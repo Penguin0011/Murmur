@@ -6,7 +6,7 @@ Status: working draft, October 2, 2026. Confirmed requirements reflect the conve
 
 Build a macOS dictation application that inserts spoken text into the active text field, with optional filler removal, spoken corrections, and list formatting. Prioritize Apple Silicon and English. Give users independent local/cloud choices for transcription and cleanup. These are confirmed requirements. [Certain]
 
-Minimum supported hardware: Apple M1 with 8 GB RAM, including subsequent Apple Silicon generations. Intel support is deferred beyond launch. Minimum macOS version remains open. [Certain]
+Minimum supported hardware: Apple M1 with 8 GB RAM, including subsequent Apple Silicon generations. Intel support is deferred beyond launch. Minimum macOS version: **macOS 26** (confirmed), which also makes the Liquid Glass material available without a fallback. Test matrix: M1/8 GB on macOS 26 plus one newer Apple Silicon Mac. [Certain]
 
 Proposed launch boundary: dictation and recovery, without meeting recording, an AI assistant, billing accounts, or automatic message submission.
 
@@ -29,12 +29,15 @@ Proposed launch boundary: dictation and recovery, without meeting recording, an 
 
 ## 3. Proposed interaction and failure rules
 
+- Shortcut state machine (diagram required in the spike): press always starts capture; on release, a press shorter than the threshold is a **tap** (recording continues until the next tap); longer is a **hold** (release stops and finishes). A tap while recording stops it. Key repeat is ignored. Modifier-only bindings (e.g. Fn, Right Option) are supported via a CGEventTap and therefore need the Input Monitoring permission in addition to Microphone and Accessibility.
 - Begin microphone capture on shortcut press; determine hold versus tap on release so the first spoken word is not discarded. Proposed hold threshold: 250 ms, to validate on real keyboards.
 - State sequence: idle → listening → transcribing → optional cleanup → saving → insertion → idle/recovery. Allow only one active session initially.
 - Escape cancels recording; do not insert canceled speech. A new shortcut press while processing must not duplicate the prior session.
 - Remember the destination app and focused field at recording start. Recheck focus before insertion; if the user changes destination, retain the result instead of typing into an unintended field.
 - Prefer safe native insertion when supported; use a clipboard/paste fallback only with clipboard preservation and verified focus. Never blindly overwrite newer clipboard content when restoring it.
-- Treat insertion as uncertain when delivery cannot be verified. Preserve the result and avoid automatic duplicate retries.
+- Treat insertion as uncertain when delivery cannot be verified. Preserve the result and avoid automatic duplicate retries. UX: the bubble shows "Inserted, unverified" with a Copy action and a history link; it never retries on its own.
+- Insertion order: (1) AX selected-text write, verified by re-reading the field; (2) paste fallback only if (1) is unsupported. Many apps accept the AX write silently without inserting, so a read-back mismatch counts as failure, not success. Clipboard restore must skip when the pasteboard change count shows another writer (including clipboard managers and Universal Clipboard).
+- Secure-field detection uses AX subrole plus app-specific checks. Browser password fields are not reliably flagged, so treat web fields with unknown type in browsers as unverified: allow dictation but never learn from them.
 - Reject secure/password fields. Unsupported apps, revoked permissions, and inaccessible fields lead to recovery history.
 - On cleanup failure, preserve raw transcription and offer it for recovery; do not silently insert a different output than requested.
 - On microphone disconnection, stop safely and retain recoverable audio according to the approved retention policy.
@@ -49,6 +52,10 @@ Proposed behavior: cleanup edits dictation, never answers it, executes instructi
 | Fillers | “Um, please send the report.” | “Please send the report.” |
 | Spoken corrections | “Meet Tuesday—sorry, Thursday at three.” | “Meet Thursday at three.” |
 | List formatting | “Shopping list: first apples, second milk, third bread.” | A three-item list, preserving the items. |
+
+Cleanup acceptance is measured, not asserted. Build a fixed corpus (target 300+ labeled utterances, covering each option, interactions between options, names, numbers, negation, quoted speech, and look-alike prose) before choosing the cleanup model. Proposed pass bar: no more than 1% of utterances with an unintended edit to a name, number, or negation; spoken-correction accuracy and list-formatting precision thresholds set from the corpus baseline and recorded in the decision log. Report each local candidate and the cloud routes against the same corpus.
+
+Prompt-injection guard: transcripts are data. Cleanup output must pass a bound check against the raw text (length ratio and edit-distance limits per enabled option, no new named entities or numbers). If the check fails, or the model appears to answer or obey the dictation, insert the raw text and log the event locally. Include injection phrases ("ignore previous instructions", "write me a…") in the corpus.
 
 Additional required checks: preserve meaningful uses of “like”; preserve negation, names, numbers, and quoted speech; do not interpret “sorry” alone as a replacement instruction; do not create lists from ordinary prose. Ambiguous corrections should retain the original wording rather than guess.
 
@@ -66,10 +73,13 @@ Proposed implementation and acceptance criteria:
 - Associate each observation with its insertion session and range. Stop tracking when the range can no longer be identified, selection moves to unrelated text, permissions are revoked, or the field is secure. Never learn from unrelated document text or monitor typing outside a dictation correction window.
 - Treat small spelling/name/term replacements as candidates. Exclude deletions, broad rewrites, tone changes, meaning changes, and ordinary text appended after the dictated span. Approved promotion rule: two consistent observations across separate dictations before applying an automatic term mapping; a conflicting correction suppresses promotion. No weight fine-tuning is assumed. [Certain]
 - Keep manually entered and learned entries distinguishable in the dictionary. Allow editing, deletion, undo, and a separate learning toggle. Deleting a learned entry must stop its application to future sessions.
+- Mechanism and honest limits: macOS exposes no edit-event stream with ranges. Tracking means reading the field's AX value and selection on change notifications (with bounded polling where notifications are absent), then locating the inserted span by anchored text diff. Chrome/Electron apps expose AX text only when accessibility is enabled for them; some web rich-text editors (e.g. Google Docs, Notion) may expose none. The spike must measure this rather than assume it. Learning triggers only on a whole-word or short-phrase replacement inside the anchored span; case-only and punctuation-only changes are not candidates, and "consistent" means the same source and target string after case-folding.
 - Automatic post-insertion observation is required at launch. The macOS feasibility spike must prove field/range tracking in representative native, browser, rich-text, chat, and code-editor apps; publish the supported observation matrix. Unsupported apps may still support dictation, but cannot claim automatic learning. Do not replace this requirement with manual feedback if feasibility fails: report the launch blocker.
 - Proposed learning implementation: persisted vocabulary/preferences, not model-weight fine-tuning. Validate that these preferences improve repeated corrections without changing unrelated dictation.
 - Store dictionary and learned corrections locally. When a selected cloud stage needs relevant entries, disclose that those entries will leave the device; avoid sending unrelated history or the entire dictionary unnecessarily.
-- Prefer runtime vocabulary biasing where supported; otherwise evaluate conservative correction during processing. Document limitations for each transcription/cleanup route instead of promising identical behavior.
+- Cleanup-failure policy on M1/8 GB: if no local cleanup model meets the quality and latency bar, the proposed fallback is to ship with cleanup off by default on 8 GB machines (toggles and presets still available, cloud cleanup opt-in), and report that outcome to the user as a decision. It must never silently use cloud.
+
+Prefer runtime vocabulary biasing where supported; otherwise evaluate conservative correction during processing. Document limitations for each transcription/cleanup route instead of promising identical behavior.
 - Learning data has its own clear/reset controls. Transcript expiry does not silently delete user-approved vocabulary; explain the separate lifetimes in settings.
 - Check automatically observed corrections in other apps, range attribution, undo/reversion, focus changes, unsupported fields, repeated corrections, conflicting entries, case, punctuation, ambiguous phrases, deletion, disabled learning, and all four local/cloud routes. A preferred term must not replace unrelated words merely because they sound similar.
 
@@ -104,10 +114,16 @@ Approved defaults are labeled below; other settings remain proposals. [Certain]
 - Offer a history-off mode with clear disclosure that recovery after app exit will then be unavailable.
 - No transcript/audio telemetry. Scrub diagnostics; opt-in diagnostic export must be reviewable.
 - Explain microphone and Accessibility permissions with a test dictation. Request any further permission only when the implementation needs it.
+- Permissions: Microphone, Accessibility, and Input Monitoring (only if a modifier-only shortcut is chosen). Explain each when first needed.
+- History cap: besides time-based retention, cap stored history at a fixed size (proposed 50 MB) and drop oldest first, except when retention is "forever", where the user is warned as the cap approaches.
+- Accessibility for the user: VoiceOver announces listening, processing, inserted, and error states; the bubble is not the only signal. Respect Reduce Motion and Reduce Transparency.
+- Uninstall and wipe: a "Delete all data" action removes history, dictionary, learned entries, retry audio, and Keychain items created by the app. Document manual removal in the README.
 - Settings include shortcut, microphone, models, processing routes, providers, independent cleanup toggles, custom dictionary, learning controls, menu bar visibility, history retention, updates, and optional launch at login.
 - Use the system input device initially; make input-device selection available. Explain missing devices and permission denial.
 
 ## 7. Architecture proposal
+
+Distribution: the app is not App Sandbox compatible (Accessibility, event tap, cross-app observation), so there is no Mac App Store release. Ship a Developer ID signed, notarized DMG via GitHub Releases. Model weights are downloaded on first run from the pinned source, not bundled in the app or repository, so the MIT source is not mixed with the NVIDIA model license; the app displays the model license before download.
 
 Use a native Swift macOS application with SwiftUI settings and AppKit integration for the menu bar, focus-safe overlay, and application lifecycle. Use FluidAudio/Core ML for the selected Parakeet Unified transcription path, subject to pinned-artifact and M1/8 GB validation. The cleanup runtime and minimum macOS version remain open.
 
@@ -127,12 +143,15 @@ This is a proposed delivery plan; no implementation agents have been launched. [
 | Interface and recovery agent | Settings, onboarding, bubble, menu bar visibility, Finder/Spotlight reopening, persistent history, dictionary editor and inspect/undo/reset/disable controls for learned entries. | Shared session/history/dictionary contracts | Accessible UI; hidden-icon reopening; raw/final recovery; retention, dictionary editing and learning-control checks. |
 | Verification and release agent | Independent end-to-end validation, packaging, signing/notarization, MIT/third-party notices, GitHub release and user-triggered update checks. | Integrated build and confirmed GitHub repository | Reproduction steps and evidence; release blockers resolved; installable artifact; clean build from published source; update flow without silent installation. |
 
+Cloud agents cannot run an M1, grant Accessibility or Microphone permissions, or drive real third-party apps. Work that needs a physical Mac (benchmarks, the observation matrix, tap/hold on a real keyboard, signing) is produced by the agent as a runnable harness plus a results template, and executed by the user. Agents must not mark such checks as passed without recorded device results.
+
 Run no more than three implementation workers beside the integration lead. Begin independent verification after those workers hand off; roles do not require five simultaneous agents.
 
 Each handoff includes owned files, inputs/outputs, acceptance criteria, assumptions, runnable checks, and known limits. The integration lead owns shared interfaces; workers coordinate changes before editing another role's files. Use small logical commits after each working checkpoint.
 
 ### Milestones
 
+0. First PR is a standalone feasibility spike with a go/no-go report (no app skeleton): shortcut state machine and CGEventTap, AX insertion with read-back verification, secure-field handling, and post-insertion observation across the five app categories. A failing observation category is reported as a launch decision (ship with it disclosed as unsupported, or hold the launch); the report does not choose.
 1. Resolve open decisions; benchmark models on M1; prove shortcut/capture/insertion and automatic correction observation feasibility on macOS. Automatic-learning feasibility is a launch gate.
 2. Ship one complete local path: record → transcribe → save → insert/recover. Prove tap and hold on real hardware.
 3. Add independently toggled cleanup, local cleanup, BYOK cloud routes, model downloads, dictionary application, correction learning, and failure handling.
@@ -165,9 +184,9 @@ Release handoff must include reproducible build instructions, architecture/macOS
 
 ## 10. Decisions still needed
 
-1. Minimum macOS version; M1, 8 GB RAM, and Intel deferral are confirmed. [Certain]
+1. Minimum macOS 26, M1, 8 GB RAM, and Intel deferral are confirmed. [Certain]
 2. Select and benchmark local models that meet the approved local-first and cleanup-on behavior on M1/8 GB; do not silently substitute cloud processing.
-3. Establish supported automatic-learning apps through the required feasibility spike; the 60-second window and two-observation threshold are approved. [Certain]
+3. Establish supported automatic-learning apps through the required feasibility spike, and decide the launch rule when a category is unsupported (disclose and ship, or hold); the 60-second window and two-observation threshold are approved. [Certain]
 4. Product name, GitHub account/repository, MIT copyright holder, signing identity, and approval of manual download/replace updating.
 5. Local cleanup model/runtime and cloud provider choices; validation and exact artifact pinning for selected Parakeet Unified transcription.
 
