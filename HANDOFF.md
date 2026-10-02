@@ -19,3 +19,9 @@ The host is a MacBook Air Mac15,12, Apple M3, 16 GB, macOS 26.6.2 (25G83), Swift
 ## Next gates
 
 Run checks and build the integrated spike, then complete real keyboard and five-category app tests. Record versions and synthetic test results in `spike/FEASIBILITY.md`. Do not claim go until at least one category passes automatic observation and shortcut/insertion safety checks have live evidence. Model validation remains a separate M1/8 GB gate. [Certain]
+
+## Completed handoff
+
+All three workers handed off their owned Swift files. The lead compiled the integrated harness and ran `spike/.build/dictation-spike --check` successfully after fixing a surrogate-boundary assertion failure. Read-only focus inspection had no accessible field; no live insertion or keyboard coverage is claimed. [Certain]
+
+Runnable inputs/outputs and safety limits are documented in `spike/README.md`; current acceptance evidence is in `spike/FEASIBILITY.md`. Next session should begin with the live synthetic-field matrix, not an app skeleton or model download. [Certain]
