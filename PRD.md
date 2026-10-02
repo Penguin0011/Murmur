@@ -77,7 +77,7 @@ Proposed implementation and acceptance criteria:
 - Automatic post-insertion observation is required at launch. The macOS feasibility spike must prove field/range tracking in representative native, browser, rich-text, chat, and code-editor apps; publish the supported observation matrix. Unsupported apps may still support dictation, but cannot claim automatic learning. Do not replace this requirement with manual feedback. Approved launch rule: a category that fails observation ships with automatic learning marked unsupported in the published matrix and in-app (learning is off for those apps, dictation still works); it does not hold the launch. [Certain] Proposed floor: if no tested app in any category supports observation, report a launch blocker, since the feature would not exist.
 - Proposed learning implementation: persisted vocabulary/preferences, not model-weight fine-tuning. Validate that these preferences improve repeated corrections without changing unrelated dictation.
 - Store dictionary and learned corrections locally. When a selected cloud stage needs relevant entries, disclose that those entries will leave the device; avoid sending unrelated history or the entire dictionary unnecessarily.
-- Cleanup-failure policy on M1/8 GB: if no local cleanup model meets the quality and latency bar, the proposed fallback is to ship with cleanup off by default on 8 GB machines (toggles and presets still available, cloud cleanup opt-in), and report that outcome to the user as a decision. It must never silently use cloud.
+- Cleanup-failure policy on M1/8 GB: if no local cleanup model meets the quality and latency bar, the approved fallback is to ship with cleanup off by default on 8 GB machines (toggles stay available, cloud cleanup is opt-in), and publish the benchmark evidence. It must never silently use cloud. [Certain]
 
 Prefer runtime vocabulary biasing where supported; otherwise evaluate conservative correction during processing. Document limitations for each transcription/cleanup route instead of promising identical behavior.
 - Learning data has its own clear/reset controls. Transcript expiry does not silently delete user-approved vocabulary; explain the separate lifetimes in settings.
@@ -204,7 +204,7 @@ The weakest assumption is whether transcription plus cleanup can meet acceptable
 
 Cleanup-on means the initial output may differ from a literal transcript by design. Enable only the named features; do not silently add tone rewriting or summarization. Preserve raw text in history while history is enabled, and let users disable each feature independently.
 
-Validation gate: if the local cleanup candidate fails the M1/8 GB quality or performance checks, return the benchmark evidence for a decision; do not silently substitute cloud processing or remove required local cleanup.
+Validation gate: if the local cleanup candidate fails the M1/8 GB quality or performance checks, apply the approved fallback (cleanup off by default on 8 GB, toggles still available) and publish the benchmark evidence; do not silently substitute cloud processing. Machines with more memory keep the cleanup-on default only if the candidate passes there.
 
 ### Approved decision: thirty-day default and temporary retry audio
 
