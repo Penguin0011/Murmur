@@ -96,7 +96,7 @@ Validation deliverable for the selected default:
 5. Evaluate a small local cleanup model separately against the cleanup contract. Do not assume a transcription model performs instruction-based cleanup.
 6. Validate the selected default and choose an accuracy-focused alternative only if measurements justify it. Resolve upstream/conversion license metadata differences before redistributing weights; do not silently change the model selection if validation fails.
 
-Proposed cloud launch: one verified speech-to-text provider and OpenAI/Anthropic cleanup where supported by their documented APIs. Final provider/model IDs, pricing, and audio capabilities require verification before implementation.
+Cloud providers (user-named candidates): **Fireworks API**, **Gemini API**, and **OpenRouter**. Proposed split, pending verification: Fireworks as the first speech-to-text provider if its hosted Whisper transcription endpoint is confirmed; Gemini and OpenRouter as cleanup providers (OpenRouter also covers OpenAI/Anthropic models through one key), with Gemini audio transcription evaluated as an alternative STT route. Verify before implementation: exact model IDs, current pricing, audio format and size limits, whether each exposes a true transcription endpoint or only audio-in chat, data-retention terms, and error/rate-limit behavior. Launch needs one verified STT provider and at least one cleanup provider; do not assume the others.
 
 Claude subscriptions do not include Claude API/Console access. [Certain] ([Anthropic documentation](https://support.claude.com/en/articles/9876003-i-have-a-paid-claude-subscription-pro-max-team-or-enterprise-plans-why-do-i-have-to-pay-separately-to-use-the-claude-api-and-console))
 
@@ -187,8 +187,8 @@ Release handoff must include reproducible build instructions, architecture/macOS
 1. Minimum macOS 26, M1, 8 GB RAM, and Intel deferral are confirmed. [Certain]
 2. Select and benchmark local models that meet the approved local-first and cleanup-on behavior on M1/8 GB; do not silently substitute cloud processing.
 3. Establish supported automatic-learning apps through the required feasibility spike, with unsupported categories disclosed rather than blocking launch (approved); the 60-second window and two-observation threshold are approved. [Certain]
-4. Product name, GitHub account/repository, MIT copyright holder, signing identity, and approval of manual download/replace updating.
-5. Local cleanup model/runtime and cloud provider choices; validation and exact artifact pinning for selected Parakeet Unified transcription.
+4. Product name, signing identity, and approval of manual download/replace updating. Settled: GitHub account `Penguin0011`, repository `dictation` (to be renamed); the user is the MIT copyright holder (legal name to be supplied for the LICENSE). No Apple Developer account exists yet: enrolling in the Apple Developer Program is a prerequisite for Developer ID signing and notarization, and the release milestone is blocked on it. [Certain]
+5. Local cleanup model/runtime and verification of the named cloud providers (Fireworks, Gemini, OpenRouter); validation and exact artifact pinning for selected Parakeet Unified transcription.
 
 This draft defines the confirmed product and proposed work boundaries; it is not yet a claim of full Wispr Flow feature parity. [Certain]
 
