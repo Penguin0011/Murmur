@@ -8,6 +8,10 @@ Current checks: Swift spike build, deterministic checks, ten CLI rejection cases
 
 Workers own `module-one/capture/`, `module-one/models/`, and `module-one/SAFETY_REVIEW.md`; the lead owns this handoff, PRD decisions, and `spike/FEASIBILITY.md`. Live microphone permission and M1 availability must be reported without requesting intervention or fabricating results. [Certain]
 
+Model checkpoint: immutable runtime/model pins, file integrity verifier, scoring/resource/timeout harness, and a source-checked Swift adapter are committed. Python checks pass; the Swift dependency download was stopped before compilation completed, so the adapter build and all real inference remain unverified. No weights were downloaded. [Certain]
+
+Capture checkpoint: native harness build, synthetic WAV/storage/expiry checks, read-only authorized microphone probe, and five invalid-argument checks passed. Capture is not yet wired into the shortcut state machine; memory-only capture and live speech/device checks remain open. [Certain]
+
 ---
 
 # Integration handoff
