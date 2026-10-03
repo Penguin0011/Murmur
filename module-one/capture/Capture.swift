@@ -1,6 +1,10 @@
 import Foundation
 import AVFoundation
 import Darwin
+import os
+
+/// Content-free capture timing (seconds of uptime), for diagnosing audio lost at start.
+private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
 
 struct CaptureError: Error, CustomStringConvertible {
     let description: String
@@ -46,7 +50,10 @@ final class Capture {
                     for index in 0..<Int(copy.frameLength) { energy += Double(samples[0][index]) * Double(samples[0][index]) }
                     level = min(1, sqrt(energy / Double(copy.frameLength)) * 8)
                 }
-                if firstBuffer == nil { firstBuffer = received - started }
+                if firstBuffer == nil {
+                    firstBuffer = received - started
+                    timingLog.notice("first-buffer at=\(received, format: .fixed(precision: 3)) after-start=\(received - self.started, format: .fixed(precision: 3))")
+                }
                 do { try file?.write(from: copy); frames += AVAudioFramePosition(copy.frameLength) }
                 catch { writeError = error }
             }
@@ -54,6 +61,8 @@ final class Capture {
         started = ProcessInfo.processInfo.systemUptime
         do { try engine.start() }
         catch { engine.inputNode.removeTap(onBus: 0); queue.sync { file = nil }; throw error }
+        let running = ProcessInfo.processInfo.systemUptime
+        timingLog.notice("engine-start called=\(self.started, format: .fixed(precision: 3)) took=\(running - self.started, format: .fixed(precision: 3)) rate=\(format.sampleRate, format: .fixed(precision: 0))")
     }
 
     func stop() {
@@ -62,6 +71,10 @@ final class Capture {
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         queue.sync { file = nil }
+        let now = ProcessInfo.processInfo.systemUptime
+        let rate = engine.inputNode.outputFormat(forBus: 0).sampleRate
+        let recorded = rate > 0 ? Double(frames) / rate : 0
+        timingLog.notice("capture-stop at=\(now, format: .fixed(precision: 3)) wall=\(now - self.started, format: .fixed(precision: 3)) recorded=\(recorded, format: .fixed(precision: 3))")
     }
 }
 

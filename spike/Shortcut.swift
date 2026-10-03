@@ -1,5 +1,8 @@
 import Foundation
 import ApplicationServices
+import os
+
+private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
 
 /// Starts on press so determining tap versus hold never discards the first word.
 struct ShortcutMachine {
@@ -183,6 +186,10 @@ final class ShortcutListener {
         }
         guard key == binding.keyCode else { return }
         let time = Double(event.timestamp) / 1_000_000_000
+        if type == .flagsChanged || event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+            let handled = ProcessInfo.processInfo.systemUptime, down = binding.isDown(event)
+            timingLog.notice("shortcut \(down ? "down" : "up", privacy: .public) event=\(time, format: .fixed(precision: 3)) handled=\(handled, format: .fixed(precision: 3)) lag=\(handled - time, format: .fixed(precision: 3)) state=\(self.machine.state.rawValue, privacy: .public)")
+        }
         if machine.state == .processing, let onQueuedPress {
             let down = (type == .keyDown || type == .flagsChanged) && binding.isDown(event)
             if down, event.getIntegerValueField(.keyboardEventAutorepeat) == 0, !queued.isEmpty || onQueuedPress() {
