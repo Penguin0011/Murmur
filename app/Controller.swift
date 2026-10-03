@@ -251,6 +251,7 @@ import Darwin
             }
         }
     }
+    private struct NoSpeech: Error {}
     private func launchRunner(_ helper: URL, models: URL, audio: URL, store: HistoryStore, timestamp: Date, token: UUID, done: @escaping () -> Void) {
         let temp = audio.deletingLastPathComponent().appendingPathComponent(".result-" + UUID().uuidString)
         let fd = open(temp.path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
@@ -270,7 +271,9 @@ import Darwin
                 let data = try output.readToEnd() ?? Data()
                 guard let last = String(data: data, encoding: .utf8)?.split(separator: "\n").last,
                       let result = try JSONSerialization.jsonObject(with: Data(last.utf8)) as? [String: Any],
-                      let text = result["text"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw CaptureError("No usable transcript") }
+                      let text = result["text"] as? String else { throw CaptureError("No usable transcript") }
+                // The model ran and answered, but heard nothing; audio stays until the 24-hour purge.
+                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NoSpeech() }
                 let savedEntry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: text, insertionStatus: "saved-not-inserted")
                 try store.save(savedEntry)
                 try? FileManager.default.removeItem(at: audio)
@@ -293,7 +296,8 @@ import Darwin
                     self.destination = nil; self.refreshHistory(); done()
                 }
             } catch {
-                DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.runnerOutput = nil; self.setPhase("Error", "Transcription failed. Audio is saved for retry for up to 24 hours."); done() }
+                let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
+                DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.runnerOutput = nil; self.setPhase("Error", message); done() }
             }
         }
     }
