@@ -32,5 +32,19 @@ func runShortcutChecks() throws {
     try check(hold.eventStreamLost() == nil, "stream loss after cancellation")
     try check(hold.press(at: 5) == .start, "stream recovery resets lost release")
     try check(hold.eventStreamLost() == .cancel && hold.state == .idle, "stream loss cancels capture")
+    for duration in ["0", "-1", "61", "nan", "inf", "nope"] {
+        do {
+            try runShortcutListener(arguments: ["--listen", "--listen-seconds", duration])
+            throw ShortcutError(description: "Invalid listener duration accepted: \(duration)")
+        } catch let error as ShortcutError {
+            try check(error.description.contains("--listen-seconds must"), "duration rejected before permission checks")
+        }
+    }
+    do {
+        try runShortcutListener(arguments: ["--listen", "--listen-seconds"])
+        throw ShortcutError(description: "Missing listener duration accepted")
+    } catch let error as ShortcutError {
+        try check(error.description == "Missing value for --listen-seconds", "missing duration rejected")
+    }
     print("Shortcut checks passed (tap, hold, threshold, repeats, cancellation, processing guard).")
 }

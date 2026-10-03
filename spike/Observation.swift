@@ -24,7 +24,13 @@ struct DictationObservation {
               insertedRange.location <= text.length,
               insertedRange.length <= text.length - insertedRange.location,
               Range(insertedRange, in: value) != nil,
-              Self.validBoundaries(insertedRange, text) else { return nil }
+              Self.validBoundaries(insertedRange, value) else { return nil }
+        // A span cutting a word cannot establish a whole-word correction.
+        let before = text.substring(to: insertedRange.location)
+        let inserted = text.substring(with: insertedRange)
+        let after = text.substring(from: NSMaxRange(insertedRange))
+        guard !(before.last?.isLetter == true && inserted.first?.isLetter == true),
+              !(inserted.last?.isLetter == true && after.first?.isLetter == true) else { return nil }
         self.sessionID = sessionID
         self.initial = text.substring(with: insertedRange)
         self.prefix = text.substring(to: insertedRange.location)
@@ -38,8 +44,10 @@ struct DictationObservation {
     mutating func observe(value: String, selection: NSRange, now: TimeInterval,
                           sameFocusedField: Bool, readableNonsecure: Bool) -> TermCorrection? {
         guard !stopped else { return candidate }
-        guard now.isFinite, now >= start, now - start < 60 else { return stop("window ended") }
-        guard sameFocusedField, readableNonsecure else { return stop("focus or access lost") }
+        guard readableNonsecure else { return stop("access or security lost") }
+        guard now.isFinite, now >= start else { return stop("invalid clock") }
+        guard sameFocusedField else { return stop("focus departed") }
+        guard now - start < 60 else { return stop("window ended") }
         let text = value as NSString
         let prefixLength = (prefix as NSString).length
         let suffixLength = (suffix as NSString).length
@@ -50,11 +58,11 @@ struct DictationObservation {
             return stop("outside anchors changed")
         }
         let updatedRange = NSRange(location: prefixLength, length: text.length - prefixLength - suffixLength)
-        guard Range(updatedRange, in: value) != nil, Self.validBoundaries(updatedRange, text),
+        guard Range(updatedRange, in: value) != nil, Self.validBoundaries(updatedRange, value),
               selection.location >= updatedRange.location,
               selection.length >= 0, selection.location <= NSMaxRange(updatedRange),
               selection.length <= NSMaxRange(updatedRange) - selection.location,
-              Range(selection, in: value) != nil, Self.validBoundaries(selection, text) else { return stop("selection left dictated span") }
+              Range(selection, in: value) != nil, Self.validBoundaries(selection, value) else { return stop("selection left dictated span") }
         let current = text.substring(with: updatedRange)
         // Any growth at the end could be ordinary appended typing. Do not attribute it as a correction.
         guard current == initial || !current.hasPrefix(initial) else { return stop("appended text") }
@@ -71,16 +79,20 @@ struct DictationObservation {
         stopReason = reason
         // A valid prior correction may survive a normal focus departure/expiry. An invalidating
         // edit/selection change removes it because attribution is no longer established.
-        if reason != "window ended" && reason != "focus or access lost" { candidate = nil }
+        if reason != "window ended" && reason != "focus departed" { candidate = nil }
         return candidate
     }
 
-    private static func validBoundaries(_ range: NSRange, _ text: NSString) -> Bool {
-        for offset in [range.location, NSMaxRange(range)] where offset > 0 && offset < text.length {
-            if (0xD800...0xDBFF).contains(text.character(at: offset - 1)) &&
-                (0xDC00...0xDFFF).contains(text.character(at: offset)) { return false }
+    private static func validBoundaries(_ range: NSRange, _ value: String) -> Bool {
+        // AX offsets are UTF16; NSString accepts surrogate/combining/ZWJ fragments.
+        // ponytail: linear boundary scan; indexed boundaries if large-field polling proves expensive.
+        var offset = 0
+        var boundaries: Set<Int> = [0]
+        for character in value {
+            offset += String(character).utf16.count
+            boundaries.insert(offset)
         }
-        return true
+        return boundaries.contains(range.location) && boundaries.contains(NSMaxRange(range))
     }
 
     private static func oneLetterEdit(_ source: String, _ target: String) -> Bool {
@@ -185,5 +197,28 @@ func runObservationChecks() {
                             sameFocusedField: true, readableNonsecure: true) == nil)
     }
     assert(DictationObservation(value: "🙂", insertedRange: NSRange(location: 1, length: 1), now: 0) == nil)
+    for (focused, readable, time, retained) in [(true, false, 2.0, false),
+                                                 (false, false, 60.0, false),
+                                                 (false, true, 2.0, true),
+                                                 (true, true, 60.0, true),
+                                                 (true, true, .nan, false)] {
+        var item = tracker()
+        _ = item.observe(value: "🙂 Akme done", selection: NSRange(location: 7, length: 0), now: 1,
+                         sameFocusedField: true, readableNonsecure: true)
+        _ = item.observe(value: "", selection: NSRange(location: 0, length: 0), now: time,
+                         sameFocusedField: focused, readableNonsecure: readable)
+        assert(item.stopped && (item.candidate != nil) == retained)
+    }
+    for fragment in ["e\u{301}", "👩‍💻", "🇺🇸"] {
+        assert(DictationObservation(value: fragment, insertedRange: NSRange(location: 0, length: 1), now: 0) == nil)
+    }
+    assert(DictationObservation(value: "Acmes", insertedRange: NSRange(location: 0, length: 4), now: 0) == nil)
+    var combined = DictationObservation(value: "e\u{301} Acme", insertedRange: NSRange(location: 3, length: 4), now: 0)!
+    assert(combined.observe(value: "e\u{301} Akme", selection: NSRange(location: 7, length: 0), now: 1,
+                            sameFocusedField: true, readableNonsecure: true) == corrected)
+    var splitSelection = DictationObservation(value: "Acme e\u{301}", insertedRange: NSRange(location: 0, length: 7), now: 0)!
+    assert(splitSelection.observe(value: "Akme e\u{301}", selection: NSRange(location: 6, length: 0), now: 1,
+                                 sameFocusedField: true, readableNonsecure: true) == nil)
+    assert(splitSelection.stopped)
     print("Observation checks passed")
 }

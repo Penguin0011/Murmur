@@ -137,6 +137,14 @@ func runShortcutListener(arguments: [String]) throws {
           seconds.isFinite, seconds >= 0 else {
         throw ShortcutError(description: "--processing-seconds must be finite and nonnegative")
     }
+    var listenSeconds: Double?
+    if arguments.contains("--listen-seconds") {
+        guard let duration = Double(try value("--listen-seconds", default: "")),
+              duration.isFinite, duration > 0, duration <= 60 else {
+            throw ShortcutError(description: "--listen-seconds must be finite, greater than 0, and at most 60")
+        }
+        listenSeconds = duration
+    }
     let monitoring = CGPreflightListenEventAccess()
     print("Input Monitoring granted=\(monitoring); Accessibility granted=\(AXIsProcessTrusted())")
     guard monitoring else {
@@ -154,9 +162,21 @@ func runShortcutListener(arguments: [String]) throws {
     guard let tap = listener.tap, let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
         throw ShortcutError(description: "Could not create keyboard event tap; verify Input Monitoring and relaunch. Secure Input or system policy may prevent observation.")
     }
-    defer { CFMachPortInvalidate(tap) }
+    defer {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        CFMachPortInvalidate(tap)
+    }
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
     print("Listening (250 ms hold threshold). Escape cancels recording; Ctrl-C exits. Events are observed, not consumed. No audio is captured.")
-    withExtendedLifetime(listener) { CFRunLoopRun() }
+    fflush(stdout)
+    withExtendedLifetime(listener) {
+        if let listenSeconds {
+            CFRunLoopRunInMode(.defaultMode, listenSeconds, false)
+            listener.emit(listener.machine.eventStreamLost())
+            print("Listener stopped after bounded duration (\(listenSeconds) seconds).")
+        } else {
+            CFRunLoopRun()
+        }
+    }
 }

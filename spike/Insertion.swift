@@ -38,13 +38,26 @@ private func axString(_ element: AXUIElement, _ name: String) -> String? {
 
 func captureFocus() throws -> FocusSnapshot {
     guard AXIsProcessTrusted() else { throw InsertionError.unavailable("Accessibility permission is unavailable; no prompt requested") }
-    guard let raw = axAttribute(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute),
-          CFGetTypeID(raw) == AXUIElementGetTypeID() else {
-        throw InsertionError.unavailable("No accessible focused field")
+    guard let frontmost = NSWorkspace.shared.frontmostApplication else {
+        throw InsertionError.unavailable("No frontmost application")
     }
-    let element = unsafeBitCast(raw, to: AXUIElement.self)
+    func focusedElement(_ owner: AXUIElement) -> (AXUIElement?, AXError) {
+        var raw: CFTypeRef?
+        let error = AXUIElementCopyAttributeValue(owner, kAXFocusedUIElementAttribute as CFString, &raw)
+        guard error == .success, let raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return (nil, error) }
+        return (unsafeBitCast(raw, to: AXUIElement.self), error)
+    }
+    let systemFocus = focusedElement(AXUIElementCreateSystemWide())
+    let appFocus = systemFocus.0 == nil ? focusedElement(AXUIElementCreateApplication(frontmost.processIdentifier)) : (nil, AXError.success)
+    guard let element = systemFocus.0 ?? appFocus.0 else {
+        throw InsertionError.unavailable("No accessible focused field; frontmost=\(frontmost.bundleIdentifier ?? "unknown") systemAX=\(systemFocus.1.rawValue) appAX=\(appFocus.1.rawValue)")
+    }
     var pid: pid_t = 0
-    guard AXUIElementGetPid(element, &pid) == .success else { throw InsertionError.unavailable("Focused application is unavailable") }
+    guard AXUIElementGetPid(element, &pid) == .success,
+          pid == frontmost.processIdentifier,
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+        throw InsertionError.unavailable("Frontmost application changed during focus capture")
+    }
     let bundleID = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? ""
     let role = axString(element, kAXRoleAttribute) ?? "unknown"
     let subrole = axString(element, kAXSubroleAttribute) ?? "unknown"
