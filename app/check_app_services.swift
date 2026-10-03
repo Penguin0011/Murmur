@@ -231,6 +231,11 @@ func checkUpdates() async throws {
     check(UpdateText.headline(ReleaseInfo(version: release.version, tag: "v0.2.0", title: "  ", notes: "", pageURL: release.pageURL, publishedAt: nil)) == "Murmur 0.2.0", "blank title falls back to the version")
     check(UpdateText.notesExcerpt(String(repeating: "a", count: 2000), limit: 10) == "aaaaaaaaaa…" && UpdateText.notesExcerpt("  short \n") == "short", "notes are trimmed")
     check(UpdateText.menuTitle(nil) == "Check for Updates…" && UpdateText.menuTitle(release) == "Update Available: Murmur 0.2.0…", "menu title")
+    let t0 = Date(timeIntervalSince1970: 1_790_000_000)
+    check(UpdateSchedule.shouldAttemptAutomatic(lastAttempt: nil, now: t0), "first automatic attempt runs")
+    check(!UpdateSchedule.shouldAttemptAutomatic(lastAttempt: t0, now: t0.addingTimeInterval(60)), "no automatic retry a minute later")
+    check(UpdateSchedule.shouldAttemptAutomatic(lastAttempt: t0, now: t0.addingTimeInterval(3600)), "automatic attempt again after an hour")
+    check(UpdateSchedule.shouldAttemptAutomatic(lastAttempt: t0.addingTimeInterval(500), now: t0), "a future attempt time (clock change) does not block")
     check(UpdateText.explanation.contains("uses the network") && UpdateText.explanation.contains("Nothing is downloaded"), "automatic-check explanation")
 
     // The bundled version string parses, and the UserDefaults throttle store skips a second automatic check.

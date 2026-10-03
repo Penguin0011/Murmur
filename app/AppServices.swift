@@ -269,6 +269,18 @@ enum PostWipeStep: String, CaseIterable, Equatable {
 
 // MARK: - Update check presentation (PRD R12)
 
+enum UpdateSchedule {
+    /// The running app attempts an automatic check at launch and then at most hourly. The checker's
+    /// UserDefaults store limits completed checks to one a day; an offline attempt does not count
+    /// there, so this interval is what keeps an offline Mac from retrying every minute.
+    static let automaticAttemptInterval: TimeInterval = 60 * 60
+
+    static func shouldAttemptAutomatic(lastAttempt: Date?, now: Date = Date()) -> Bool {
+        guard let lastAttempt, lastAttempt <= now else { return true }
+        return now.timeIntervalSince(lastAttempt) >= automaticAttemptInterval
+    }
+}
+
 enum UpdateText {
     static let explanation = "Murmur asks GitHub for new releases at launch and at most once a day. This uses the network even though transcription runs on this Mac. Nothing is downloaded or installed, and no transcripts, audio, dictionary or API keys are sent."
 
