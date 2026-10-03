@@ -46,9 +46,9 @@ Repeated down events do not create sessions. A release belonging to the tap that
 
 | Category | Intended test target | Insertion | Observation | Evidence |
 |---|---|---|---|---|
-| Native editor | TextEdit 1.20 | Verified AX write | Partial pass | Replacement detected, Undo removed evidence, unrelated cursor move stopped observation |
+| Native editor | TextEdit 1.20 | Verified AX write | Pass for live-testable cases | Replacement, Undo, appended text, cursor outside span, focus departure, 60-second expiry, consecutive dictations; permission revocation and clipboard fallback pending |
 | Browser text field | Arc 1.166.0, local textarea | Unverified; visible text unchanged | Ineligible in tested setup | Native focus exposed AXWebArea; AX write reported success without insertion |
-| Rich text | Google Docs/Notion synthetic document | Pending | Pending | No live result yet |
+| Rich text | Safari 26.6.2, synthetic Google Doc | Default: no field exposed. With Docs screen reader support: AX write delivered (user-observed), harness-unverified | Ineligible (browser field type unknown) | Requires a user-enabled Docs setting; product requirement says this must not be needed |
 | Chat composer | Synthetic unsent draft | Pending | Pending | No live result yet |
 | Code editor | Synthetic disposable editor buffer | Pending | Pending | No live result yet |
 
@@ -69,7 +69,32 @@ provisionalCandidate=false; no dictionary mapping applied
 observationStopped=selection left dictated span candidateRetained=false
 ```
 
-The UI actions replaced `Acme` with `Akme`, then Undo restored `Acme`, then moved the caret before `Native`. Native focus departure, app-level 60-second expiry, repeated-session learning, app permission revocation, consecutive dictations, and clipboard fallback remain pending live tests. The structural tracker and evidence ledger cover those branches with deterministic checks, but production semantic eligibility remains unresolved and mappings are not applied. [Certain]
+The UI actions replaced `Acme` with `Akme`, then Undo restored `Acme`, then moved the caret before `Native`. The later automated run below covers focus departure, expiry, appended text, and consecutive dictations; repeated-session learning, permission revocation, and clipboard fallback remain pending live tests. The structural tracker and evidence ledger cover those branches with deterministic checks, but production semantic eligibility remains unresolved and mappings are not applied. [Certain]
+
+### Automated native run (October 2, 2026)
+
+Claude drove a fresh TextEdit 1.20 Untitled document (`Native probe: `) from this session: harness outside the command sandbox (inside it, Accessibility preflight fails), TextEdit activated via AppleScript, edits sent as System Events keystrokes while TextEdit was frontmost. Synthetic text only. [Certain]
+
+| Scenario | Actions | Result |
+|---|---|---|
+| A | Replace `Acme`→`Akme`, Undo, append ` appended` | `provisionalCandidate=true`, then `false` after Undo, then `observationStopped=appended text candidateRetained=false` |
+| A (first try) | Caret jumped to document start before editing | `observationStopped=selection left dictated span` (selection outside span) |
+| B | Replace, then activate Finder | `observationStopped=focus departed candidateRetained=true` (after fixes below) |
+| Expiry | Insert, no edits | `observationStopped=window ended` about 60 s after start |
+| D | Two dictations, space between, replace in second span | Both verified; candidate attributed to the second span; `window ended candidateRetained=true` |
+| Foreground guard | Claude desktop took focus before an insert | `Foreground app differs from --expected-app; no insertion attempted` |
+
+Two harness bugs found and fixed in this run (deterministic checks and CLI checks still pass): [Certain]
+
+1. `NSWorkspace.frontmostApplication` is refreshed only when the run loop delivers workspace notifications. The observer polls with `Thread.sleep`, so it kept seeing TextEdit after Finder came forward and observed for the full 60 seconds. `captureFocus` now drains the run loop before reading the frontmost app.
+2. The observe loop derived "readable" from whichever field now had focus, so departing to Finder's unreadable `AXGroup` was misreported as `access or security lost` and discarded a valid candidate. Readability now applies to the dictated field; leaving it is a focus departure, and lost Accessibility permission still stops as access lost.
+
+Product findings: [Certain]
+
+- Consecutive dictations at the same caret are glued (`probeAcme`). The tracker correctly refuses spans that cut a word, so the product needs automatic inter-dictation spacing or observation is lost for the second dictation.
+- In this run the AX write advanced the caret (14→34), so the second dictation landed after the first. The earlier non-advancing observation may vary by state; anchoring on the pre-insertion offset remains correct either way.
+
+Still pending: permission revocation mid-observation (a security-settings change the user must perform), clipboard fallback (TextEdit accepts AX writes, so the paste path does not trigger), clipboard-manager races, and repeated-session learning (the spike has no persisted ledger; deterministic checks only). [Certain]
 
 ## Browser synthetic test evidence
 
@@ -85,6 +110,27 @@ Reading the foreground app's AXRole did not resolve the field exposure in a subs
 This result is limited to the tested Arc setup. It does not establish Chrome, Safari, password-field detection, or rich-editor compatibility. Unknown browser field types remain excluded from learning. Further browser accessibility setup and field-specific native focus are required before calling this route supported. [Certain]
 
 The final harness also rejects AXWebArea/document roles before insertion and learning. Consequently this Arc setup now reports an unsupported text destination without attempting a write; the earlier silent-success trace remains useful evidence for why read-back verification is required. [Certain]
+
+## Rich-text synthetic test evidence
+
+Safari 26.6.2 (`com.apple.Safari`), new disposable Google Doc containing `Rich probe: `, run by the user from a terminal holding Accessibility permission (this Claude desktop session lacked it and recorded nothing). Notion and Pages are not installed. [Certain]
+
+Default Docs settings, caret in the document body: Safari reported no focused AX element (`systemAX=-25204` cannot complete, `appAX=-25212` no value). An earlier attempt reported `AXList/AXCollectionList`, attributed to focus outside the body. No write was attempted in either case. [Certain]
+
+```text
+Spike: No accessible focused field; frontmost=com.apple.Safari systemAX=-25204 appAX=-25212
+```
+
+After the user enabled Google Docs Tools → Accessibility → Screen reader support, the body exposed a readable AXTextArea with no `AXDOMInputType`, so the harness treats it as an unknown browser field type: read-back cannot verify delivery and learning is excluded. [Certain]
+
+```text
+app=com.apple.Safari role=AXTextArea subrole=unknown secure=false valueReadable=true selectionReadable=true learningEligible=false
+insertion=unverified detail=AX selected-text write delivery unverified; retain output, never automatically retry
+```
+
+The user confirmed the Doc then showed the inserted text, so the AX write delivered despite the harness's conservative `unverified` status; no paste or retry occurred and observation did not start. [Certain]
+
+Product requirement from the user: dictation must not depend on users enabling screen reader support in Docs. Under that requirement Safari + Google Docs is **unsupported via AX in the default setup**. Whether a no-setup route exists (for example keyboard-event or clipboard paste into the Docs canvas, which works without AX exposure but cannot be read back) is untested; it would deliver without verification and give observation nothing to read. Chrome + Docs and Notion remain untested. [Certain]
 
 ## Independent review
 
