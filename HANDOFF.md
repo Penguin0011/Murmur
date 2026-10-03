@@ -1,4 +1,36 @@
-# Open issues — October 3, 2026 (after merging `aakash-module-one` into main)
+# Session checkpoint — October 3, 2026
+
+Branch `aakash/stoic-pascal-2p0zyt`. Since the merge commit `027c1bf`, these landed (through `fecee29`): [Certain]
+
+| Area | Commits | What it adds |
+|---|---|---|
+| Cleanup | `9b1ad25`, `47af2ab`, `4c52312`, `867743c`, merged in `08fd0e0` | `app/Cleanup.swift`: independent cleanup options, the PRD bound-check guard, the LLM prompt, a deterministic `RuleCleaner` baseline and a pipeline that holds failures for recovery. A 425-utterance labeled corpus (`app/cleanup-corpus.json`, built by `app/tools/build_cleanup_corpus.py`) and `app/check_cleanup.swift`. |
+| Dictionary, learning, retention | `d2470c3`, `17c359b`, `325f72a`, `0ee1c6a`, `82b0f92`, merged in `8d2bf02` | `app/Dictionary.swift` (custom dictionary, whole-word apply), `app/Learning.swift` (correction ledger and the proposed promotion rule), `app/Retention.swift` (50 MB cap, history-off mode, data wipe), and `app/check_dictionary.swift`. |
+| Providers, Keychain, updates | `952c999`, `2e51682`, `c7b928e`, `5f5c0f8`, `06d215b`, merged in `6b09a2d` | `app/PROVIDERS.md` (verified provider facts), `app/Credentials.swift` (Keychain store, service "Murmur"), `app/Providers.swift` (OpenRouter STT, Gemini and OpenRouter cleanup, deprecated Fireworks STT, error classification), `app/Updates.swift` (GitHub Releases checker), with checks. |
+| Shared type | `fecee29` | One `CleanupMessages` type used by both cleanup and providers. |
+| Docs | `7270591` | Marks the PRD cleanup-failure conflict resolved. |
+
+All of these are Foundation-only modules. Their checks passed on Linux with Swift 6.1.2. They are **not wired into the app and have not been compiled on the Mac** (Swift 6.3.3, `-swift-version 5`); the Keychain store compiles only on macOS, so it has never been compiled. [Certain]
+
+Measured cleanup baseline (Linux, 425 utterances): 96.7% exact match, 1/425 unintended name/number/negation edits, 0/237 guard false rejects, 2348/2348 adversarial outputs rejected. The same agent wrote corpus, labels and baseline, so real quality is lower. `RuleCleaner` is a baseline, not the local cleanup model choice. Details are in `app/README.md` and PRD "Milestone 1 implementation decisions". [Certain]
+
+Providers: Fireworks deprecated audio inference on 2026-06-10. PRD section 5 now proposes OpenRouter `/api/v1/audio/transcriptions` for STT and Gemini/OpenRouter for cleanup, pending user approval. No call has been made with a real API key. [Certain]
+
+Release files added on this branch: `README.md`, `CONTRIBUTING.md`, `THIRD_PARTY_NOTICES.md`. FluidAudio at the pinned revision is Apache-2.0; the Parakeet weights are under the NVIDIA Open Model License and are downloaded, not bundled; the Core ML conversion's card says CC-BY-4.0, which does not resolve the upstream license. [Certain] No LICENSE file was added (see blocker below). [Certain]
+
+In progress in parallel, not done: wiring these modules into Controller/UI and `app/build.sh`, and the in-app model downloader. [Certain]
+
+**Mac-side next steps**
+1. Pull this branch, run `app/build.sh` and every check in `app/README.md` (including `check_ui.sh`) on the macOS 26 host. Fix anything that fails under Swift 6.3.3 and `-swift-version 5`. [Certain]
+2. Run a live key test per provider: OpenRouter STT, OpenRouter chat, Gemini `generateContent`, and the Fireworks turbo host only if it is to be offered. Record status codes and error shapes; do not offer a route in settings until its test passes. [Certain]
+3. Back the learning lexicon with NSSpellChecker (`isCommonWord`) before shipping learning. Without it, real-word swaps such as casual→causal pass the filter and can promote. [Certain]
+4. Get user approval for the proposed provider split and the proposed promotion rule. [Certain]
+
+**Release blocker: LICENSE.** R11 requires an MIT LICENSE with the confirmed copyright holder. The PRD says the user is the holder and the legal name must be supplied, not invented. Ask the user for the legal name, then add `LICENSE`. Developer ID signing still needs an Apple Developer Program account. [Certain]
+
+---
+
+# Open issues — October 3, 2026 (after merging `aakash-module-one` into main; updated at the session checkpoint above)
 
 Merged state: module-one's standalone glass-dot indicator and error-only popup replace main's three-pill bubble; main's Murmur naming, active event tap (`ShortcutListener.createTap()`, Control–Option–Space Space and Escape-while-recording swallowed), permission refresh on activation, "No speech was detected" message, Audio gating and stable signing identity are kept. The merge was resolved on Linux without a Swift toolchain, so **the merged app has not been compiled or run**; run `app/build.sh` and the checks in `app/README.md` first. [Certain]
 
@@ -12,7 +44,7 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 1. A refused insertion (`failed`) and an uncertain one (`unverified`) share the "Delivery could not be verified" message; with no Saved popup it is now visible only in settings and History.
 2. The bubble's Audio button shows when this error's audio is known (selects that file) or when any retained audio exists (opens the retry folder). Confirm this union is the intended behavior.
 3. Settings changes take effect only after Apply Settings.
-4. No onboarding, dictionary editor, learning controls or model download (model folder is chosen manually). Cleanup, cloud routes and correction learning are not wired in.
+4. No onboarding, dictionary editor or learning controls. Cleanup, cloud providers, Keychain credentials, dictionary, learning, retention cap and update checks now exist as checked Foundation-only modules, but are not wired in; wiring is in progress. The model downloader is in progress; until then the model folder is chosen manually.
 5. Corrupt history blocks startup; there is no user-visible repair path.
 
 **Shortcut and capture**
@@ -30,6 +62,14 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 13. Builds are self-signed (`clouddev Development`); Developer ID signing and notarization need an Apple Developer Program account.
 14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders, notification names and the repository still use the old name.
 15. Test transcripts from live runs remain in Murmur's History.
+16. No LICENSE file: the copyright holder's legal name is needed (release blocker). `README.md`, `CONTRIBUTING.md` and `THIRD_PARTY_NOTICES.md` now exist.
+17. The new modules have never been compiled on the Mac; the Keychain store has never been compiled at all.
+
+**Processing and providers**
+18. No provider has been called with a real API key. Fireworks STT is deprecated upstream; the OpenRouter STT and Gemini/OpenRouter cleanup split is a proposal pending user approval.
+19. The local cleanup model is unselected. `RuleCleaner` is a baseline; its corpus has no real ASR transcripts, and the guard will hold more real LLM output than baseline output.
+20. Learning's lexicon check needs NSSpellChecker on macOS before learning ships; the semantic promotion rule is still pending user approval.
+21. The Parakeet conversion's CC-BY-4.0 label conflicts with the upstream NVIDIA Open Model License; the app must show the model license before download.
 
 ---
 
