@@ -96,6 +96,48 @@ runtime/Murmur.app/Contents/MacOS/Murmur --test-audio /absolute/synthetic.wav --
 
 This explicitly performs transcription and one insertion attempt. It preserves the supplied audio, using a private retry copy, and writes durable history. It cannot be combined with preview or timed quit; malformed flags exit before storage/UI initialization. [Certain]
 
+## Cleanup
+
+`Cleanup.swift` is Foundation-only and is not yet wired into the app. It provides:
+- `CleanupOptions`: fillers, corrections, and lists toggle independently. All are on by default, and `.faithful` turns all off.
+- `CleanupGuard`: the PRD bound check between raw and cleaned text.
+- `CleanupPrompt`: messages for an LLM provider.
+- `RuleCleaner`: a deterministic local baseline.
+- `CleanupPipeline`: returns `.cleaned`, `.unchanged` (all options off), or `.heldForRecovery(raw:reason:)`. A cleaner error or a guard failure both produce a hold. The reason is a content-free enum. [Certain]
+
+**RuleCleaner is a conservative stopgap, not the PRD's cleanup-model selection.** [Certain]
+
+```sh
+python3 app/tools/build_cleanup_corpus.py        # regenerates app/cleanup-corpus.json
+swiftc app/Cleanup.swift app/check_cleanup.swift -o /tmp/cc && /tmp/cc app/cleanup-corpus.json   # add --verbose for misses
+```
+
+The check exits non-zero if the name/number/negation bar or any adversarial case fails. Measured October 3, 2026 on Linux with Swift 6.1.2. It also type-checks under `-swift-version 5` and `-swift-version 6`. [Certain]
+
+| Metric (425 utterances) | Result |
+|---|---|
+| Exact match, all utterances | 96.7% (fillers only 95.3%, corrections only 95.8%, lists only 97.8%, all on 99.0%, all off 100%) |
+| Unintended name/number/negation edits (PRD bar ≤ 1%) | 1/425 = 0.2%. The one case is the list false positive below. |
+| Strict mismatch with labels, including corrections the baseline missed | 6/425 = 1.4% |
+| Spoken-correction exact match / ambiguous corrections kept unchanged | 95.8% / 22 of 22 |
+| List formatting precision / recall | 97.7% / 100% |
+| Expected-unchanged utterances left untouched | 187/188 |
+| Guard false rejects on labeled cleanups | 0/237 |
+| Adversarial outputs rejected | 2348/2348: 60 hand-written cases (answers, obeyed instructions, poems, translation, tone polish, dropped `not`, added/changed numbers, added/dropped names, quote edits, emoji) plus systematic mutations of every label |
+| Plausible LLM variants accepted (not gating) | 11/16 |
+
+Treat these numbers with caution:
+- The same agent wrote the corpus, its labels, and the baseline, so exact-match overstates real-world quality. [Certain]
+- A 40-utterance `heldout` group was written after tuning. Its first run scored 38/40. That run found two bugs: a stray "." after a sentence-only "Hmm.", and a list length-ratio limit that held a correct "number one…" list. Both are fixed now, so the group is no longer held out. [Certain]
+- The guard is strict on purpose. It holds an added `?` or `!`, number-word-to-digit changes, `gonna`→`going to`, and bullet lists, so real LLM output will reach recovery more often than RuleCleaner output. [Certain]
+
+Known gaps:
+- After a removed hesitation, comma handling uses a word list. This misses introductory phrases ("To be honest, um, I…") and over-keeps after a capitalized first word ("Please, um, don't…").
+- Corrections need an explicit cue set off by punctuation and either a same-category swap (weekday, month, number, time, color, name) or a phrase restarted with the same function word. These stay unchanged: "Order three pizzas, sorry, four", "Add salt, no wait, add sugar", and corrections inside list items.
+- "Remember: first impressions matter, second chances are rare" becomes a list.
+- The guard does not convert number words; "twenty five" vs "25" is rejected.
+- No real ASR transcripts are in the corpus. [Certain]
+
 ## Evidence from October 2, 2026
 
 The app bundle built and ad-hoc signing passed. Launch, history/model-verifier, controller dismissal/audio ownership, session state, processor fault/signal, and spike insertion/observation checks passed. Native screenshots/AX inspection confirmed settings and empty/populated History, error dismissal to Ready, preserved synthetic entries, matching-transcript selection, and no-results search. The native Liquid Glass update was captured in light, dark, and forced opaque compact appearances. Scoped screenshot review resolved supporting-text and search-placeholder contrast findings. Native History filtering/clearing and the floating bubble Dismiss click passed; the fixture confirmed preserved recovery history. [Certain]
