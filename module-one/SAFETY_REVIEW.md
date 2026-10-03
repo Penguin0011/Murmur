@@ -10,7 +10,7 @@ Reviewed `spike/Insertion.swift`, `spike/Observation.swift`, `spike/Shortcut.swi
 
 The matrix in `spike/FEASIBILITY.md` is prior recorded evidence. It describes TextEdit and the Codex composer passing insertion plus structural observation scenarios; Arc and VS Code receiving synthetic paste once with unverified delivery and no learning; and default Safari/Google Docs lacking an accessible destination. These observations were not independently repeated in this review. [Certain]
 
-The recorded host is M3/16 GB, while the PRD baseline is M1/8 GB. Neither historical interaction success nor this deterministic check measures the baseline model pipeline. [Certain]
+The recorded host is M3/16 GB, while the earlier PRD baseline was M1/8 GB (now deferred by user decision). Neither historical interaction success nor this deterministic check measures the baseline model pipeline. [Certain]
 
 ## Findings and smallest useful actions
 
@@ -26,7 +26,7 @@ The recorded host is M3/16 GB, while the PRD baseline is M1/8 GB. Neither histor
 
 ## Exit criteria
 
-Milestone one remains open until the model baseline benchmark, real capture/shortcut path, insertion recovery, and published per-category automatic-learning evidence are resolved. Unsupported learning categories may be disclosed under the approved PRD rule; a passing structural tracker does not satisfy conservative semantic promotion by itself. [Certain]
+Milestone one remains open until available-host model validation, real capture/shortcut path, insertion recovery, and published per-category automatic-learning evidence are resolved. Unsupported learning categories may be disclosed under the approved PRD rule; a passing structural tracker does not satisfy conservative semantic promotion by itself. [Certain]
 
 Release remains NO-GO while the duplicate fallback, secure-field/permission coverage, and recovery invariant lack acceptance evidence. The spike explicitly has no persistent recovery store, so it must continue using disposable synthetic content. [Certain]
 

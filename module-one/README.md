@@ -5,15 +5,15 @@ Scope: PRD milestone 1. GO for bounded engineering and validation; production/re
 ## Workstreams
 
 - `capture/`: native capture probe, synthetic audio/storage checks, and explicit bounded recording commands. Microphone recordings and first-word keyboard integration require separate real-device evidence. [Certain]
-- `models/`: exact artifact/runtime pins and reproducible benchmark tooling. M1/8 GB and complete transcription-plus-cleanup measurements remain pending. [Certain]
+- `models/`: exact artifact/runtime pins and reproducible benchmark tooling. Complete transcription-plus-cleanup measurements on the available Mac remain pending; M1/8 GB performance work is optional and deferred. [Certain]
 - [SAFETY_REVIEW.md](SAFETY_REVIEW.md): independent review of insertion, clipboard, secure-field, shortcut, and correction attribution limits. [Certain]
 
-The updated [go/no-go report](../spike/FEASIBILITY.md) preserves historical app results and distinguishes them from checks run during this continuation. The host is M3/16 GB/macOS 26.6.2; it cannot provide the required M1/8 GB baseline result. [Certain]
+The updated [go/no-go report](../spike/FEASIBILITY.md) preserves historical app results and distinguishes them from checks run during this continuation. The host is M3/16 GB/macOS 26.6.2; M1/8 GB testing is deferred and no longer required. [Certain]
 
 ## Open acceptance gates
 
 - Real microphone/shortcut first-word and disconnection checks; Fn and configurable binding conflicts. [Certain]
-- Exact pinned model inference on both hardware targets, WER/name/number scoring on genuine labeled 5/30/120-second recordings, peak memory and memory pressure, cold/warm latency, and cleanup corpus quality. [Certain]
+- Exact pinned model inference on the available Mac, WER/name/number scoring on genuine labeled 5/30/120-second recordings, peak memory and memory pressure, cold/warm latency, and cleanup corpus quality. [Certain]
 - No duplicate uncertain delivery, durable text recovery before insertion, secure-field and permission-revocation cases, clipboard-manager races, and conservative semantic correction promotion. [Certain]
 - Publish per-app learning limitations from measured configurations; unsupported browser/rich-text/code configurations do not imply that every app in the category fails. [Certain]
 

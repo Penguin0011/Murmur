@@ -1,6 +1,6 @@
 # Module one: model validation checkpoint
 
-The weakest assumption remains the complete transcription + cleanup pipeline on M1/8 GB; no inference or target-device acceptance result exists in this checkpoint. [Certain]
+The complete transcription + cleanup pipeline on the available Mac remains unverified. M1/8 GB performance work is deferred by user decision and does not block development or release. [Certain]
 
 ## Exact artifacts and API
 

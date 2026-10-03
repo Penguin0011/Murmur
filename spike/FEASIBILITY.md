@@ -2,7 +2,7 @@
 
 Decision, updated October 2, 2026: **GO for milestone 1 validation work; NO-GO for production readiness or release**. Recorded live evidence establishes Right Option tap/hold and attributable observation in TextEdit and the Codex composer; it permits continued engineering, not a claim of complete acceptance. [Certain]
 
-The weakest unresolved gate is the unmeasured complete local pipeline on M1/8 GB. Microphone first-word capture, permission revocation, clipboard-manager races, delayed AX-write duplicate delivery, and semantic eligibility for learned replacements also remain unproved. [Certain]
+The weakest unresolved gate is safe, recoverable end-to-end delivery on the available Mac. M1/8 GB performance is deferred by user decision and is not a development or release blocker. Microphone first-word capture, permission revocation, clipboard-manager races, delayed AX-write duplicate delivery, and semantic eligibility for learned replacements also remain unproved. [Certain]
 
 The five categories have recorded outcomes below. Native and chat have partial acceptance with passing live observation cases; the tested browser field and default VS Code configuration do not support learning; default Safari + Google Docs has no usable AX destination. These limits do not defeat the approved at-least-one-category observation floor, but they require published support limits. [Certain]
 
@@ -224,4 +224,4 @@ Use synthetic text only. In each category, test verified insertion, an attributa
 - Known secure fields must be rejected. Browser fields of unknown type must remain unverified and excluded from learning even when text read-back matches. [Certain]
 - Anchored range attribution does not prove semantic equivalence. A short replacement can change meaning, so candidates alone cannot justify automatic vocabulary promotion. [Certain]
 - Persisted recovery, audio capture, production learning eligibility, model inference, UI, signing, and packaging are outside this standalone spike. [Certain]
-- The recorded Right Option and native/chat observation evidence satisfies the narrow feasibility floor for starting milestone 1. The remaining safety checks and M1/8 GB model/audio validation remain acceptance gates; this report does not authorize a production-ready claim. [Certain]
+- The recorded Right Option and native/chat observation evidence satisfies the narrow feasibility floor for starting milestone 1. The remaining safety checks and available-host model/audio validation remain acceptance gates; this report does not authorize a production-ready claim. [Certain]

@@ -1,3 +1,7 @@
+# Superseding hardware scope — October 2, 2026
+
+M1/8 GB performance is no longer a development or release gate, per the user. Use the available M3/16 GB host for functional/inference validation, publish only measured results, and leave users model selection for their hardware. Earlier M1-gate references below are historical and superseded. Next implementation step remains wiring shortcut events into capture, then validating the local transcription path. [Certain]
+
 # Current continuation — October 2, 2026
 
 Work proceeds on `aakash-module-one`, fast-forwarded from the recorded feasibility continuation at `da78462`. The go/no-go report now permits milestone 1 validation and retains NO-GO for production/release. [Certain]

@@ -6,7 +6,7 @@ Status: working draft, October 2, 2026. Confirmed requirements reflect the conve
 
 Build a macOS dictation application that inserts spoken text into the active text field, with optional filler removal, spoken corrections, and list formatting. Prioritize Apple Silicon and English. Give users independent local/cloud choices for transcription and cleanup. These are confirmed requirements. [Certain]
 
-Minimum supported hardware: Apple M1 with 8 GB RAM, including subsequent Apple Silicon generations. Intel support is deferred beyond launch. Minimum macOS version: **macOS 26** (confirmed), which also makes the Liquid Glass material available without a fallback. Test matrix: M1/8 GB on macOS 26 plus one newer Apple Silicon Mac. [Certain]
+Hardware scope: Apple Silicon, including M1; Intel support is deferred beyond launch. Minimum macOS version: **macOS 26**. M1/8 GB performance validation is deferred and is not a development or release gate. Users choose a model appropriate to their hardware; no minimum RAM performance guarantee is made. Validate the available M3/16 GB host and publish its measured configuration. [Certain]
 
 Proposed launch boundary: dictation and recovery, without meeting recording, an AI assistant, billing accounts, or automatic message submission.
 
@@ -77,7 +77,7 @@ Proposed implementation and acceptance criteria:
 - Automatic post-insertion observation is required at launch. The macOS feasibility spike must prove field/range tracking in representative native, browser, rich-text, chat, and code-editor apps; publish the supported observation matrix. Unsupported apps may still support dictation, but cannot claim automatic learning. Do not replace this requirement with manual feedback. Approved launch rule: a category that fails observation ships with automatic learning marked unsupported in the published matrix and in-app (learning is off for those apps, dictation still works); it does not hold the launch. [Certain] Proposed floor: if no tested app in any category supports observation, report a launch blocker, since the feature would not exist.
 - Proposed learning implementation: persisted vocabulary/preferences, not model-weight fine-tuning. Validate that these preferences improve repeated corrections without changing unrelated dictation.
 - Store dictionary and learned corrections locally. When a selected cloud stage needs relevant entries, disclose that those entries will leave the device; avoid sending unrelated history or the entire dictionary unnecessarily.
-- Cleanup-failure policy on M1/8 GB: if no local cleanup model meets the quality and latency bar, the approved fallback is to ship with cleanup off by default on 8 GB machines (toggles stay available, cloud cleanup is opt-in), and publish the benchmark evidence. It must never silently use cloud. [Certain]
+- Hardware policy: users may disable cleanup or choose lighter models to suit their hardware. No M1-specific benchmark or 8 GB default rule blocks release. Preserve local-first defaults and never silently use cloud. [Certain]
 
 Prefer runtime vocabulary biasing where supported; otherwise evaluate conservative correction during processing. Document limitations for each transcription/cleanup route instead of promising identical behavior.
 - Learning data has its own clear/reset controls. Transcript expiry does not silently delete user-approved vocabulary; explain the separate lifetimes in settings.
@@ -91,7 +91,7 @@ Validation deliverable for the selected default:
 
 1. Benchmark selected Parakeet Unified against English Parakeet V2 and Whisper large-v3 turbo using documented macOS-compatible runtimes. Confirm exact artifacts and runtime versions.
 2. Check license and redistribution rights for weights and runtime separately; record exact versions and sources.
-3. Benchmark English dictation on an M1 Mac and one newer Apple Silicon device, including accents, quiet speech, names, numbers, background noise, and 5/30/120-second recordings. Record RAM and macOS version; use results to establish the minimum RAM requirement.
+3. Benchmark English dictation on the available Apple Silicon host, including accents, quiet speech, names, numbers, background noise, and 5/30/120-second recordings. Record RAM and macOS version; report results only for the measured configuration. M1/8 GB testing is optional future work. [Certain]
 4. Record word error rate, name/number accuracy, cold/warm latency, peak memory, download size, and processing time. Publish results with the recommendation.
 5. Evaluate a small local cleanup model separately against the cleanup contract. Do not assume a transcription model performs instruction-based cleanup.
 6. Validate the selected default and choose an accuracy-focused alternative only if measurements justify it. Resolve upstream/conversion license metadata differences before redistributing weights; do not silently change the model selection if validation fails.
@@ -125,7 +125,7 @@ Approved defaults are labeled below; other settings remain proposals. [Certain]
 
 Distribution: the app is not App Sandbox compatible (Accessibility, event tap, cross-app observation), so there is no Mac App Store release. Ship a Developer ID signed, notarized DMG via GitHub Releases. Model weights are downloaded on first run from the pinned source, not bundled in the app or repository, so the MIT source is not mixed with the NVIDIA model license; the app displays the model license before download.
 
-Use a native Swift macOS application with SwiftUI settings and AppKit integration for the menu bar, focus-safe overlay, and application lifecycle. Use FluidAudio/Core ML for the selected Parakeet Unified transcription path, subject to pinned-artifact and M1/8 GB validation. The cleanup runtime and minimum macOS version remain open.
+Use a native Swift macOS application with SwiftUI settings and AppKit integration for the menu bar, focus-safe overlay, and application lifecycle. Use FluidAudio/Core ML for the selected Parakeet Unified transcription path, subject to pinned-artifact and available-host validation. The cleanup runtime and minimum macOS version remain open.
 
 Keep one session coordinator responsible for recording state, processing selection, saving, and insertion. Use small concrete boundaries for capture, transcription, cleanup, history, and insertion; do not build a general plugin framework.
 
@@ -143,7 +143,7 @@ Milestone 0 has an implemented standalone spike and recorded live results; miles
 | Interface and recovery agent | Settings, onboarding, bubble, menu bar visibility, Finder/Spotlight reopening, persistent history, dictionary editor and inspect/undo/reset/disable controls for learned entries. | Shared session/history/dictionary contracts | Accessible UI; hidden-icon reopening; raw/final recovery; retention, dictionary editing and learning-control checks. |
 | Verification and release agent | Independent end-to-end validation, packaging, signing/notarization, MIT/third-party notices, GitHub release and user-triggered update checks. | Integrated build and confirmed GitHub repository | Reproduction steps and evidence; release blockers resolved; installable artifact; clean build from published source; update flow without silent installation. |
 
-Device-dependent work (benchmarks, the observation matrix, tap/hold on a real keyboard, signing) runs on an agent hosted on a Mac that meets the test matrix (M1/8 GB on macOS 26 for the baseline). Cloud-only agents write code and harnesses but cannot claim device results. One-time macOS permission grants (Microphone, Accessibility, Input Monitoring, Screen Recording if used for app driving) need a human click on that Mac and are a setup step, not something the agent can do for itself. Every device check records machine model, RAM, macOS and app versions, and raw results.
+Device-dependent work (benchmarks, the observation matrix, tap/hold on a real keyboard, signing) runs on an agent hosted on an available Apple Silicon Mac running macOS 26; M1/8 GB is not required. Cloud-only agents write code and harnesses but cannot claim device results. One-time macOS permission grants (Microphone, Accessibility, Input Monitoring, Screen Recording if used for app driving) need a human click on that Mac and are a setup step, not something the agent can do for itself. Every device check records machine model, RAM, macOS and app versions, and raw results.
 
 Run no more than three implementation workers beside the integration lead. Begin independent verification after those workers hand off; roles do not require five simultaneous agents.
 
@@ -152,7 +152,7 @@ Each handoff includes owned files, inputs/outputs, acceptance criteria, assumpti
 ### Milestones
 
 0. First PR is a standalone feasibility spike with a go/no-go report (no app skeleton): shortcut state machine and CGEventTap, AX insertion with read-back verification, secure-field handling, and post-insertion observation across the five app categories. A failing observation category is recorded as unsupported in the matrix per the approved launch rule; it does not block launch unless no category passes.
-1. Resolve open decisions; benchmark models on M1; prove shortcut/capture/insertion and automatic correction observation feasibility on macOS. Automatic-learning feasibility is measured and published per category; unsupported categories are disclosed, not blocking.
+1. Resolve open decisions; benchmark models on the available Mac; prove shortcut/capture/insertion and automatic correction observation feasibility on macOS. Automatic-learning feasibility is measured and published per category; unsupported categories are disclosed, not blocking.
 2. Ship one complete local path: record → transcribe → save → insert/recover. Prove tap and hold on real hardware.
 3. Add independently toggled cleanup, local cleanup, BYOK cloud routes, model downloads, dictionary application, correction learning, and failure handling.
 4. Complete bubble, settings, hidden-icon reopening, permissions, history retention, dictionary editing and automatic-learning controls.
@@ -170,7 +170,7 @@ Release handoff must include reproducible build instructions, architecture/macOS
 
 ## 9. Release acceptance
 
-- Every confirmed requirement passes on an M1 Mac with the minimum supported RAM/macOS and a newer Apple Silicon configuration. Intel is outside launch acceptance.
+- Functional and safety requirements pass on the available Apple Silicon/macOS 26 test configuration. Publish tested hardware and model-specific performance without promising M1/8 GB performance. Intel is outside launch acceptance. [Certain]
 - Real insertion coverage includes a native editor, browser text field, rich-text editor, chat app, and code editor; publish unsupported cases rather than claiming universal compatibility.
 - Exercise cursor loss, focus change, full-screen/Spaces, microphone loss, permission revocation, missing model, interrupted download, offline cloud requests, invalid key, quota exhaustion, and cleanup failure.
 - Verify no inference network requests in local/local mode, and only the selected stage's data leaves the device in mixed modes.
@@ -184,8 +184,8 @@ Release handoff must include reproducible build instructions, architecture/macOS
 
 ## 10. Decisions still needed
 
-1. Minimum macOS 26, M1, 8 GB RAM, and Intel deferral are confirmed. [Certain]
-2. Select and benchmark local models that meet the approved local-first and cleanup-on behavior on M1/8 GB; do not silently substitute cloud processing.
+1. Minimum macOS 26 and Apple Silicon scope remain confirmed. M1/8 GB performance is deferred, with user-selected models and no validated minimum RAM guarantee. Intel remains deferred. [Certain]
+2. Select and benchmark local models on the available Mac; retain local-first and cleanup-on defaults and user model selection. Do not silently substitute cloud processing. [Certain]
 3. Establish supported automatic-learning apps through the required feasibility spike, with unsupported categories disclosed rather than blocking launch (approved); the 60-second window and two-observation threshold are approved. [Certain]
 4. Product name, signing identity, and approval of manual download/replace updating. Settled: GitHub account `Penguin0011`, repository `dictation` (to be renamed); the user is the MIT copyright holder (legal name to be supplied for the LICENSE). No Apple Developer account exists yet: enrolling in the Apple Developer Program is a prerequisite for Developer ID signing and notarization, and the release milestone is blocked on it. [Certain]
 5. Local cleanup model/runtime and verification of the named cloud providers (Fireworks, Gemini, OpenRouter); validation and exact artifact pinning for selected Parakeet Unified transcription.
@@ -200,11 +200,11 @@ Approved behavior: on first setup, select local transcription and local cleanup,
 
 Local-first means recording and inference remain on the Mac; initial model downloads and enabled GitHub update checks still require network access. This is a proposed product contract, not a claim of a completely network-free application.
 
-The weakest assumption is whether transcription plus cleanup can meet acceptable latency and memory use on an M1 with 8 GB RAM. This has not been benchmarked. [Certain] Model loading/unloading or running the stages sequentially may be necessary. [Likely] The processing agent must measure the complete pipeline, including memory pressure and other apps running, before recommending the default models.
+The complete transcription-plus-cleanup pipeline remains unmeasured on the available Mac. Validate it there before publishing performance claims. M1/8 GB optimization and testing are deferred; users choose lighter models or disable cleanup as needed. [Certain]
 
 Cleanup-on means the initial output may differ from a literal transcript by design. Enable only the named features; do not silently add tone rewriting or summarization. Preserve raw text in history while history is enabled, and let users disable each feature independently.
 
-Validation gate: if the local cleanup candidate fails the M1/8 GB quality or performance checks, apply the approved fallback (cleanup off by default on 8 GB, toggles still available) and publish the benchmark evidence; do not silently substitute cloud processing. Machines with more memory keep the cleanup-on default only if the candidate passes there.
+Superseding hardware decision: M1/8 GB performance does not gate development or release, and the previous automatic 8 GB cleanup-off policy is retired. Cleanup quality/safety checks still apply; model choice and cleanup toggles let users adjust resource use. No silent cloud fallback. [Certain]
 
 ### Approved decision: thirty-day default and temporary retry audio
 
@@ -238,10 +238,14 @@ Validation gate: test automatic learning in at least one real app per representa
 
 ### Milestone 1 implementation decisions — October 2, 2026
 
-Continue with the selected Unified model and batch processing; neither model performance nor the M1/8 GB local-cleanup default is approved by benchmark evidence yet. No silent model/provider substitution is permitted. [Certain]
+Continue with the selected Unified model and batch processing; available-host inference remains unverified. M1/8 GB performance is deferred and does not block implementation or release. No silent model/provider substitution is permitted. [Certain]
 
 Cleanup errors and guard failures share one policy: save the raw transcript, show recovery, and require an explicit raw-text action before insertion. Treat dictation text as data and do not log its contents. [Certain]
 
 The spike's unchanged-successful-AX-write paste fallback remains experimental: a delayed write may duplicate insertion. Production must choose one delivery method before attempting delivery, or retain uncertain output for recovery; a timer or change notification does not prove that an earlier write will never arrive. Unknown browser field types remain unverified and excluded from learning. [Certain]
 
 Recorded native/chat observation establishes the narrow feasibility floor, while app-specific unsupported states must remain visible. A production semantic rule for automatic promotion remains unresolved; structural edit similarity alone does not justify learning. [Certain]
+
+### Superseding hardware decision — October 2, 2026
+
+The user removed M1 performance from the required gates. M1/8 GB benchmarking and optimization may be done later; users may select lighter models. This supersedes earlier mandatory M1 baseline and 8 GB default rules, while retaining functional, privacy, safety, and measured-configuration reporting requirements. [Certain]
