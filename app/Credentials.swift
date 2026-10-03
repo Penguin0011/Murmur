@@ -65,6 +65,12 @@ protocol CredentialStore: Sendable {
     func delete(_ provider: ProviderID) throws
     /// Removes every key this app created (used by "Delete all data").
     func deleteAll() throws
+    /// Whether a key is stored, without reading the secret.
+    func exists(_ provider: ProviderID) -> Bool
+}
+
+extension CredentialStore {
+    func exists(_ provider: ProviderID) -> Bool { (try? read(provider)) != nil }
 }
 
 /// Test and preview store. Holds keys only in process memory.
@@ -123,6 +129,13 @@ struct KeychainCredentialStore: CredentialStore {
         add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         let added = SecItemAdd(add as CFDictionary, nil)
         guard added == errSecSuccess else { throw CredentialError.keychain(status: added) }
+    }
+
+    /// Attribute-only lookup: the secret is never decrypted into this process.
+    func exists(_ provider: ProviderID) -> Bool {
+        var query = baseQuery(provider)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
     }
 
     func delete(_ provider: ProviderID) throws {

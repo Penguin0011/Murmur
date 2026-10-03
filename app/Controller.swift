@@ -928,7 +928,7 @@ final class PreStart: @unchecked Sendable {
     // MARK: API keys (R5) and the local model server
 
     /// Publishes which providers have a key. The key itself never leaves the Keychain store.
-    func refreshKeys() { savedKeys = Set(KeyText.providers.filter { (try? credentials.read($0)) != nil }) }
+    func refreshKeys() { savedKeys = Set(KeyText.providers.filter { credentials.exists($0) }) }
     @discardableResult
     func saveKey(_ provider: ProviderID, _ raw: String) -> Bool {
         guard let key = APIKey(raw) else { keyMessages[provider] = KeyText.invalid; return false }

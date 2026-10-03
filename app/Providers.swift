@@ -1568,6 +1568,11 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     }
 
     var locality: EndpointLocality { LocalEndpoint.locality(of: baseURL) }
+    /// The key is never sent in cleartext: a server off this Mac gets it only over https.
+    var sendableKey: APIKey? {
+        if case .leavesDevice(_, encrypted: false) = locality { return nil }
+        return apiKey
+    }
     var address: String { LocalEndpoint.address(of: baseURL) }
     var chatCompletionsURL: URL { URL(string: baseURL.absoluteString + "/v1/chat/completions")! }
     var modelsURL: URL { URL(string: baseURL.absoluteString + "/v1/models")! }
@@ -1587,7 +1592,7 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
                                   leavesDevice: ["the transcript text", "relevant dictionary terms included in the cleanup prompt"],
                                   staysOnDevice: ["audio", "history", "the rest of the dictionary"],
                                   retentionNote: "The transcript leaves this Mac to \(host). Retention depends on whoever runs that server.",
-                                  warning: encrypted ? nil : "The connection uses plain http and is not encrypted: anyone on the network path can read the transcript\(apiKey == nil ? "" : " and the API key").")
+                                  warning: encrypted ? nil : "The connection uses plain http and is not encrypted: anyone on the network path can read the transcript.\(apiKey == nil ? "" : " Your API key is not sent over plain http; use https to send it.")")
         }
     }
 
@@ -1608,7 +1613,7 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     func makeGetRequest(_ url: URL) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        if let key = apiKey { request.setValue("Bearer \(key.secret)", forHTTPHeaderField: "Authorization") }
+        if let key = sendableKey { request.setValue("Bearer \(key.secret)", forHTTPHeaderField: "Authorization") }
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         return request
     }
@@ -1635,7 +1640,7 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     }
 
     func cleanup(_ messages: CleanupMessages) async throws -> String {
-        let request = try Self.makeRequest(messages: messages, endpoint: chatCompletionsURL, model: model, apiKey: apiKey, maxTokens: maxTokens)
+        let request = try Self.makeRequest(messages: messages, endpoint: chatCompletionsURL, model: model, apiKey: sendableKey, maxTokens: maxTokens)
         return try Self.parse(try await ProviderHTTP(provider: id, transport: transport, deadline: effectiveTimeout).execute(request))
     }
 

@@ -67,6 +67,28 @@ let openRouterLength = #"{"choices": [{"finish_reason": "length", "message": {"r
 let fireworksUnauthorized = #"{"error":{"message":"You must provide an API key. See https://docs.fireworks.ai/api-reference/introduction#authentication for more information.","param":null,"code":"UNAUTHORIZED","type":"error"},"request_id":"9065354e-1dde-4fff-a352-d73dcfe3f95f"}"#
 let fireworksAudioUnauthorized = #"{"error":{"object":"error","type":"unauthorized","message":"Unauthorized"}}"#
 
+/// Real macOS Keychain round trip under a throwaway service, so Murmur's own keys are never touched.
+func checkKeychainStore() {
+    #if canImport(Security)
+    let store = KeychainCredentialStore(service: "Murmur-check-\(UUID().uuidString)")
+    defer { try? store.deleteAll() }
+    check(!store.exists(.gemini) && (try? store.read(.gemini)) == .some(nil), "keychain starts empty")
+    check((try? store.save(key, for: .gemini)) != nil && store.exists(.gemini), "keychain save, then exists without reading")
+    check((try? store.read(.gemini)) == key, "keychain reads the saved key back")
+    let replacement = APIKey("AIzaFAKEreplacement0123456789")!
+    check((try? store.save(replacement, for: .gemini)) != nil && (try? store.read(.gemini)) == replacement, "keychain save replaces")
+    var query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: store.service,
+                                kSecAttrAccount as String: ProviderID.gemini.rawValue, kSecReturnAttributes as String: true]
+    var item: CFTypeRef?
+    let found = SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess
+    let attributes = item as? [String: Any] ?? [:]
+    check(found && (attributes[kSecAttrSynchronizable as String] as? Bool ?? false) == false, "keychain item never syncs to iCloud")
+    query[kSecReturnAttributes as String] = nil
+    check((try? store.delete(.gemini)) != nil && !store.exists(.gemini) && (try? store.delete(.gemini)) != nil, "keychain delete, and deleting a missing key succeeds")
+    check((try? store.save(key, for: .openrouter)) != nil && (try? store.deleteAll()) != nil && !store.exists(.openrouter), "keychain delete-all removes every key")
+    #endif
+}
+
 @main struct ProviderChecks {
     static func main() async {
         checkAPIKeyAndCredentials()
@@ -92,6 +114,7 @@ let fireworksAudioUnauthorized = #"{"error":{"object":"error","type":"unauthoriz
         checkTranscribeDisclosureAndRedaction()
         await checkTranscribePolling()
         await checkTranscribeDeleteAndValidate()
+        checkKeychainStore()
         print(failures == 0
               ? "Provider checks passed (\(passes) assertions: credentials, multipart/JSON shape, parsing, classification, redaction, disclosure, deadline, cancellation, no retry, Gemini STT, silence/answer heuristics, host classification, local server, Gemini 3.5 Transcribe)."
               : "Provider checks FAILED: \(failures) of \(passes + failures) assertions.")
@@ -649,6 +672,13 @@ extension ProviderChecks {
         check(lan.disclosure.warning?.contains("not encrypted") == true && lan.disclosure.summary.contains("not encrypted") && !(lan.disclosure.warning ?? "").contains("API key"), "plain http to LAN warns (no key mentioned without key)")
         var lanKeyed = lan; lanKeyed.apiKey = key
         check(lanKeyed.disclosure.warning?.contains("API key") == true && !lanKeyed.disclosure.summary.contains(fakeSecret), "http with key warns about key, never shows it")
+        // The key never crosses the network in cleartext: plain http off this Mac sends no key.
+        check(lanKeyed.sendableKey == nil && lanKeyed.makeGetRequest(lanKeyed.modelsURL).value(forHTTPHeaderField: "Authorization") == nil, "plain http to LAN sends no key")
+        check(lanKeyed.disclosure.warning?.contains("not sent over plain http") == true, "plain http with key says the key is not sent")
+        var lanTLS = try! OpenAICompatibleCleanupProvider(baseURL: "https://192.168.1.20:11434", model: "m"); lanTLS.apiKey = key
+        check(lanTLS.makeGetRequest(lanTLS.modelsURL).value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "https to LAN sends the key")
+        var loopKeyed = ollama; loopKeyed.apiKey = key
+        check(loopKeyed.makeGetRequest(loopKeyed.modelsURL).value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "http to loopback sends the key (it never leaves this Mac)")
         let dotLocal = try! OpenAICompatibleCleanupProvider(baseURL: "http://studio.local:1234", model: "m")
         check(dotLocal.disclosure.summary.contains("leaves this Mac to studio.local"), ".local disclosed as leaving")
         let remote = try! OpenAICompatibleCleanupProvider(baseURL: "https://gpu.example.com", model: "m")
