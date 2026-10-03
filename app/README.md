@@ -32,6 +32,19 @@ swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/ca
 /tmp/dictation-controller-check
 ```
 
+### Cloud providers, credentials, and updates
+
+`Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation and are not wired into the app yet. Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. They have not yet been compiled on the macOS 26 host (Swift 6.3.3, `-swift-version 5`), and the Keychain store is compiled only on macOS. [Certain]
+
+```sh
+swiftc app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check
+/tmp/murmur-providers-check
+swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check
+/tmp/murmur-updates-check
+```
+
+No provider call has been made with a real API key. The request shapes come from official documentation, and the error shapes from documentation or from unauthenticated responses (see [PROVIDERS.md](PROVIDERS.md), verified October 3, 2026). Fireworks deprecated audio inference on June 10, 2026. OpenRouter's transcription endpoint is the documented alternative. Each route needs a live check with a real key before it is offered. [Certain]
+
 For isolated empty-history visual inspection, run the executable directly:
 
 ```sh
