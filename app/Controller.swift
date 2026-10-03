@@ -202,6 +202,7 @@ final class PreStart: @unchecked Sendable {
     private var activeModelDirectory = ""
     private var listeningStarted = Date()
     private var phaseBeforeEarly: (String, String)?
+    private var statusShown = UUID()
     private var preview = false
     private var previewDirectory: URL?
     private lazy var session: CaptureSession = {
@@ -541,8 +542,16 @@ final class PreStart: @unchecked Sendable {
         setPhase("Ready", stage == .transcription ? CloudTranscription.message(.cancelled) ?? "Canceled." : "Canceled. The raw transcript is saved in History and was not inserted.")
         bubble.hide(); historySaved(); done()
     }
-    private func setPhase(_ phase: String, _ message: String) {
+    func setPhase(_ phase: String, _ message: String) {
         self.phase = phase; self.message = message
+        // "No speech" needs no action, so its popup leaves on its own after 2 s unless replaced.
+        let shown = UUID(); statusShown = shown
+        if phase == "Error" && message.hasPrefix("No speech was detected") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, self.statusShown == shown else { return }
+                self.dismissStatus()
+            }
+        }
         // Errors raised while processing leave that session's audio retained for retry.
         // Audio already deleted after a usable transcript (e.g. a held cleanup) is not offered.
         recoveryAudio = phase == "Error" && sessionAvailable && session.state == .processing ? session.audio.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil } : nil
