@@ -49,7 +49,7 @@ Repeated down events do not create sessions. A release belonging to the tap that
 | Native editor | TextEdit 1.20 | Verified AX write | Pass for live-testable cases | Replacement, Undo, appended text, cursor outside span, focus departure, 60-second expiry, consecutive dictations; permission revocation and clipboard fallback pending |
 | Browser text field | Arc 1.166.0, local textarea | Unverified; visible text unchanged | Ineligible in tested setup | Native focus exposed AXWebArea; AX write reported success without insertion |
 | Rich text | Safari 26.6.2, synthetic Google Doc | Default: no field exposed. With Docs screen reader support: AX write delivered (user-observed), harness-unverified | Ineligible (browser field type unknown) | Requires a user-enabled Docs setting; product requirement says this must not be needed |
-| Chat composer | Synthetic unsent draft | Pending | Pending | No live result yet |
+| Chat composer | ChatGPT/Codex desktop 26.928.40906 (`com.openai.codex`), new unsent chat | Fails: AX write reports success, nothing delivered; harness-unverified | Not reached | Readable AXTextArea, learning-eligible by role; no paste fallback after a successful-looking write |
 | Code editor | Synthetic disposable editor buffer | Pending | Pending | No live result yet |
 
 Remaining rows are pending, not classified unsupported. Target versions must be recorded when executed. [Certain]
@@ -110,6 +110,19 @@ Reading the foreground app's AXRole did not resolve the field exposure in a subs
 This result is limited to the tested Arc setup. It does not establish Chrome, Safari, password-field detection, or rich-editor compatibility. Unknown browser field types remain excluded from learning. Further browser accessibility setup and field-specific native focus are required before calling this route supported. [Certain]
 
 The final harness also rejects AXWebArea/document roles before insertion and learning. Consequently this Arc setup now reports an unsupported text destination without attempting a write; the earlier silent-success trace remains useful evidence for why read-back verification is required. [Certain]
+
+## Chat-composer synthetic test evidence
+
+ChatGPT/Codex desktop 26.928.40906 (`com.openai.codex`), a new empty chat opened from File → New Chat; the existing agent session was not touched. Claude drove it from this session; the draft was seeded with `Chat probe: `, Return was never pressed, nothing was sent, and the draft was cleared afterwards. The Claude desktop composer was not used because this session runs in it. [Certain]
+
+The composer exposes a readable, nonsecure `AXTextArea` with a readable selection, so it is learning-eligible by role. The AX selected-text write returned success, but full-field read-back did not match and the composer visibly still read `Chat probe: ` in a clean single-insert run. The harness reported `unverified`, did not paste or retry, and did not start observation. [Certain]
+
+```text
+app=com.openai.codex role=AXTextArea subrole=unknown secure=false valueReadable=true selectionReadable=true learningEligible=true
+insertion=unverified detail=AX selected-text write delivery unverified; retain output, never automatically retry
+```
+
+This matches the Arc silent-success pattern in a second Chromium-based surface. Under the current safety rule (paste only when the AX write is unsupported), dictation delivers nothing to this composer. Read-back here showed the field unchanged, which is distinguishable from an unexpected change; whether "unchanged after a successful-looking write" may safely trigger the paste fallback is an open design decision, not implemented. Slack, Discord, Messages, and the Claude desktop composer remain untested. [Certain]
 
 ## Rich-text synthetic test evidence
 
