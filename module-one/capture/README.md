@@ -5,7 +5,7 @@ This standalone Swift harness uses AVAudioEngine and AVAudioFile; it has no app 
 Build and run non-recording checks from the repository root:
 
 ```sh
-swiftc module-one/capture/main.swift -o /tmp/dictation-capture-spike
+swiftc module-one/capture/Capture.swift module-one/capture/main.swift -o /tmp/dictation-capture-spike
 /tmp/dictation-capture-spike --check
 /tmp/dictation-capture-spike --probe
 ```
@@ -28,4 +28,4 @@ The checks generate a 100 ms synthetic WAV, verify frame count and a sample on r
 
 After usable transcription, the future coordinator must call `RetryAudio.delete` for the session file; cleanup and insertion recovery must use text. The harness lacks a recovery-disabled recording mode; implementing memory-only capture is a remaining product task. Device selection and microphone configuration-change recovery also remain product tasks. [Certain]
 
-Interface: `Capture.start(url:)` starts immediately without a gesture classification wait; `Capture.stop()` stops the engine and tap, drains the serial writer, and closes the WAV. `RetryAudio.create`, `purge(now:)`, and `delete` own recovery storage. These are standalone feasibility types and are not yet wired into the shortcut state machine. [Certain]
+Interface: `Capture.start(url:)` starts immediately without a gesture classification wait; `Capture.stop()` stops the engine and tap, drains the serial writer, and closes the WAV. `RetryAudio.create`, `purge(now:)`, and `delete` own recovery storage. These shared types are wired into the shortcut session CLI in `module-one/session`. [Certain]

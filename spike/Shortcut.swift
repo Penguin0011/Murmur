@@ -45,6 +45,12 @@ struct ShortcutMachine {
         return .cancel
     }
 
+    mutating func finish() -> Action? {
+        guard state == .listening else { return nil }
+        state = .processing
+        return .finish
+    }
+
     mutating func processingFinished() { if state == .processing { state = .idle } }
 
     mutating func eventStreamLost() -> Action? {
@@ -77,15 +83,22 @@ private final class ShortcutListener {
     var tap: CFMachPort?
     let binding: ShortcutBinding
     let processingSeconds: Double
-    init(binding: ShortcutBinding, processingSeconds: Double) {
+    let onAction: ((ShortcutMachine.Action, @escaping () -> Void) -> Void)?
+    init(binding: ShortcutBinding, processingSeconds: Double, onAction: ((ShortcutMachine.Action, @escaping () -> Void) -> Void)?) {
         self.binding = binding
         self.processingSeconds = processingSeconds
+        self.onAction = onAction
     }
     func emit(_ action: ShortcutMachine.Action?) {
         guard let action else { return }
         print("shortcut action=\(action.rawValue) state=\(machine.state.rawValue)")
         fflush(stdout)
-        if action == .finish {
+        if let onAction {
+            // Event taps must return promptly; serial main delivery preserves start/stop ordering.
+            DispatchQueue.main.async { [self] in
+                onAction(action) { [self] in machine.processingFinished() }
+            }
+        } else if action == .finish {
             // ponytail: simulated processing only; wire real completion in the recording milestone.
             DispatchQueue.main.asyncAfter(deadline: .now() + processingSeconds) { [self] in
                 machine.processingFinished()
@@ -119,7 +132,10 @@ private final class ShortcutListener {
 struct ShortcutError: Error, CustomStringConvertible { let description: String }
 
 /// Deliberately does nothing without explicit --listen. Never requests permissions.
-func runShortcutListener(arguments: [String]) throws {
+func runShortcutListener(arguments: [String],
+    onAction: ((ShortcutMachine.Action, @escaping () -> Void) -> Void)? = nil,
+    onReady: ((@escaping () -> Void, @escaping () -> Void) -> Void)? = nil,
+    onShutdown: (() -> Void)? = nil) throws {
     guard arguments.contains("--listen") else {
         throw ShortcutError(description: "Use --listen to enable global keyboard observation.")
     }
@@ -154,7 +170,7 @@ func runShortcutListener(arguments: [String]) throws {
     guard monitoring else {
         throw ShortcutError(description: "Global keyboard observation is unavailable. Grant Input Monitoring to the executable/terminal in System Settings, then relaunch. No permission was requested.")
     }
-    let listener = ShortcutListener(binding: binding, processingSeconds: seconds)
+    let listener = ShortcutListener(binding: binding, processingSeconds: seconds, onAction: onAction)
     let mask = [CGEventType.keyDown, .keyUp, .flagsChanged].reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
     listener.tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
         options: .listenOnly, eventsOfInterest: mask, callback: { _, type, event, context in
@@ -167,17 +183,23 @@ func runShortcutListener(arguments: [String]) throws {
         throw ShortcutError(description: "Could not create keyboard event tap; verify Input Monitoring and relaunch. Secure Input or system policy may prevent observation.")
     }
     defer {
+        onShutdown?()
         CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         CFMachPortInvalidate(tap)
     }
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
-    print("Listening (250 ms hold threshold). Escape cancels recording; Ctrl-C exits. Events are observed, not consumed. No audio is captured.")
+    onReady?({ listener.emit(listener.machine.finish()) }, {
+        listener.emit(listener.machine.eventStreamLost())
+        listener.machine.processingFinished()
+    })
+    print("Listening (250 ms hold threshold). Escape cancels recording; Ctrl-C exits. Events are observed, not consumed. Capture behavior is controlled by the caller.")
     fflush(stdout)
     withExtendedLifetime(listener) {
         if let listenSeconds {
             CFRunLoopRunInMode(.defaultMode, listenSeconds, false)
             listener.emit(listener.machine.eventStreamLost())
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
             print("Listener stopped after bounded duration (\(listenSeconds) seconds).")
         } else {
             CFRunLoopRun()
