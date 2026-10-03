@@ -449,7 +449,9 @@ struct SettingsView: View {
                 HSplitView {
                     List(filteredHistory, selection: $selectedID) { entry in
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(entry.finalText.isEmpty ? entry.rawText : entry.finalText).lineLimit(2)
+                            // Explicit primary: the sidebar list style dims unstyled text below its own captions.
+                            Text((entry.finalText.isEmpty ? entry.rawText : entry.finalText).trimmingCharacters(in: .whitespacesAndNewlines))
+                                .foregroundStyle(Color.primary).lineLimit(2)
                             Label(statusLabel(entry.insertionStatus), systemImage: statusSymbol(entry.insertionStatus))
                                 .font(.caption).foregroundStyle(selectedID == entry.id ? Color.primary : Color.primary.opacity(0.72)).lineLimit(2)
                             Text(entry.recordedAt, format: .dateTime.month().day().hour().minute())
