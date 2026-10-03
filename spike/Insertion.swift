@@ -1,6 +1,24 @@
 import AppKit
 import ApplicationServices
 
+enum InsertionPolicy {
+    case experimentalFallback, singleAttempt
+}
+
+enum InsertionMethod { case accessibility, paste }
+
+/// Choose before writing: native AX and clipboard paste must never both run in app mode.
+func insertionMethod(bundleID: String, policy: InsertionPolicy) -> InsertionMethod {
+    let pasteApps: Set<String> = [
+        "com.apple.Safari", "com.apple.SafariTechnologyPreview", "com.google.Chrome",
+        "com.google.Chrome.canary", "org.mozilla.firefox", "com.microsoft.edgemac",
+        "company.thebrowser.Browser", "com.brave.Browser", "com.openai.codex",
+        "com.openai.chat", "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
+        "com.tinyspeck.slackmacgap", "com.hnc.Discord"
+    ]
+    return policy == .singleAttempt && pasteApps.contains(bundleID) ? .paste : .accessibility
+}
+
 struct FocusSnapshot {
     let element: AXUIElement
     let pid: pid_t
@@ -97,21 +115,24 @@ func expectedInsertedValue(_ value: String?, selection: CFRange?, text: String) 
     return source.replacingCharacters(in: range, with: text)
 }
 
-private func sameDestination(_ original: FocusSnapshot, _ current: FocusSnapshot) -> Bool {
-    original.pid == current.pid && CFEqual(original.element, current.element) && !current.secure
-        && original.role == current.role && insertionTextRole(current.role)
+func sameDestination(_ original: FocusSnapshot, _ current: FocusSnapshot) -> Bool {
+    original.pid == current.pid && original.bundleID == current.bundleID && CFEqual(original.element, current.element) && !current.secure
+        && original.role == current.role && original.subrole == current.subrole && insertionTextRole(current.role)
         && original.value == current.value
         && original.selection?.location == current.selection?.location
         && original.selection?.length == current.selection?.length
 }
 
-func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionResult {
+func insertText(_ text: String, into destination: FocusSnapshot, policy: InsertionPolicy = .experimentalFallback) -> InsertionResult {
     func result(_ status: InsertionResult.Status, _ detail: String, _ snapshot: FocusSnapshot? = nil) -> InsertionResult {
         InsertionResult(status: status, detail: detail, snapshot: snapshot)
     }
     guard !text.isEmpty else { return result(.failed, "Empty output; no insertion attempted") }
     guard !destination.secure else { return result(.failed, "Secure field rejected") }
     guard insertionTextRole(destination.role) else { return result(.failed, "Focused element is not a supported text field") }
+    if policy == .singleAttempt && (destination.value == nil || destination.selection == nil) {
+        return result(.failed, "Destination cannot be compared safely; retain output for recovery")
+    }
     guard let current = try? captureFocus(), sameDestination(destination, current) else {
         return result(.failed, "Focus, value, or selection changed; retain output for recovery")
     }
@@ -120,22 +141,32 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
         return result(.failed, "Invalid UTF16 selection; no insertion attempted")
     }
     // Without an expected value, a successful write remains uncertain and must never be retried.
-    let write = AXUIElementSetAttributeValue(current.element, kAXSelectedTextAttribute as CFString, text as CFString)
+    let method = insertionMethod(bundleID: current.bundleID, policy: policy)
     var pasteMethod = "clipboard paste"
-    if write == .success {
-        let written = verifyInsertion(current, expected: expected, method: "AX selected-text write")
-        guard written.status == .unverified else { return written }
-        // Some Chromium/Electron fields accept the write and drop it. Paste only if the field still reads exactly as before.
-        // Browser fields of unknown type are included; secure fields were rejected above, and paste stays unverified there.
-        // ponytail: fixed 300 ms settle; a write applied later than this would double-insert. Use change notifications in the app.
-        Thread.sleep(forTimeInterval: 0.3)
-        guard let settled = try? captureFocus(), sameDestination(current, settled),
-              silentWriteAllowsPaste(before: current.value, after: settled.value) else {
-            return written
+    if method == .accessibility {
+        let write = AXUIElementSetAttributeValue(current.element, kAXSelectedTextAttribute as CFString, text as CFString)
+        if policy == .singleAttempt {
+            guard write == .success else {
+                return result(.unverified, "AX write returned \(write.rawValue); retain output, no paste retry")
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+            return verifyInsertion(current, expected: expected, method: "AX selected-text write")
         }
-        pasteMethod = "clipboard paste after unchanged AX write"
-    } else if write != .attributeUnsupported && write != .notImplemented {
-        return result(.unverified, "AX write returned \(write.rawValue); delivery uncertain, no paste retry")
+        if write == .success {
+            let written = verifyInsertion(current, expected: expected, method: "AX selected-text write")
+            guard written.status == .unverified else { return written }
+            // Some Chromium/Electron fields accept the write and drop it. Paste only if the field still reads exactly as before.
+            // Browser fields of unknown type are included; secure fields were rejected above, and paste stays unverified there.
+            // ponytail: fixed 300 ms settle; a write applied later than this would double-insert. Use change notifications in the app.
+            Thread.sleep(forTimeInterval: 0.3)
+            guard let settled = try? captureFocus(), sameDestination(current, settled),
+                  silentWriteAllowsPaste(before: current.value, after: settled.value) else {
+                return written
+            }
+            pasteMethod = "clipboard paste after unchanged AX write"
+        } else if write != .attributeUnsupported && write != .notImplemented {
+            return result(.unverified, "AX write returned \(write.rawValue); delivery uncertain, no paste retry")
+        }
     }
     guard let rechecked = try? captureFocus(), sameDestination(current, rechecked) else {
         return result(.failed, "Destination changed before paste; no paste attempted")
@@ -199,8 +230,9 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
     }
     down.flags = .maskCommand; up.flags = .maskCommand
     down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
-    // ponytail: bounded synchronous spike wait; use asynchronous completion in the application.
-    Thread.sleep(forTimeInterval: 0.2)
+    // ponytail: bounded clipboard lease; apps taking longer than 500 ms may miss the paste.
+    // Focus checking, posting, and clipboard restoration cannot be atomic on macOS.
+    Thread.sleep(forTimeInterval: policy == .singleAttempt ? 0.5 : 0.2)
     return verifyInsertion(current, expected: expected, method: pasteMethod)
 }
 
@@ -232,6 +264,23 @@ func insertionTextRole(_ role: String) -> Bool {
 }
 
 func runInsertionChecks() {
+    assert(insertionMethod(bundleID: "com.openai.codex", policy: .singleAttempt) == .paste)
+    assert(insertionMethod(bundleID: "com.google.Chrome", policy: .singleAttempt) == .paste)
+    assert(insertionMethod(bundleID: "com.microsoft.VSCode", policy: .singleAttempt) == .paste)
+    assert(insertionMethod(bundleID: "com.apple.TextEdit", policy: .singleAttempt) == .accessibility)
+    assert(insertionMethod(bundleID: "com.google.Chrome", policy: .experimentalFallback) == .accessibility)
+    let element = AXUIElementCreateApplication(123)
+    func destination(pid: pid_t = 123, bundleID: String = "com.apple.TextEdit", value: String = "abc",
+                     selection: CFRange = CFRange(location: 3, length: 0), secure: Bool = false) -> FocusSnapshot {
+        FocusSnapshot(element: element, pid: pid, bundleID: bundleID, role: kAXTextFieldRole,
+                      subrole: "unknown", value: value, selection: selection, secure: secure, browserTypeUnknown: false)
+    }
+    assert(sameDestination(destination(), destination()))
+    assert(!sameDestination(destination(), destination(pid: 124)))
+    assert(!sameDestination(destination(), destination(bundleID: "other")))
+    assert(!sameDestination(destination(), destination(value: "abcd")))
+    assert(!sameDestination(destination(), destination(selection: CFRange(location: 2, length: 0))))
+    assert(!sameDestination(destination(), destination(secure: true)))
     assert(insertionTextRole(kAXTextFieldRole))
     assert(insertionTextRole(kAXTextAreaRole))
     assert(!insertionTextRole("AXWebArea"))
