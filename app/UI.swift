@@ -49,10 +49,10 @@ struct SettingsView: View {
 
             Section {
                 Toggle("Automatically insert into the original text field", isOn: $controller.automaticInsertion)
-                Text("Text is saved before insertion. If the destination changes or insertion cannot be verified, recover it from History. Dictation never sends a message.")
+                Text("Text is saved before insertion. If the destination changes or insertion cannot be verified, recover it from History. Murmur never sends a message.")
                     .font(.callout).foregroundStyle(.secondary)
                 Toggle("Show menu bar icon", isOn: $controller.showMenuBar)
-                Text("When hidden, reopen Dictation from Finder or Spotlight to return to settings.")
+                Text("When hidden, reopen Murmur from Finder or Spotlight to return to settings.")
                     .font(.callout).foregroundStyle(.secondary)
                 Picker("Keep transcripts", selection: $controller.retention) {
                     Text("30 days").tag("30-days")

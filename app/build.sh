@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -eu
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
-app_path="$project_root/runtime/Dictation.app"
+app_path="$project_root/runtime/Murmur.app"
 runner_path="$project_root/module-one/models/Runner/.build/release/ModelBench"
 if [[ ! -x "$runner_path" ]]; then
   swift build --package-path "$project_root/module-one/models/Runner" -c release
@@ -12,7 +12,7 @@ swiftc -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/module-one/capture/Capture.swift" "$project_root/module-one/session/Session.swift" \
   "$project_root/app/History.swift" "$project_root/app/Controller.swift" \
   "$project_root/app/UI.swift" "$project_root/app/main.swift" \
-  -o "$app_path/Contents/MacOS/Dictation"
+  -o "$app_path/Contents/MacOS/Murmur"
 cp "$project_root/app/Info.plist" "$app_path/Contents/Info.plist"
 cp "$runner_path" "$app_path/Contents/MacOS/ModelBench"
 cp "$project_root/module-one/models/artifact-pins.json" "$app_path/Contents/Resources/artifact-pins.json"

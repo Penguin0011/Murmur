@@ -9,7 +9,7 @@ import SwiftUI
         NSApp.setActivationPolicy(.accessory)
         let mainMenu = NSMenu()
         let appItem = NSMenuItem(); let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Quit Dictation", action: #selector(quit), keyEquivalent: "q").target = self
+        appMenu.addItem(withTitle: "Quit Murmur", action: #selector(quit), keyEquivalent: "q").target = self
         appItem.submenu = appMenu; mainMenu.addItem(appItem); NSApp.mainMenu = mainMenu
         controller.openSettings = { [weak self] in self?.showWindow() }
         controller.updateMenu = { [weak self] in self?.refreshMenu() }
@@ -26,7 +26,7 @@ import SwiftUI
     func showWindow() {
         if window == nil {
             let next = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 610), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            next.title = "Dictation"; next.contentView = NSHostingView(rootView: SettingsView(controller: controller))
+            next.title = "Murmur"; next.contentView = NSHostingView(rootView: SettingsView(controller: controller))
             next.minSize = NSSize(width: 650, height: 500); next.center(); next.isReleasedWhenClosed = false
             window = next
         }
@@ -34,7 +34,7 @@ import SwiftUI
     }
     func refreshMenu() {
         if !controller.showMenuBar { if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }; statusItem = nil; return }
-        if statusItem == nil { statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength); statusItem?.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Dictation") }
+        if statusItem == nil { statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength); statusItem?.button?.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Murmur") }
         let menu = NSMenu()
         let state = NSMenuItem(title: controller.phase, action: nil, keyEquivalent: ""); state.isEnabled = false; menu.addItem(state)
         menu.addItem(.separator())
@@ -43,7 +43,7 @@ import SwiftUI
             menu.addItem(withTitle: "Finish Dictation", action: #selector(finish), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Cancel Recording", action: #selector(cancel), keyEquivalent: "").target = self
         }
-        menu.addItem(.separator()); menu.addItem(withTitle: "Quit Dictation", action: #selector(quit), keyEquivalent: "q").target = self
+        menu.addItem(.separator()); menu.addItem(withTitle: "Quit Murmur", action: #selector(quit), keyEquivalent: "q").target = self
         statusItem?.menu = menu
     }
     @objc func openSettings() { showWindow() }

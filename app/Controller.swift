@@ -83,7 +83,7 @@ import Darwin
             }
             try store?.purge(retention: appliedRetention)
             refreshHistory()
-        } catch { store = nil; retry = nil; phase = "Error"; message = "Private storage is unavailable. Dictation cannot start." }
+        } catch { store = nil; retry = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
     }
     func start() {
         refreshPermissions()
