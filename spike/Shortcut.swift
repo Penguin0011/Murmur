@@ -76,6 +76,11 @@ enum ShortcutBinding {
             return event.flags.intersection(relevant) == [.maskControl, .maskAlternate]
         }
     }
+    /// Only the chord's Space types a character; swallow it so the shortcut never inserts a space.
+    func consumes(_ type: CGEventType, _ event: CGEvent) -> Bool {
+        self == .controlOptionSpace && (type == .keyDown || type == .keyUp)
+            && event.getIntegerValueField(.keyboardEventKeycode) == keyCode && isDown(event)
+    }
 }
 
 final class ShortcutListener {
@@ -175,9 +180,11 @@ func runShortcutListener(arguments: [String],
     let listener = ShortcutListener(binding: binding, processingSeconds: seconds, onAction: onAction)
     let mask = [CGEventType.keyDown, .keyUp, .flagsChanged].reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
     listener.tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
-        options: .listenOnly, eventsOfInterest: mask, callback: { _, type, event, context in
+        options: binding == .controlOptionSpace ? .defaultTap : .listenOnly, eventsOfInterest: mask, callback: { _, type, event, context in
             if let context {
-                Unmanaged<ShortcutListener>.fromOpaque(context).takeUnretainedValue().enqueue(type: type, event: event)
+                let listener = Unmanaged<ShortcutListener>.fromOpaque(context).takeUnretainedValue()
+                listener.enqueue(type: type, event: event)
+                if listener.binding.consumes(type, event) { return nil }
             }
             return Unmanaged.passUnretained(event)
         }, userInfo: Unmanaged.passUnretained(listener).toOpaque())
@@ -195,7 +202,7 @@ func runShortcutListener(arguments: [String],
         listener.emit(listener.machine.eventStreamLost())
         listener.machine.processingFinished()
     })
-    print("Listening (250 ms hold threshold). Escape cancels recording; Ctrl-C exits. Events are observed, not consumed. Capture behavior is controlled by the caller.")
+    print("Listening (250 ms hold threshold). Escape cancels recording; Ctrl-C exits. Events are observed, not consumed, except the Space of Control-Option-Space. Capture behavior is controlled by the caller.")
     fflush(stdout)
     withExtendedLifetime(listener) {
         if let listenSeconds {

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 func runShortcutChecks() throws {
@@ -46,5 +47,14 @@ func runShortcutChecks() throws {
     } catch let error as ShortcutError {
         try check(error.description == "Missing value for --listen-seconds", "missing duration rejected")
     }
-    print("Shortcut checks passed (tap, hold, threshold, repeats, cancellation, processing guard).")
+    func key(_ code: CGKeyCode, _ down: Bool, _ flags: CGEventFlags) -> CGEvent {
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)!; event.flags = flags; return event
+    }
+    let chord: CGEventFlags = [.maskControl, .maskAlternate]
+    try check(ShortcutBinding.controlOptionSpace.consumes(.keyDown, key(49, true, chord)), "chord Space down is swallowed")
+    try check(ShortcutBinding.controlOptionSpace.consumes(.keyUp, key(49, false, chord)), "chord Space up is swallowed")
+    try check(!ShortcutBinding.controlOptionSpace.consumes(.keyDown, key(49, true, [])), "plain Space passes through")
+    try check(!ShortcutBinding.controlOptionSpace.consumes(.keyDown, key(49, true, [.maskControl, .maskAlternate, .maskCommand])), "other chords pass through")
+    try check(!ShortcutBinding.rightOption.consumes(.keyDown, key(49, true, chord)), "other bindings consume nothing")
+    print("Shortcut checks passed (tap, hold, threshold, repeats, cancellation, processing guard, chord consumption).")
 }
