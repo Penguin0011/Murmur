@@ -16,8 +16,8 @@ Native macOS 26 utility in Operate mode. The recording bubble is a temporary, no
 
 ## Behavior
 
-The bubble never becomes the key or main window and does not activate the app. Listening exposes Stop and Cancel; recoverable status exposes Copy and History. Error status exposes the recovery-audio action. History opens the History tab and selects the latest saved entry. Settings explicitly describe unavailable model downloads, cloud transcription, and cleanup instead of presenting inactive settings for those features.
+The bubble never becomes the key or main window and does not activate the app. Listening exposes Stop and Cancel; recoverable status exposes Copy and History. Idle status exposes Dismiss without deleting recovery data. Error status exposes Settings and offers Audio only when retry audio exists. History opens the History tab and selects the recovery entry, falling back to the latest saved entry. Settings keep state and Apply visible outside the scrollable form; individual permission rows and model-file status make setup actionable. History includes search and delivery status. Settings explicitly describe unavailable model downloads, cloud transcription, and cleanup instead of presenting inactive settings for those features.
 
 ## Verification boundary
 
-UI.swift typechecks against Swift 6.3.3 with the macOS 26 SDK using the agreed controller contract. Native screenshot and live interaction inspection require the integrated app build; this document does not claim those checks passed.
+The integrated macOS 26 app builds. Native synthetic fixtures verified settings/error and empty/populated History layouts, idle dismissal, and search. Physical recording, live insertion after this checkpoint, and the floating bubble click path remain unverified. See app/README.md.

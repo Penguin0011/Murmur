@@ -1,3 +1,15 @@
+# Native app recovery and UI checkpoint — October 2, 2026
+
+This supersedes the older no-app-skeleton continuation below. Branch `aakash-module-one` now contains the native app in `app/`; build/run/check instructions and current evidence are in `app/README.md`. [Certain]
+
+Three delegated reviewers covered recording lifecycle, history/settings, and insertion safety, followed by a UI review. Fixed idle error dismissal, stale shortcut callbacks, monitor pauses during menu tracking, probe input deletion, unsafe probe arguments, invalid retention, and mismatched/corrupt history handling. Settings now show state/model/individual permissions with a fixed Apply footer; History has search and delivery status; the bubble has dismissal and context-sensitive audio recovery. [Certain]
+
+The app builds; launch/history/controller/session/processor/spike checks pass. Native synthetic UI inspection verified idle Error to Ready, retained recovery entries, settings and History layouts, filtered selection and no-results search. No live recording/insertion or physical-key claims are added. See `app/README.md` for the exact boundary. [Certain]
+
+Next steps: validate physical-key first-word capture and error/restart behavior with the actual app, verify the floating bubble click path without stealing destination focus, then repeat live per-app insertion and clipboard-race cases. Genuine labeled speech benchmarks and cleanup/model-management work remain open. Corrupt history currently blocks startup; a user-visible repair path remains future work. [Certain]
+
+---
+
 # Connected local path checkpoint — October 2, 2026
 
 Implemented shortcut → capture → local processor → durable text history. Release model runner build and pinned model checksum verification passed on the available M3. Synthetic injected-key microphone hold/cancel and synthetic speaker-to-microphone processing passed; all test audio was deleted. No insertion, physical-key first-word guarantee, or real speech quality claim is made. [Certain]
