@@ -2,9 +2,37 @@ import AppKit
 import SwiftUI
 import ApplicationServices
 import AVFoundation
+import os
 import Combine
 import Darwin
 @preconcurrency import Dispatch
+
+/// Content-free timing and stop reasons, alongside the capture and shortcut timing.
+private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
+
+/// Starts capture on a dedicated queue as soon as the tap thread sees a shortcut press, so a slow
+/// main thread does not delay the microphone. The session adopts it; anything unclaimed is deleted.
+final class PreStart: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "murmur.prestart", qos: .userInteractive)
+    private var pending: (capture: Capture, url: URL, id: UUID)?
+    func begin(store: RetryAudio) {
+        queue.async { [self] in
+            guard pending == nil, permission() == "authorized", let url = try? store.create() else { return }
+            let capture = Capture()
+            do { try capture.start(url: url) } catch { try? store.delete(url); return }
+            let id = UUID(); pending = (capture, url, id)
+            timingLog.notice("prestart engine running at=\(ProcessInfo.processInfo.systemUptime, format: .fixed(precision: 3))")
+            // ponytail: unclaimed after 10 s means the main thread never handled the press.
+            queue.asyncAfter(deadline: .now() + 10) { [self] in if pending?.id == id { drop(store) } }
+        }
+    }
+    func take() -> (Capture, URL)? { queue.sync { defer { pending = nil }; return pending.map { ($0.capture, $0.url) } } }
+    func discard(store: RetryAudio) { queue.sync { drop(store) } }
+    private func drop(_ store: RetryAudio) {
+        guard let p = pending else { return }
+        pending = nil; p.capture.stop(); try? store.delete(p.url)
+    }
+}
 
 @MainActor final class AppController: ObservableObject {
     @Published var phase = "Ready"
@@ -103,6 +131,9 @@ import Darwin
     private var shortcutGeneration = UUID()
     private var listener: ShortcutListener?
     private var source: CFRunLoopSource?
+    private var tapThread: TapThread?
+    private let prestart = PreStart()
+    private var noNap: NSObjectProtocol?
     private var monitor: Timer?
     private var expiry: Timer?
     private var runner: Process?
@@ -188,6 +219,8 @@ import Darwin
         refreshKeys()
     }
     func start() {
+        // App Nap would delay the shortcut; idle system sleep stays allowed.
+        noNap = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Respond to the dictation shortcut without delay")
         refreshPermissions()
         if !preview { configureShortcut() }
         if !preview && updateChecksEnabled { runUpdateCheck(manual: false) }
@@ -206,7 +239,11 @@ import Darwin
                 // Download progress and the verifying phase are sampled here, on the main thread.
                 if self.modelDownloadInFlight, let status = self.downloader?.status(), status != self.modelStatus { self.modelStatus = status }
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
-                   !capture.engine.isRunning || capture.queue.sync(execute: { capture.writeError != nil }) { self.recordingFailed = true; self.stopRecording() }
+                   !capture.engine.isRunning || capture.queue.sync(execute: { capture.writeError != nil }) {
+                    let running = capture.engine.isRunning, writeFailed = capture.queue.sync { capture.writeError != nil }
+                    timingLog.notice("capture-interrupted engine-running=\(running, privacy: .public) write-error=\(writeFailed, privacy: .public)")
+                    self.recordingFailed = true; self.stopRecording()
+                }
                 if self.isBusy, let initial = self.destination {
                     guard let current = try? captureFocus(), current.pid == initial.pid, CFEqual(current.element, initial.element),
                           !current.secure, current.value == initial.value,
@@ -330,20 +367,31 @@ import Darwin
             if self.session.state == .processing, let (phase, message) = self.phaseBeforeEarly { self.setPhase(phase, message) }
         }
         listener = next; source = nextSource
-        CFRunLoopAddSource(CFRunLoopGetMain(), nextSource, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
+        if let retry {
+            next.onPressFromIdle = { [prestart] in prestart.begin(store: retry) }
+            next.onPressWithoutStart = { [prestart] in prestart.discard(store: retry) }
+        }
+        let thread = TapThread(source: nextSource); thread.startAndWait(); tapThread = thread
+        CGEvent.tapEnable(tap: tap, enable: true)
         // ponytail: fixed tail; measured: long dictations lost the last word at 0 s, kept it at 0.6 s.
         session.releaseTail = 0.4
+        session.takePrestarted = { [weak self] in
+            guard let self, let (capture, url) = self.prestart.take() else { return nil }
+            self.capture = capture; return url
+        }
         session.resumeCapture = { [weak self] in self?.setPhase("Listening", "Listening… Release to finish, or press Escape to cancel.") }
-        session.finishRecording = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
+        session.finishRecording = { [weak self] in timingLog.notice("capture-cap reached"); guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
     private func removeShortcut() {
         shortcutGeneration = UUID()
-        if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+        tapThread?.stop(); tapThread = nil
         if let tap = listener?.tap { CFMachPortInvalidate(tap) }
         source = nil; listener = nil
     }
     private func handle(_ action: ShortcutMachine.Action, done: @escaping () -> Void) {
+        // A refused start never adopts the capture begun on the tap thread; delete it.
+        defer { if action == .start, let retry { prestart.discard(store: retry) } }
         guard sessionAvailable else { done(); return }
         if action == .start {
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }

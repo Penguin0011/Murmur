@@ -81,6 +81,36 @@ func sessionCheck() throws {
     assert(b2b.state == .idle && b2bListener.machine.state == .idle && processed.count == 3)
     try? FileManager.default.removeItem(at: processed[2])
 
+    // After an automatic stop (time cap, interruption) a press means "stop", not a new dictation.
+    let capped2 = CaptureSession(store: store, start: { _ in }, stop: { true }, process: { _, _ in })
+    let cappedListener = ShortcutListener(binding: .fn, processingSeconds: 0) { action, done in capped2.receive(action, completed: done) }
+    var cappedQueued = 0
+    cappedListener.onQueuedPress = { cappedQueued += 1; return capped2.startEarly() }
+    cappedListener.receive(type: .flagsChanged, event: fnEvent(true, 40)); cappedListener.receive(type: .flagsChanged, event: fnEvent(false, 40.1))
+    cappedListener.emit(cappedListener.machine.finish())      // the 120 s cap, not the user
+    cappedListener.receive(type: .flagsChanged, event: fnEvent(true, 45)); cappedListener.receive(type: .flagsChanged, event: fnEvent(false, 45.1))
+    assert(cappedQueued == 0 && capped2.early == nil && cappedListener.queued.isEmpty && cappedListener.machine.state == .processing)
+    try? FileManager.default.removeItem(at: capped2.audio!)
+
+    // Prestart: the tap thread starts capture on a press from idle; .start adopts it instead of
+    // starting a second capture, and a press that starts nothing reports itself for cleanup.
+    var preStarted: URL?, preStarts = 0, unused = 0, ordinaryStarts = 0
+    let pre = CaptureSession(store: store, start: { _ in ordinaryStarts += 1 }, stop: { true }, process: { _, done in done() })
+    pre.takePrestarted = { defer { preStarted = nil }; return preStarted }
+    let preListener = ShortcutListener(binding: .fn, processingSeconds: 0) { action, done in pre.receive(action, completed: done) }
+    preListener.onPressFromIdle = { preStarts += 1; preStarted = try? store.create() }
+    preListener.onPressWithoutStart = { unused += 1 }
+    let down30 = fnEvent(true, 30)
+    preListener.notePress(.flagsChanged, down30); let adopted = preStarted
+    preListener.receive(type: .flagsChanged, event: down30)
+    assert(preStarts == 1 && ordinaryStarts == 0 && pre.audio == adopted && pre.state == .listening && unused == 0)
+    preListener.receive(type: .flagsChanged, event: fnEvent(false, 30.1))   // tap: keeps listening
+    let stopPress = fnEvent(true, 31)
+    preListener.notePress(.flagsChanged, stopPress); assert(preStarts == 1) // not idle: no prestart
+    preListener.receive(type: .flagsChanged, event: stopPress); assert(unused == 1 && pre.state == .idle)
+    preListener.receive(type: .flagsChanged, event: fnEvent(false, 31.1))
+    try? FileManager.default.removeItem(at: adopted!)
+
     var attempts = 0
     let retry = CaptureSession(store: store, start: { _ in
         attempts += 1

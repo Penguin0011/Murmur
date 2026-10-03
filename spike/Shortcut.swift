@@ -101,18 +101,35 @@ final class ShortcutListener {
     /// Escape or a lost event stream clears the queue and calls `onQueuedCancel`.
     private(set) var queued: [(down: Bool, at: TimeInterval)] = []
     var onQueuedPress: (() -> Bool)?
+    /// Whether the user's own release or tap ended the session now processing. Only then is a
+    /// press during processing a new dictation; after an automatic stop (interruption, time cap)
+    /// the user most likely meant to stop, so the press is ignored.
+    private var userFinished = false
+    private var handlingEvent = false
     var onQueuedCancel: (() -> Void)?
+    /// Called on the tap thread for a fresh shortcut press from idle, before the main thread sees
+    /// it, so capture can start while a slow (paged-out) main thread catches up.
+    var onPressFromIdle: (() -> Void)?
+    /// Called on the main thread when a shortcut press did not start a session.
+    var onPressWithoutStart: (() -> Void)?
+    /// The machine state as last published by the main thread; the tap thread reads only this.
+    private let mirrorLock = NSLock()
+    private var mirror: (state: ShortcutMachine.State, queued: Bool) = (.idle, false)
+    func publishState() { mirrorLock.lock(); mirror = (machine.state, !queued.isEmpty); mirrorLock.unlock() }
+    private var mirrored: (state: ShortcutMachine.State, queued: Bool) { mirrorLock.lock(); defer { mirrorLock.unlock() }; return mirror }
     init(binding: ShortcutBinding, processingSeconds: Double, onAction: ((ShortcutMachine.Action, @escaping () -> Void) -> Void)?) {
         self.binding = binding
         self.processingSeconds = processingSeconds
         self.onAction = onAction
     }
     func emit(_ action: ShortcutMachine.Action?) {
+        defer { publishState() }
         guard let action else { return }
+        if action == .finish { userFinished = handlingEvent }
         print("shortcut action=\(action.rawValue) state=\(machine.state.rawValue)")
         fflush(stdout)
         if let onAction {
-            onAction(action) { [self] in machine.processingFinished(); replayQueued() }
+            onAction(action) { [self] in machine.processingFinished(); replayQueued(); publishState() }
         } else if action == .finish {
             // ponytail: simulated processing only; wire real completion in the recording milestone.
             DispatchQueue.main.asyncAfter(deadline: .now() + processingSeconds) { [self] in
@@ -124,6 +141,7 @@ final class ShortcutListener {
     func replayQueued() {
         guard machine.state == .idle, !queued.isEmpty else { return }
         let events = queued; queued.removeAll()
+        handlingEvent = true; defer { handlingEvent = false }
         for (n, e) in events.enumerated() {
             if n > 0 && machine.state == .idle { break } // The replayed start was refused.
             emit(e.down ? machine.press(at: e.at) : machine.release(at: e.at))
@@ -146,7 +164,8 @@ final class ShortcutListener {
         guard type == .keyDown || type == .keyUp,
               event.getIntegerValueField(.keyboardEventKeycode) == 53 else { return false }
         if type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
-            swallowingEscape = machine.state == .listening || !queued.isEmpty
+            let m = mirrored
+            swallowingEscape = m.state == .listening || m.queued
         }
         defer { if type == .keyUp { swallowingEscape = false } }
         return swallowingEscape
@@ -160,10 +179,19 @@ final class ShortcutListener {
                 guard let context else { return Unmanaged.passUnretained(event) }
                 let listener = Unmanaged<ShortcutListener>.fromOpaque(context).takeUnretainedValue()
                 let swallow = listener.consumes(type, event)
+                listener.notePress(type, event)
                 listener.enqueue(type: type, event: event)
                 return swallow ? nil : Unmanaged.passUnretained(event)
             }, userInfo: Unmanaged.passUnretained(self).toOpaque())
         return tap
+    }
+    /// Tap thread: a fresh press of the binding while idle.
+    func notePress(_ type: CGEventType, _ event: CGEvent) {
+        guard let onPressFromIdle, type == .keyDown || type == .flagsChanged,
+              event.getIntegerValueField(.keyboardEventKeycode) == binding.keyCode, binding.isDown(event),
+              event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
+        let m = mirrored
+        if m.state == .idle && !m.queued { onPressFromIdle() }
     }
     func enqueue(type: CGEventType, event: CGEvent) {
         // Copy the borrowed event; defer the entire mutation/action pair together.
@@ -171,6 +199,8 @@ final class ShortcutListener {
         DispatchQueue.main.async { [self] in receive(type: type, event: copy) }
     }
     func receive(type: CGEventType, event: CGEvent) {
+        handlingEvent = true
+        defer { handlingEvent = false; publishState() }
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             cancelQueued()
             emit(machine.eventStreamLost())
@@ -190,10 +220,11 @@ final class ShortcutListener {
             let handled = ProcessInfo.processInfo.systemUptime, down = binding.isDown(event)
             timingLog.notice("shortcut \(down ? "down" : "up", privacy: .public) event=\(time, format: .fixed(precision: 3)) handled=\(handled, format: .fixed(precision: 3)) lag=\(handled - time, format: .fixed(precision: 3)) state=\(self.machine.state.rawValue, privacy: .public)")
         }
-        if machine.state == .processing, let onQueuedPress {
+        if machine.state == .processing, userFinished, let onQueuedPress {
             let down = (type == .keyDown || type == .flagsChanged) && binding.isDown(event)
-            if down, event.getIntegerValueField(.keyboardEventAutorepeat) == 0, !queued.isEmpty || onQueuedPress() {
-                queued.append((true, time)); return
+            if down, event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                onPressWithoutStart?()
+                if !queued.isEmpty || onQueuedPress() { queued.append((true, time)); return }
             }
             if !down, !queued.isEmpty { queued.append((false, time)); return }
         }
@@ -204,9 +235,30 @@ final class ShortcutListener {
         } else if (type == .keyDown || type == .flagsChanged) && binding.isDown(event) {
             let action = machine.press(at: time, isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
             if action == .finish { print("shortcut gesture=tap-stop") }
+            if action != .start { onPressWithoutStart?() }
             emit(action)
         }
     }
+}
+
+/// Runs an event tap's run loop source on its own high-priority thread, so a busy or paged-out
+/// main thread does not delay seeing the shortcut.
+final class TapThread: Thread {
+    private let source: CFRunLoopSource
+    private var loop: CFRunLoop?
+    private let ready = DispatchSemaphore(value: 0)
+    init(source: CFRunLoopSource) {
+        self.source = source
+        super.init()
+        qualityOfService = .userInteractive; name = "murmur.shortcut-tap"
+    }
+    override func main() {
+        loop = CFRunLoopGetCurrent()
+        CFRunLoopAddSource(loop, source, .commonModes); ready.signal()
+        CFRunLoopRun()
+    }
+    func startAndWait() { start(); ready.wait() }
+    func stop() { if let loop { CFRunLoopRemoveSource(loop, source, .commonModes); CFRunLoopStop(loop) } }
 }
 
 struct ShortcutError: Error, CustomStringConvertible { let description: String }

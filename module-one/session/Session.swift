@@ -19,6 +19,8 @@ final class CaptureSession {
     /// Capture started by a press during processing; the next .start adopts it.
     private(set) var early: URL?
     var resumeCapture: (() -> Void)?
+    /// Returns a capture started before the main thread handled the press, for .start to adopt.
+    var takePrestarted: (() -> URL?)?
 
     init(store: RetryAudio, start: @escaping (URL) throws -> Void,
          stop: @escaping () -> Bool, process: @escaping (URL, @escaping () -> Void) -> Void) {
@@ -28,11 +30,11 @@ final class CaptureSession {
         switch action {
         case .start:
             guard state == .idle else { return }
-            if let url = early {
+            if let url = early ?? takePrestarted?() {
                 // ponytail: the 120 s cap restarts at adoption, not at the early press.
                 early = nil; audio = url; state = .listening
                 timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in self?.finishRecording?() }
-                resumeCapture?(); print("capture=listening adopted-early limit=120s")
+                resumeCapture?(); print("capture=listening adopted limit=120s")
                 return
             }
             do {
