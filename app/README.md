@@ -58,7 +58,7 @@ Known failure modes: without the lexicon, real-word swaps that look like respell
 `Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation and are not wired into the app yet. Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. They have not yet been compiled on the macOS 26 host (Swift 6.3.3, `-swift-version 5`), and the Keychain store is compiled only on macOS. [Certain]
 
 ```sh
-swiftc app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check
+swiftc app/Cleanup.swift app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check
 /tmp/murmur-providers-check
 swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check
 /tmp/murmur-updates-check

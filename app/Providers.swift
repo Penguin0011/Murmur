@@ -14,12 +14,7 @@ import FoundationNetworking
 
 // MARK: - Shared contracts
 
-/// Already-built prompt for cleanup. Built by the cleanup worker's prompt builder; the integrator
-/// reconciles this type with that module.
-struct CleanupMessages: Equatable, Sendable {
-    var system: String
-    var user: String
-}
+// `CleanupMessages` (the already-built cleanup prompt) is defined in Cleanup.swift by `CleanupPrompt`.
 
 /// Recorded audio sent to a transcription provider.
 struct AudioPayload: Sendable {
