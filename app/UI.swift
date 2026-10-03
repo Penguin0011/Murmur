@@ -55,6 +55,9 @@ struct SettingsView: View {
     @State private var searchText = ""
     @State private var newPreferred = ""
     @State private var newVariants = ""
+    @State private var geminiKey = ""
+    @State private var openrouterKey = ""
+    @State private var serverKey = ""
 
     var body: some View {
         VStack(spacing: 18) {
@@ -64,7 +67,7 @@ struct SettingsView: View {
                     Text("Your voice, on your Mac.").font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 }
                 Spacer()
-                Label("Local transcription", systemImage: "desktopcomputer")
+                Label(controller.appliedTranscriptionIsLocal ? "Local transcription" : "Cloud transcription", systemImage: controller.appliedTranscriptionIsLocal ? "desktopcomputer" : "cloud")
                     .font(.callout).padding(.horizontal, 14).padding(.vertical, 9)
                     .modifier(UtilityGlass())
             }
@@ -170,9 +173,55 @@ struct SettingsView: View {
                         if controller.usesCustomModelFolder { Button("Use Default", action: controller.useDefaultModelDirectory) }
                         Button("Choose Folder…", action: controller.chooseModelDirectory)
                     }
-                    Text("Transcription runs on this Mac. Downloading the model uses the network once; dictation does not. A folder you choose takes effect on Apply Settings. Cloud transcription is not available yet.")
+                    Text("Local transcription runs on this Mac. Downloading the model uses the network once; dictation does not. A folder you choose takes effect on Apply Settings. Cloud transcription is chosen under Processing routes.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Recording") }
+
+                Section {
+                    Picker("Transcription", selection: $controller.transcriptionRoute) {
+                        Text("On this Mac (Parakeet)").tag(TranscriptionRoute.local)
+                        Text("Cloud").tag(TranscriptionRoute.cloud)
+                    }
+                    if controller.transcriptionRoute == .cloud {
+                        Picker("Cloud provider", selection: $controller.cloudTranscriber) {
+                            ForEach(CloudTranscriber.allCases) { choice in Text(choice.displayName).tag(choice) }
+                        }
+                        if let disclosure = controller.routeDisclosure(.transcription) {
+                            Text(disclosure).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Picker("Cleanup", selection: $controller.cleanupChoice) {
+                        ForEach(CleanupChoice.allCases) { choice in Text(choice.displayName).tag(choice) }
+                    }
+                    if controller.cleanupChoice == .localServer {
+                        placeholderField("Server address, e.g. \(RouteSettings.defaultServerURL)", text: $controller.localServerURL)
+                        HStack(spacing: 8) {
+                            placeholderField("Model name", text: $controller.localServerModel)
+                            Button("Find Models", action: controller.findLocalModels).disabled(controller.findingModels)
+                        }
+                        if !controller.localServerModels.isEmpty {
+                            Picker("Found models", selection: $controller.localServerModel) {
+                                ForEach(controller.localServerModels, id: \.self) { model in Text(model).tag(model) }
+                            }
+                        }
+                        if !controller.localServerMessage.isEmpty {
+                            Text(controller.localServerMessage).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if controller.cleanupChoice != .localRules, let disclosure = controller.routeDisclosure(.cleanup) {
+                        Text(disclosure).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text("Routes take effect on Apply Settings, which first shows what leaves this Mac. Murmur never falls back to another route: if a provider fails, your audio or raw transcript stays here.")
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                } header: { Text("Processing routes") }
+
+                Section {
+                    keyRow(.gemini, text: $geminiKey)
+                    keyRow(.openrouter, text: $openrouterKey)
+                    keyRow(.localServer, text: $serverKey)
+                    Text("Keys are stored in your Keychain and shown only as saved. The local model server key is optional.")
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                } header: { Text("API keys") }
 
                 Section {
                     Toggle("Remove filler words", isOn: $controller.cleanupFillers)
@@ -185,7 +234,7 @@ struct SettingsView: View {
                         Button("Faithful Transcription", action: controller.useFaithfulTranscription)
                             .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists)
                     }
-                    Text("Cleanup runs on this Mac. If it fails or changes too much, Murmur keeps the raw transcript in History and does not insert it.")
+                    Text((controller.appliedCleanupIsLocal ? "Cleanup runs on this Mac." : "Cleanup uses the provider chosen under Processing routes.") + " If it fails or changes too much, Murmur keeps the raw transcript in History and does not insert it.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Cleanup") }
 
@@ -326,6 +375,29 @@ struct SettingsView: View {
             }
     }
 
+    private func keyRow(_ provider: ProviderID, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(provider.displayName)
+                Spacer()
+                Text(controller.savedKeys.contains(provider) ? KeyText.saved : KeyText.none)
+                    .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+            }
+            HStack(spacing: 8) {
+                SecureField("", text: text).accessibilityLabel("\(provider.displayName) API key")
+                Button("Save") { if controller.saveKey(provider, text.wrappedValue) { text.wrappedValue = "" } }
+                    .disabled(text.wrappedValue.isEmpty)
+                Button("Validate") { controller.validateKey(provider) }
+                    .disabled(!controller.savedKeys.contains(provider) && provider != .localServer)
+                Button("Remove", role: .destructive) { controller.removeKey(provider) }
+                    .disabled(!controller.savedKeys.contains(provider))
+            }
+            if let message = controller.keyMessages[provider], !message.isEmpty {
+                Text(message).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private func permissionRow(_ title: String, allowed: Bool, actionTitle: String, action: @escaping () -> Void) -> some View {
         HStack(spacing: 12) {
             Label(title, systemImage: allowed ? "checkmark.circle" : "exclamationmark.circle")
@@ -454,6 +526,7 @@ struct SettingsView: View {
         case "unverified", "insertion-pending": return "Delivery uncertain · text saved"
         case "failed": return "Could not insert · text saved"
         case "held-cleanup": return "Cleanup held · raw text saved"
+        case "held-transcript": return "Transcript held for review · raw text saved"
         default: return "Saved · not inserted"
         }
     }
@@ -463,7 +536,7 @@ struct SettingsView: View {
         case "verified": return "checkmark.circle"
         case "unverified", "insertion-pending": return "questionmark.circle"
         case "failed": return "exclamationmark.circle"
-        case "held-cleanup": return "pause.circle"
+        case "held-cleanup", "held-transcript": return "pause.circle"
         default: return "tray"
         }
     }
