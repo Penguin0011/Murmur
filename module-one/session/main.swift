@@ -1,4 +1,5 @@
 import Foundation
+import ApplicationServices
 import Darwin
 
 func sessionCheck() throws {
@@ -33,6 +34,27 @@ func sessionCheck() throws {
     empty.receive(.start) {}; let emptyURL = empty.audio!
     empty.receive(.finish) {}; assert(!FileManager.default.fileExists(atPath: emptyURL.path) && empty.state == .idle)
 
+    var attempts = 0
+    let retry = CaptureSession(store: store, start: { _ in
+        attempts += 1
+        if attempts == 1 { throw CaptureError("synthetic failed start") }
+    }, stop: { true }, process: { _, done in done() })
+    let listener = ShortcutListener(binding: .controlOptionSpace, processingSeconds: 0,
+        onAction: { action, done in retry.receive(action, completed: done) })
+    retry.resetShortcut = { listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
+    func queue(_ type: CGEventType, key: CGKeyCode, time: UInt64, flags: CGEventFlags = []) {
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: key, keyDown: type == .keyDown)!
+        event.flags = flags; event.timestamp = time
+        listener.enqueue(type: type, event: event)
+    }
+    queue(.keyDown, key: 49, time: 1, flags: [.maskControl, .maskAlternate])
+    queue(.keyDown, key: 53, time: 2)
+    queue(.keyUp, key: 49, time: 3)
+    queue(.keyDown, key: 49, time: 4, flags: [.maskControl, .maskAlternate])
+    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    assert(attempts == 2 && retry.state == .listening && listener.machine.state == .listening)
+    assert(FileManager.default.fileExists(atPath: retry.audio!.path))
+    retry.shutdown()
     print("session-check=passed tap hold processing-guard cancellation event-loss shutdown startup-failure")
 }
 
@@ -98,7 +120,10 @@ func runSession() throws {
             session.finishRecording?()
         }
     }
-    defer { monitor.invalidate(); interrupt.cancel(); terminate.cancel(); session.shutdown(); processorTask?.terminate() }
+    let expiry = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+        do { try store.purge() } catch { fputs("retry-audio=purge-failed\n", stderr) }
+    }
+    defer { expiry.invalidate(); monitor.invalidate(); interrupt.cancel(); terminate.cancel(); session.shutdown(); processorTask?.terminate() }
     try runShortcutListener(arguments: args, onAction: { action, done in session.receive(action, completed: done) }, onReady: { finish, reset in session.finishRecording = finish; session.resetShortcut = reset }, onShutdown: { session.shutdown() })
 }
 do { try runSession() } catch { fputs("\(error)\n", stderr); exit(1) }

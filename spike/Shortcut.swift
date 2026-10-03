@@ -61,7 +61,7 @@ struct ShortcutMachine {
     }
 }
 
-private enum ShortcutBinding {
+enum ShortcutBinding {
     case rightOption, fn, controlOptionSpace
     var keyCode: Int64 {
         switch self { case .rightOption: return 61; case .fn: return 63; case .controlOptionSpace: return 49 }
@@ -78,7 +78,7 @@ private enum ShortcutBinding {
     }
 }
 
-private final class ShortcutListener {
+final class ShortcutListener {
     var machine = ShortcutMachine()
     var tap: CFMachPort?
     let binding: ShortcutBinding
@@ -94,10 +94,7 @@ private final class ShortcutListener {
         print("shortcut action=\(action.rawValue) state=\(machine.state.rawValue)")
         fflush(stdout)
         if let onAction {
-            // Event taps must return promptly; serial main delivery preserves start/stop ordering.
-            DispatchQueue.main.async { [self] in
-                onAction(action) { [self] in machine.processingFinished() }
-            }
+            onAction(action) { [self] in machine.processingFinished() }
         } else if action == .finish {
             // ponytail: simulated processing only; wire real completion in the recording milestone.
             DispatchQueue.main.asyncAfter(deadline: .now() + processingSeconds) { [self] in
@@ -105,6 +102,11 @@ private final class ShortcutListener {
                 print("shortcut state=\(machine.state.rawValue)")
             }
         }
+    }
+    func enqueue(type: CGEventType, event: CGEvent) {
+        // Copy the borrowed event; defer the entire mutation/action pair together.
+        guard let copy = event.copy() else { return }
+        DispatchQueue.main.async { [self] in receive(type: type, event: copy) }
     }
     func receive(type: CGEventType, event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
@@ -175,7 +177,7 @@ func runShortcutListener(arguments: [String],
     listener.tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
         options: .listenOnly, eventsOfInterest: mask, callback: { _, type, event, context in
             if let context {
-                Unmanaged<ShortcutListener>.fromOpaque(context).takeUnretainedValue().receive(type: type, event: event)
+                Unmanaged<ShortcutListener>.fromOpaque(context).takeUnretainedValue().enqueue(type: type, event: event)
             }
             return Unmanaged.passUnretained(event)
         }, userInfo: Unmanaged.passUnretained(listener).toOpaque())
