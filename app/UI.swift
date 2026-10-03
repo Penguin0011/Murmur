@@ -147,9 +147,6 @@ struct SettingsView: View {
                         Text("Six months").tag("six-months")
                         Text("Forever").tag("forever")
                     }
-                    Toggle("Minimal transcription display", isOn: $controller.minimalTranscriptionDisplay)
-                    Text("Show voice-reactive bubbles instead of status details. Errors and recovery actions remain visible.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     Toggle("Show menu bar icon", isOn: $controller.showMenuBar)
                     Text("When hidden, reopen Dictation from Finder or Spotlight.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
@@ -321,8 +318,8 @@ struct SettingsView: View {
     }
 }
 
-func usesMinimalTranscriptionDisplay(_ enabled: Bool, phase: String, message: String) -> Bool {
-    enabled && ["Listening", "Processing", "Inserted"].contains(phase) && !message.localizedCaseInsensitiveContains("unverified")
+func showsFloatingIndicator(phase: String) -> Bool {
+    ["Listening", "Processing", "Error"].contains(phase)
 }
 
 private struct VoiceBubbles: View {
@@ -331,18 +328,18 @@ private struct VoiceBubbles: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         TimelineView(.animation(minimumInterval: 0.15, paused: phase != "Processing" || reduceMotion)) { context in
-            HStack(spacing: 7) {
+            HStack(spacing: 5) {
                 ForEach(0..<5) { index in
                     let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 4 - Double(index)) + 1) / 2
                     let level = phase == "Listening" ? controller.voiceLevel : phase == "Processing" ? (reduceMotion ? 0.35 : pulse * 0.45) : 0.15
                     Circle().fill(Color.accentColor)
-                        .frame(width: 10 + level * Double(index == 2 ? 20 : 14), height: 10 + level * Double(index == 2 ? 20 : 14))
+                        .frame(width: 6 + level * Double(index == 2 ? 12 : 8), height: 6 + level * Double(index == 2 ? 12 : 8))
                 }
             }
-            .frame(width: 136, height: 36)
+            .frame(width: 80, height: 24)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: controller.voiceLevel)
         }
-        .padding(12).modifier(UtilityGlass(radius: 24))
+        .padding(8).modifier(UtilityGlass(radius: 20))
         .accessibilityElement(children: .ignore).accessibilityLabel(phase)
         .help(phase == "Listening" ? "Release or tap the shortcut to finish. Escape cancels." : phase)
     }
@@ -350,65 +347,30 @@ private struct VoiceBubbles: View {
 
 private struct BubbleView: View {
     @ObservedObject var controller: AppController
-    let phase: String
     let message: String
 
-    private var recovery: Bool { phase == "Saved" || phase == "Error" || message.localizedCaseInsensitiveContains("unverified") }
-    private var symbol: String {
-        switch phase {
-        case "Listening": return "mic.fill"
-        case "Processing": return "waveform"
-        case "Inserted": return "checkmark.circle.fill"
-        case "Error": return "exclamationmark.triangle"
-        default: return "text.bubble"
-        }
+    private var summary: String {
+        message.components(separatedBy: ". ").first ?? "Dictation failed."
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: symbol).font(.title2).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(phase).font(.headline)
-                    if !message.isEmpty {
-                        Text(message).font(.callout).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Spacer(minLength: 8)
-                if !controller.isBusy {
-                    Button(action: controller.dismissStatus) { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).help("Dismiss status").accessibilityLabel("Dismiss status")
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityHidden(true)
+                Text(summary).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+                    .help(message)
+                Spacer(minLength: 4)
+                Button(action: controller.dismissStatus) { Image(systemName: "xmark") }
+                    .buttonStyle(.plain).help("Dismiss error").accessibilityLabel("Dismiss error")
             }
-            if phase == "Listening" {
-                HStack(spacing: 12) {
-                    Button("Stop", action: controller.stopRecording).buttonStyle(.borderedProminent)
-                    Button("Cancel", action: controller.cancelRecording).buttonStyle(.bordered)
-                }
-            } else if recovery {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { recoveryActions }
-                    VStack(alignment: .leading, spacing: 8) { recoveryActions }
-                }
-                .buttonStyle(.bordered)
+            HStack(spacing: 8) {
+                Button("Details…", action: controller.showSettings)
+                if controller.hasRecoveryAudio { Button("Audio…", action: controller.revealRecoveryAudio) }
             }
+            .buttonStyle(.bordered).controlSize(.small)
         }
-        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .modifier(UtilityGlass(radius: 24))
-    }
-
-    @ViewBuilder private var recoveryActions: some View {
-        if let entry = controller.history.first(where: { $0.id == controller.recoveryEntryID }) {
-            Button("Copy Text") { controller.copyEntry(entry) }
-        }
-        Button("History") {
-            controller.showSettings()
-            DispatchQueue.main.async { NotificationCenter.default.post(name: .dictationShowHistory, object: nil) }
-        }
-        if phase == "Error" {
-            Button("Settings", action: controller.showSettings)
-            if controller.hasRecoveryAudio { Button("Recovery Audio", action: controller.revealRecoveryAudio) }
-        }
+        .modifier(UtilityGlass(radius: 18))
     }
 }
 
@@ -435,13 +397,14 @@ final class BubblePresenter {
     }
 
     func show(phase: String, message: String, screen: NSScreen? = nil) {
+        guard showsFloatingIndicator(phase: phase) else { hide(); return }
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-        let minimal = usesMinimalTranscriptionDisplay(controller.minimalTranscriptionDisplay, phase: phase, message: message)
-        let width = minimal ? 160 : min(560, max(280, frame.width - 32))
-        let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase)) : AnyView(BubbleView(controller: controller, phase: phase, message: message))
+        let minimal = phase != "Error"
+        let width = minimal ? 96 : min(320, max(240, frame.width - 32))
+        let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase)) : AnyView(BubbleView(controller: controller, message: message))
         let host = NSHostingView(rootView: content.frame(width: width))
         panel.contentView = host
-        let height = max(host.fittingSize.height, 70)
+        let height = host.fittingSize.height
         panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.minY + 24, width: width, height: height), display: true)
         panel.orderFrontRegardless()
     }

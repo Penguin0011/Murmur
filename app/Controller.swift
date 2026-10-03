@@ -13,7 +13,6 @@ import Darwin
     @Published var recoveryEntryID: String?
     @Published var modelDirectory: String
     @Published var shortcut: String
-    @Published var minimalTranscriptionDisplay: Bool
     @Published var voiceLevel = 0.0
     @Published var showMenuBar: Bool
     @Published var permissionsSummary = ""
@@ -46,7 +45,6 @@ import Darwin
     private var runnerOutput: URL?
     private var recordingFailed = false
     private var generation = UUID()
-    private var hideGeneration = UUID()
     private var appliedRetention: String
     private var activeModelDirectory = ""
     private var listeningStarted = Date()
@@ -78,7 +76,6 @@ import Darwin
         let defaults = UserDefaults.standard
         modelDirectory = defaults.string(forKey: "modelDirectory") ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/Dictation/module-one/unified-d32e972").path
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
-        minimalTranscriptionDisplay = defaults.bool(forKey: "minimalTranscriptionDisplay")
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
@@ -162,7 +159,6 @@ import Darwin
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion")
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(retention, forKey: "retention")
-        defaults.set(minimalTranscriptionDisplay, forKey: "minimalTranscriptionDisplay")
         do { try store?.purge(retention: appliedRetention); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }; updateMenu?()
     }
@@ -247,12 +243,8 @@ import Darwin
     private func setPhase(_ phase: String, _ message: String) {
         self.phase = phase; self.message = message
         refreshRecoveryAudio()
-        hideGeneration = UUID(); updateMenu?()
-        if phase != "Ready" { bubble.show(phase: phase, message: message, screen: destinationScreen) }
-        if phase == "Inserted" {
-            let token = hideGeneration
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { [weak self] in guard self?.hideGeneration == token else { return }; self?.bubble.hide() }
-        }
+        updateMenu?()
+        bubble.show(phase: phase, message: message, screen: destinationScreen)
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
     private func transcribe(_ audio: URL, done: @escaping () -> Void) {
@@ -361,7 +353,7 @@ import Darwin
             setPhase("Ready", "Hold your configured shortcut to dictate, or tap to start and tap again to finish.")
         } else {
             phase = "Error"; message = "Private storage is unavailable. Dictation cannot start."
-            hideGeneration = UUID(); updateMenu?()
+            updateMenu?()
         }
         bubble.hide()
     }

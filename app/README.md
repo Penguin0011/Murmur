@@ -11,11 +11,11 @@ The bundle uses the pinned local ModelBench helper. Model download, cleanup, clo
 
 ## Recovery and interface
 
-Idle errors and saved-output bubbles have a Dismiss control. Dismissal hides status without deleting history or retry audio; it is unavailable while recording or processing. Storage failure remains an error rather than claiming the app is ready. [Certain]
+Idle errors have a Dismiss control. Dismissal hides status without deleting history or retry audio; it is unavailable while recording or processing. Storage failure remains an error rather than claiming the app is ready. [Certain]
 
 Settings show the current state above the scrollable form, model file availability, individual permission rows, and an always-visible Apply Settings button. Model availability checks file sizes; full checksums are verified before inference. History supports search, delivery status, initial selection, and recovery-entry selection. [Certain]
 
-Enable **Minimal transcription display** and apply settings to replace normal status details with compact voice-reactive bubbles. Listening follows microphone level, processing pulses, and completion briefly remains visible. Errors and saved-text recovery retain their details and actions; shortcut finish/cancel behavior remains available. The option defaults off and is saved locally. [Certain]
+Recording and processing use a compact 96-point voice indicator by default. Saved output and successful insertion show no popup; delivery status remains in History. Only errors show a compact message with Details and, when recovery audio exists, Audio. Full error text is available in settings and the message tooltip. [Certain]
 
 Corrupt or mismatched history files produce an error and prevent retention from silently skipping data; corruption at startup currently blocks dictation. Automatic repair/quarantine is not implemented. [Certain]
 
@@ -47,9 +47,9 @@ app/check_ui.sh
 app/check_ui.sh --light
 app/check_ui.sh --light --compact --opaque
 app/check_ui.sh --bubble-only
-app/check_ui.sh --minimal --bubble-only
-app/check_ui.sh --minimal --processing --bubble-only
-app/check_ui.sh --minimal --error --bubble-only
+app/check_ui.sh --listening --bubble-only
+app/check_ui.sh --processing --bubble-only
+app/check_ui.sh --saved --bubble-only
 ```
 
 The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]

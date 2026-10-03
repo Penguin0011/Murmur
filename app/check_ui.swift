@@ -36,9 +36,8 @@ import SwiftUI
         DispatchQueue.main.async {
             controller.history = entries
             controller.recoveryEntryID = entries[0].id
-            controller.minimalTranscriptionDisplay = CommandLine.arguments.contains("--minimal")
             controller.voiceLevel = 0.6
-            controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : controller.minimalTranscriptionDisplay && !CommandLine.arguments.contains("--error") ? "Listening" : "Error"
+            controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
             controller.message = "Model verification failed. Choose the pinned model folder."
             controller.bubble.show(phase: controller.phase, message: controller.message)
             if CommandLine.arguments.contains("--bubble-only") { window.orderOut(nil) }

@@ -29,12 +29,8 @@ import AppKit
         print("Controller probe ownership checks passed (multi-buffer copy, private mode, original preserved, failed-copy cleanup).")
     }
     @MainActor static func checkDismissal() throws {
-        for phase in ["Listening", "Processing", "Inserted"] {
-            precondition(usesMinimalTranscriptionDisplay(true, phase: phase, message: "normal"))
-            precondition(!usesMinimalTranscriptionDisplay(false, phase: phase, message: "normal"))
-        }
-        for phase in ["Error", "Saved", "Ready"] { precondition(!usesMinimalTranscriptionDisplay(true, phase: phase, message: "normal")) }
-        precondition(!usesMinimalTranscriptionDisplay(true, phase: "Inserted", message: "unverified"))
+        for phase in ["Listening", "Processing", "Error"] { precondition(showsFloatingIndicator(phase: phase)) }
+        for phase in ["Saved", "Inserted", "Ready"] { precondition(!showsFloatingIndicator(phase: phase)) }
         func spaced(_ text: String, _ value: String?, _ location: Int, _ length: Int = 0, _ enabled: Bool = true) -> String {
             textWithLeadingSpace(text, value: value, selection: CFRange(location: location, length: length), enabled: enabled)
         }

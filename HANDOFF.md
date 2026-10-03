@@ -1,3 +1,9 @@
+# Compact indicators — October 2, 2026
+
+User superseded the optional minimal display: compact voice indicators are now the default (96 points), with no Saved or Inserted popup. Only errors show short messages and Details/conditional Audio actions. Full status remains in settings and History. The prior minimal-display preference is ignored; leading-space settings remain available. [Certain]
+
+---
+
 # Intelligent leading-space checkpoint — October 2, 2026
 
 Added a default-off, locally persisted leading-space toggle. The setting is captured at recording start; spacing uses the original destination context before the existing single-attempt safety check. Raw history remains unchanged, and final history records insertion text. Deterministic checks cover whitespace, punctuation, selection, word interiors, unavailable/invalid context, and UTF-16 emoji boundaries. Live target-app insertion remains unverified. [Certain]

@@ -29,7 +29,7 @@
       "materials": {
         "utility": "glassEffect(.regular, in: RoundedRectangle)",
         "button": "glass / glassProminent",
-        "bubbleButtons": "bordered / borderedProminent",
+        "bubbleButtons": "bordered, small control size",
         "fallback": "windowBackgroundColor; bordered / borderedProminent",
         "fallbackCondition": "utilityOpaquePreview || accessibilityReduceTransparency || colorSchemeContrast == .increased",
         "previewOverride": "utilityOpaquePreview supplied only by synthetic fixture; does not modify system accessibility preferences"
@@ -43,8 +43,7 @@
         },
         "historyDetailMinimumPoints": 300,
         "glassContainerSpacingPoints": 12,
-        "bubbleWidth": "min(560, max(280, screen.visibleFrame.width - 32))",
-        "bubbleMinimumHeightPoints": 70,
+        "bubbleWidth": "96pt live; min(320, max(240, screen.visibleFrame.width - 32)) error",
         "bubbleBottomOffsetPoints": 24,
         "windowContentMinimumPoints": [
           700,

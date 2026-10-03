@@ -3,7 +3,7 @@ name: Dictation
 description: Native macOS Liquid Glass utility
 rounded:
   utility: "18pt"
-  bubble: "24pt"
+  bubble: "20pt live / 18pt error"
 spacing:
   compact: "4pt"
   related: "8pt"
@@ -39,7 +39,7 @@ Use SwiftUI's system roles: largeTitle with semibold weight for the window title
 
 The window uses a transparent titlebar with its native title hidden, a header, and native tab navigation above Settings/History. Settings separates persistent status and actions from its scrollable grouped form. History separates search, master/detail content, transcript actions, and refresh/delete controls. Content insets and spacing use the frontmatter scale; list/detail dimensions remain native extension values. [Certain]
 
-The bubble is centered above the destination display's bottom edge. Its message wraps; recovery controls switch from a horizontal row to a vertical stack when space is insufficient. [Certain]
+The bubble is centered above the destination display's bottom edge. Live indicators contain only circles. Error summaries wrap above compact Details and conditional Audio controls; saved/success states have no floating surface. [Certain]
 
 ## Elevation & Depth
 
@@ -73,6 +73,6 @@ Utility surfaces and the bubble use the frontmatter radii. Buttons, tabs, lists,
 
 Implementation values are extracted from app/UI.swift and app/main.swift. Integrated source compilation passed. The lead captured the dark floating bubble and clicked its native Dismiss control; the fixture asserted that synthetic recovery history remained. Light, dark, and forced opaque compact captures were reviewed. The scoped contrast review resolved its findings; the explicit search placeholder overlay measures approximately 5.8:1 in the captured light appearance. These checks do not establish real destination focus, physical recording, or live insertion behavior. [Certain]
 
-## Minimal transcription display
+## Compact floating indicators
 
-An optional, default-off setting replaces normal floating status details with a 160-point glass panel containing five circles. Listening scales the circles from microphone level; processing uses a pulse that becomes static with Reduce Motion. The phase remains an accessibility label. Error and saved-output recovery retain the detailed panel and actions. Finish/cancel use the configured shortcut in minimal mode. [Certain]
+Recording and processing always use a 96-point glass panel containing five voice-reactive circles. Processing becomes static with Reduce Motion. The phase remains an accessibility label; the shortcut controls finish/cancel. Saved output and successful insertion hide the panel. Error messages use a 320-point maximum panel, a short summary, Dismiss, Details, and conditional Audio. Settings retain full error details; History retains delivery results and copy controls. [Certain]
