@@ -707,6 +707,10 @@ final class PreStart: @unchecked Sendable {
         // A held result keeps only the raw transcript and is never inserted.
         guard case .insert(let processed) = outcome else {
             let reason = processing?.lastProviderError.map { " " + $0.userMessage } ?? ""
+            // Content-free: the guard's category, never the text.
+            if case .heldForRecovery(_, let why) = outcome {
+                timingLog.notice("cleanup-held reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError != nil, privacy: .public)")
+            }
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
             do { try store.save(entry); setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History.") }
             catch { setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History; its status could not be saved.") }
