@@ -8,6 +8,9 @@ swiftc -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/spike/Shortcut.swift" "$project_root/spike/Insertion.swift" \
   "$project_root/module-one/capture/Capture.swift" "$project_root/module-one/session/Session.swift" \
   "$project_root/app/History.swift" "$project_root/app/Controller.swift" \
+  "$project_root/app/Cleanup.swift" "$project_root/app/Dictionary.swift" "$project_root/app/Learning.swift" \
+  "$project_root/app/Retention.swift" "$project_root/app/Providers.swift" "$project_root/app/Credentials.swift" \
+  "$project_root/app/Processing.swift" \
   "$project_root/app/UI.swift" "$project_root/app/check_ui.swift" \
   -o "$fixture_path/Contents/MacOS/UIQA"
 cp "$project_root/app/Info.plist" "$fixture_path/Contents/Info.plist"

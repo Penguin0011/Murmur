@@ -25,12 +25,21 @@ import Darwin
     @Published var intelligentLeadingSpace: Bool
     @Published var automaticInsertion: Bool
     @Published var retention: String
+    // Cleanup and learning settings, saved by Apply Settings like the others.
+    @Published var cleanupFillers: Bool
+    @Published var cleanupCorrections: Bool
+    @Published var cleanupLists: Bool
+    @Published var learningEnabled: Bool
+    // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
+    @Published var dictionaryEntries: [DictionaryEntry] = []
+    @Published var dictionaryMessage = ""
     var isBusy: Bool { phase == "Listening" || phase == "Processing" || (sessionAvailable && session.state != .idle) }
     var openSettings: (() -> Void)?
     var updateMenu: (() -> Void)?
     lazy var bubble = BubblePresenter(controller: self)
     private var store: HistoryStore?
     private var retry: RetryAudio?
+    private var processing: ProcessingCoordinator?
     private var capture: Capture?
     private var destination: FocusSnapshot?
     private var destinationScreen: NSScreen?
@@ -82,6 +91,11 @@ import Darwin
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
+        let processingSettings = ProcessingSettings.load(from: defaults)
+        cleanupFillers = processingSettings.options.fillers
+        cleanupCorrections = processingSettings.options.corrections
+        cleanupLists = processingSettings.options.lists
+        learningEnabled = processingSettings.learningEnabled
         self.preview = preview
         let isolatedStorage = isolatedStorage ?? preview
         do {
@@ -89,14 +103,15 @@ import Darwin
             if isolatedStorage { previewDirectory = base }
             store = try HistoryStore(directory: base.appendingPathComponent("history"))
             retry = try RetryAudio(directory: base.appendingPathComponent("retry-audio"))
+            processing = try ProcessingCoordinator(directory: base.appendingPathComponent("dictionary"))
             if let retry {
                 for file in try FileManager.default.contentsOfDirectory(at: retry.directory, includingPropertiesForKeys: nil) where file.lastPathComponent.hasPrefix(".result-") {
                     try FileManager.default.removeItem(at: file)
                 }
             }
             try store?.purge(retention: appliedRetention)
-            refreshHistory(); refreshRecoveryAudio()
-        } catch { store = nil; retry = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
+            refreshHistory(); refreshRecoveryAudio(); refreshDictionary()
+        } catch { store = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
     }
     func start() {
         refreshPermissions()
@@ -168,6 +183,12 @@ import Darwin
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion")
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(retention, forKey: "retention")
+        if let processing {
+            var next = processing.settings
+            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists)
+            next.learningEnabled = learningEnabled
+            do { try processing.update(next) } catch { setPhase("Error", "Could not save cleanup and learning settings.") }
+        }
         do { try store?.purge(retention: appliedRetention); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }; updateMenu?()
     }
@@ -247,7 +268,8 @@ import Darwin
     private func setPhase(_ phase: String, _ message: String) {
         self.phase = phase; self.message = message
         // Errors raised while processing leave that session's audio retained for retry.
-        recoveryAudio = phase == "Error" && sessionAvailable && session.state == .processing ? session.audio : nil
+        // Audio already deleted after a usable transcript (e.g. a held cleanup) is not offered.
+        recoveryAudio = phase == "Error" && sessionAvailable && session.state == .processing ? session.audio.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil } : nil
         refreshRecoveryAudio()
         updateMenu?()
         bubble.show(phase: phase, message: message, screen: destinationScreen)
@@ -298,16 +320,32 @@ import Darwin
                     self.runner = nil; self.runnerOutput = nil
                     var entry = savedEntry
                     self.recoveryEntryID = entry.id
+                    // Dictionary, then cleanup. A held result keeps only the raw transcript and is never inserted.
+                    let outcome = self.processing?.process(text) ?? .heldForRecovery(raw: text, reason: .cleanerFailed)
+                    guard case .insert(let processed) = outcome else {
+                        entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
+                        do { try store.save(entry); self.setPhase("Error", "Cleanup was held for review. The raw transcript is in History.") }
+                        catch { self.setPhase("Error", "Cleanup was held for review. The raw transcript is in History; its status could not be saved.") }
+                        self.destination = nil; self.refreshHistory(); done(); return
+                    }
+                    if processed != text {
+                        entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus)
+                        do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); self.destination = nil; self.refreshHistory(); done(); return }
+                    }
                     if self.insertThisSession, self.focusStable, let destination = self.destination {
                         // Persist uncertainty before the one permitted delivery attempt.
-                        let insertionText = textWithLeadingSpace(text, value: destination.value, selection: destination.selection, enabled: self.leadingSpaceThisSession)
+                        let insertionText = textWithLeadingSpace(processed, value: destination.value, selection: destination.selection, enabled: self.leadingSpaceThisSession)
                         entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
                         do {
                             try store.save(entry)
                             let insertion = insertText(entry.finalText, into: destination, policy: .singleAttempt)
                             entry.insertionStatus = insertion.status.rawValue
                             try store.save(entry)
-                            self.setPhase(insertion.status == .verified ? "Inserted" : "Saved", insertion.status == .verified ? "Inserted." : "Saved in History. Delivery could not be verified; no retry was attempted.")
+                            switch insertion.status {
+                            case .verified: self.setPhase("Inserted", "Inserted.")
+                            case .unverified: self.setPhase("Saved", "Saved in History. Delivery could not be verified; no retry was attempted.")
+                            case .failed: self.setPhase("Saved", "Saved in History. The text could not be inserted into this field, so nothing was typed.")
+                            }
                         } catch { self.setPhase("Saved", "Saved in History. Insertion status could not be saved.") }
                     } else { self.setPhase("Saved", "Saved in History. The destination changed or automatic insertion is off.") }
                     self.destination = nil; self.refreshHistory(); done()
@@ -347,6 +385,33 @@ import Darwin
         catch { message = "Could not read saved history." }
     }
     func copyEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.finalText, forType: .string) }
+    /// The explicit raw-text action for held cleanup (and any entry whose final text differs).
+    func copyRawEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.rawText, forType: .string) }
+    /// Turns all three cleanup options off. Like other settings, it takes effect on Apply Settings.
+    func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false }
+    func refreshDictionary() { dictionaryEntries = processing?.dictionary.entries ?? [] }
+    @discardableResult
+    func addDictionaryEntry(preferred: String, variants: String) -> Bool {
+        guard let processing else { dictionaryMessage = "The dictionary is unavailable."; return false }
+        do { try processing.addEntry(preferred: preferred, variants: variants); dictionaryMessage = ""; refreshDictionary(); return true }
+        catch { dictionaryMessage = (error as? DictionaryError)?.description ?? "Could not save the dictionary."; return false }
+    }
+    func deleteDictionaryEntry(_ entry: DictionaryEntry) {
+        do { try processing?.deleteEntry(id: entry.id); dictionaryMessage = "" } catch { dictionaryMessage = "Could not delete this dictionary entry." }
+        refreshDictionary()
+    }
+    func resetLearnedEntries() {
+        let alert = NSAlert(); alert.messageText = "Reset learned dictionary entries?"
+        alert.informativeText = "This removes every learned entry and all learning evidence. Entries you added stay."
+        alert.addButton(withTitle: "Reset Learned"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do { try processing?.resetLearned(); dictionaryMessage = "" } catch { dictionaryMessage = "Could not reset learned entries." }
+        refreshDictionary()
+    }
+    // TODO(observation): automatic post-insertion observation is not wired in. The spike's
+    // Observation.swift is not part of the app; when it is, feed attributed corrections to
+    // processing?.observe(_:) during the window and processing?.settle(sessionID:) when it closes,
+    // then refreshDictionary(). Learning must stay off for fields where learningEligible is false.
     func deleteEntry(_ entry: HistoryEntry) { do { try store?.delete(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
     func clearHistory() {
         let alert = NSAlert(); alert.messageText = "Delete all saved transcripts?"; alert.informativeText = "This cannot be undone."

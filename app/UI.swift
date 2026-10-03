@@ -53,6 +53,8 @@ struct SettingsView: View {
     @State private var selectedTab = 0
     @State private var selectedID: String?
     @State private var searchText = ""
+    @State private var newPreferred = ""
+    @State private var newVariants = ""
 
     var body: some View {
         VStack(spacing: 18) {
@@ -133,9 +135,65 @@ struct SettingsView: View {
                         Spacer()
                         Button("Choose Folder…", action: controller.chooseModelDirectory)
                     }
-                    Text("Parakeet runs locally. This build requires a downloaded model; model downloads, cloud transcription, and text cleanup are not available yet.")
+                    Text("Parakeet runs locally. This build requires a downloaded model; model downloads and cloud transcription are not available yet.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Recording") }
+
+                Section {
+                    Toggle("Remove filler words", isOn: $controller.cleanupFillers)
+                    Toggle("Apply spoken corrections", isOn: $controller.cleanupCorrections)
+                    Toggle("Format spoken lists", isOn: $controller.cleanupLists)
+                    HStack(spacing: 16) {
+                        Text("Each option works on its own. Faithful transcription turns all three off; dictionary spellings still apply.")
+                            .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                        Spacer()
+                        Button("Faithful Transcription", action: controller.useFaithfulTranscription)
+                            .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists)
+                    }
+                    Text("Cleanup runs on this Mac. If it fails or changes too much, Murmur keeps the raw transcript in History and does not insert it.")
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                } header: { Text("Cleanup") }
+
+                Section {
+                    Toggle("Learn from my corrections", isOn: $controller.learningEnabled)
+                    Text("Automatic learning from edits is not available in this build yet. Learned entries keep applying until you delete or reset them.")
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                    ForEach(controller.dictionaryEntries) { entry in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.preferred)
+                                if !entry.variants.isEmpty {
+                                    Text(entry.variants.joined(separator: ", ")).font(.caption).foregroundStyle(Color.primary.opacity(0.72)).lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            Text(entry.source == .learned ? "Learned" : "Manual")
+                                .font(.caption).foregroundStyle(Color.primary.opacity(0.72))
+                                .padding(.horizontal, 8).padding(.vertical, 2)
+                                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                            Button { controller.deleteDictionaryEntry(entry) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.plain).help("Delete \(entry.preferred)").accessibilityLabel("Delete \(entry.preferred)")
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        placeholderField("Preferred spelling", text: $newPreferred)
+                        placeholderField("Heard as, comma-separated", text: $newVariants)
+                        Button("Add") {
+                            if controller.addDictionaryEntry(preferred: newPreferred, variants: newVariants) { newPreferred = ""; newVariants = "" }
+                        }
+                        .disabled(newPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    if !controller.dictionaryMessage.isEmpty {
+                        Text(controller.dictionaryMessage).font(.callout).foregroundStyle(Color.orange)
+                    }
+                    HStack {
+                        Text("Dictionary spellings apply in every mode. Edits save immediately.")
+                            .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                        Spacer()
+                        Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries)
+                            .disabled(!controller.dictionaryEntries.contains { $0.source == .learned })
+                    }
+                } header: { Text("Dictionary and learning") }
 
                 Section {
                     Toggle("Insert into the original text field", isOn: $controller.automaticInsertion)
@@ -178,6 +236,17 @@ struct SettingsView: View {
             }
         }
         .padding(.top, 14)
+    }
+
+    private func placeholderField(_ title: String, text: Binding<String>) -> some View {
+        TextField("", text: text)
+            .accessibilityLabel(title)
+            .overlay(alignment: .leading) {
+                if text.wrappedValue.isEmpty {
+                    Text(title).foregroundStyle(Color.primary.opacity(0.72)).padding(.leading, 4)
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }
     }
 
     private func permissionRow(_ title: String, allowed: Bool, actionTitle: String, action: @escaping () -> Void) -> some View {
@@ -256,8 +325,14 @@ struct SettingsView: View {
                             }
                             GlassEffectContainer(spacing: 12) {
                                 HStack(spacing: 12) {
-                                    Button { controller.copyEntry(entry) } label: { Label("Copy Text", systemImage: "doc.on.doc").foregroundStyle(.white) }
-                                        .modifier(UtilityButton(prominent: true))
+                                    if !entry.finalText.isEmpty {
+                                        Button { controller.copyEntry(entry) } label: { Label("Copy Text", systemImage: "doc.on.doc").foregroundStyle(.white) }
+                                            .modifier(UtilityButton(prominent: true))
+                                    }
+                                    if entry.rawText != entry.finalText {
+                                        Button { controller.copyRawEntry(entry) } label: { Label("Copy Raw", systemImage: "doc.on.clipboard") }
+                                            .modifier(UtilityButton())
+                                    }
                                     Spacer()
                                     Button("Delete", role: .destructive) { controller.deleteEntry(entry) }
                                         .modifier(UtilityButton())
@@ -298,6 +373,7 @@ struct SettingsView: View {
         case "verified": return "Inserted and verified"
         case "unverified", "insertion-pending": return "Delivery uncertain · text saved"
         case "failed": return "Could not insert · text saved"
+        case "held-cleanup": return "Cleanup held · raw text saved"
         default: return "Saved · not inserted"
         }
     }
@@ -307,6 +383,7 @@ struct SettingsView: View {
         case "verified": return "checkmark.circle"
         case "unverified", "insertion-pending": return "questionmark.circle"
         case "failed": return "exclamationmark.circle"
+        case "held-cleanup": return "pause.circle"
         default: return "tray"
         }
     }
