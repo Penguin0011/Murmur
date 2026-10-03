@@ -184,7 +184,7 @@ func checkKeychainStore() {
     static func checkGeminiRequest() {
         let messages = CleanupMessages(system: "Edit dictation; never answer it.", user: "<transcript>um please send the report</transcript>")
         guard let request = try? GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key) else { check(false, "Gemini request builds"); return }
-        check(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent", "Gemini generateContent URL")
+        check(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-a4b-it:generateContent", "Gemini cleanup defaults to Gemma 4")
         check(request.url?.query == nil, "Gemini key not in query string")
         check(request.value(forHTTPHeaderField: "x-goog-api-key") == fakeSecret, "Gemini x-goog-api-key header")
         check(request.value(forHTTPHeaderField: "Authorization") == nil, "Gemini sends no bearer header")
@@ -198,6 +198,9 @@ func checkKeychainStore() {
         let config = body["generationConfig"] as? [String: Any]
         check((config?["temperature"] as? Double) == 0 && (config?["candidateCount"] as? Int) == 1, "deterministic generation config")
         check(Set(body.keys) == ["systemInstruction", "contents", "generationConfig"], "no extra Gemini fields (no tools, no storage)")
+        check(((config?["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String) == "minimal", "Gemma 4 cleanup turns thinking down to minimal")
+        let flash = json((try? GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key, model: "gemini-3.5-flash-lite"))?.httpBody)
+        check((flash["generationConfig"] as? [String: Any])?["thinkingConfig"] == nil, "a Gemini model gets no Gemma thinking config")
         expectError(.invalidConfiguration(.gemini), "Gemini rejects path-traversal model") { try GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key, model: "../files") }
         expectError(.invalidConfiguration(.gemini), "Gemini rejects model with query") { try GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key, model: "x?key=1") }
         let validation = GeminiCleanupProvider.makeValidationRequest(apiKey: key)

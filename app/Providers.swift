@@ -651,7 +651,9 @@ struct OpenRouterTranscriptionProvider: TranscriptionProvider {
 
 struct GeminiCleanupProvider: CleanupProvider {
     static let defaultBaseURL = URL(string: "https://generativelanguage.googleapis.com/v1beta")!
-    static let defaultModel = "gemini-3.5-flash-lite"
+    /// Gemma 4 through the Gemini API: generous free-tier limits for a light task. The MoE variant
+    /// (about 4B active parameters) answers faster than gemma-4-31b-it.
+    static let defaultModel = "gemma-4-26b-a4b-it"
     /// Documented total request size for inline data.
     static let requestLimitBytes = 20_000_000
 
@@ -674,14 +676,17 @@ struct GeminiCleanupProvider: CleanupProvider {
 
     private struct Part: Encodable { let text: String }
     private struct Content: Encodable { let role: String?; let parts: [Part] }
-    private struct GenerationConfig: Encodable { let temperature: Double; let candidateCount: Int; let maxOutputTokens: Int? }
+    private struct ThinkingConfig: Encodable { let thinkingLevel: String }
+    private struct GenerationConfig: Encodable { let temperature: Double; let candidateCount: Int; let maxOutputTokens: Int?; let thinkingConfig: ThinkingConfig? }
     private struct Body: Encodable { let systemInstruction: Content; let contents: [Content]; let generationConfig: GenerationConfig }
 
     static func makeRequest(messages: CleanupMessages, apiKey: APIKey, model: String = defaultModel, baseURL: URL = defaultBaseURL, maxOutputTokens: Int? = 4096) throws -> URLRequest {
         let url = try GeminiResponse.generateContentURL(baseURL: baseURL, model: model)
         let body = Body(systemInstruction: Content(role: nil, parts: [Part(text: messages.system)]),
                         contents: [Content(role: "user", parts: [Part(text: messages.user)])],
-                        generationConfig: GenerationConfig(temperature: 0, candidateCount: 1, maxOutputTokens: maxOutputTokens))
+                        // Gemma 4 reasons first by default; cleanup needs none, so keep latency down.
+                        generationConfig: GenerationConfig(temperature: 0, candidateCount: 1, maxOutputTokens: maxOutputTokens,
+                                                           thinkingConfig: model.hasPrefix("gemma-4") ? ThinkingConfig(thinkingLevel: "minimal") : nil))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var request = URLRequest(url: url)

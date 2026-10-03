@@ -31,7 +31,7 @@ struct ProcessingSettings: Equatable, Sendable {
     var options: CleanupOptions = .standard
     var route: CleanupRoute = .local
     var learningEnabled = true
-    /// Applied by AppController on Apply Settings through HistoryRouter.
+    /// Applied by AppController, as soon as the setting changes, through HistoryRouter.
     var historyMode: HistoryMode = .on
     /// Read by AppController for the automatic update check.
     var updateChecksEnabled = true

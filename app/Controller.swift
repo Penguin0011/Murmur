@@ -110,7 +110,7 @@ final class PreStart: @unchecked Sendable {
     @Published var intelligentLeadingSpace: Bool
     @Published var automaticInsertion: Bool
     @Published var retention: String
-    // Cleanup and learning settings, saved by Apply Settings like the others.
+    // Cleanup and learning settings, applied as soon as they change like the others.
     @Published var cleanupFillers: Bool
     @Published var cleanupCorrections: Bool
     @Published var cleanupLists: Bool
@@ -125,7 +125,7 @@ final class PreStart: @unchecked Sendable {
     var modelLicense: ModelLicenseInfo? { downloader?.license }
     var modelSummary: String { downloader.map { ModelFacts.summary(downloadSize: $0.downloadSize) } ?? "" }
     var usesCustomModelFolder: Bool { downloader.map { URL(fileURLWithPath: modelDirectory).standardizedFileURL.path != $0.target.path } ?? false }
-    // History-off mode and the size cap (R9, §6). History-off and update checks apply on Apply Settings.
+    // History-off mode and the size cap (R9, §6). History-off and update checks apply as soon as they change.
     @Published var historyMode: HistoryMode
     @Published var historyCapWarning: String?
     @Published var sessionOnlyIDs: Set<String> = []
@@ -136,7 +136,7 @@ final class PreStart: @unchecked Sendable {
     @Published var availableRelease: ReleaseInfo?
     @Published var checkingForUpdates = false
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0" }
-    // Processing routes (R4) apply on Apply Settings, after any disclosure is confirmed.
+    // Processing routes (R4) apply as soon as they change, after any disclosure is confirmed.
     // API keys (R5) save immediately to the Keychain; only their presence is published.
     @Published var transcriptionRoute: TranscriptionRoute
     @Published var cloudTranscriber: CloudTranscriber
@@ -203,6 +203,7 @@ final class PreStart: @unchecked Sendable {
     private var listeningStarted = Date()
     private var phaseBeforeEarly: (String, String)?
     private var statusShown = UUID()
+    private var applyScheduled = false
     private var preview = false
     private var previewDirectory: URL?
     private lazy var session: CaptureSession = {
@@ -360,7 +361,24 @@ final class PreStart: @unchecked Sendable {
     func chooseModelDirectory() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
         panel.allowsMultipleSelection = false; panel.message = "Choose the pinned Parakeet Unified model folder."
-        if panel.runModal() == .OK, let url = panel.url { modelDirectory = url.path }
+        if panel.runModal() == .OK, let url = panel.url { modelDirectory = url.path; settingsChanged() }
+    }
+    /// Settings apply as soon as they change; there is no Apply button. Changes made in the same
+    /// moment (Faithful Transcription flips three toggles) apply once. Confirmations still appear,
+    /// and Cancel puts the control back.
+    func settingsChanged() {
+        guard !applyScheduled else { return }
+        applyScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.applyScheduled = false
+            self.applySettings()
+        }
+    }
+    /// Refreshes the permission rows and starts the shortcut if Input Monitoring was just allowed.
+    func refreshPermissionsAndShortcut() {
+        refreshPermissions()
+        if !preview, listener == nil, !isBusy, CGPreflightListenEventAccess() { configureShortcut() }
     }
     func applySettings() {
         guard !isBusy else { message = "Finish the current dictation before changing settings."; return }
@@ -420,7 +438,7 @@ final class PreStart: @unchecked Sendable {
     private func configureShortcut() {
         removeShortcut()
         guard sessionAvailable else { return }
-        guard CGPreflightListenEventAccess() else { message = "Allow Input Monitoring, then click Apply Settings to enable the shortcut."; return }
+        guard CGPreflightListenEventAccess() else { message = "Allow Input Monitoring, then click Refresh Permissions to enable the shortcut."; return }
         let binding: ShortcutBinding = shortcut == "fn" ? .fn : shortcut == "ctrl-option-space" ? .controlOptionSpace : .rightOption
         let token = shortcutGeneration
         let next = ShortcutListener(binding: binding, processingSeconds: 0, onAction: { [weak self] action, done in
@@ -776,7 +794,7 @@ final class PreStart: @unchecked Sendable {
     func copyEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.finalText, forType: .string) }
     /// The explicit raw-text action for held cleanup (and any entry whose final text differs).
     func copyRawEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.rawText, forType: .string) }
-    /// Turns all three cleanup options off. Like other settings, it takes effect on Apply Settings.
+    /// Turns all three cleanup options off. Like other settings, it takes effect at once.
     func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false }
     func refreshDictionary() { dictionaryEntries = processing?.dictionary.entries ?? [] }
     @discardableResult

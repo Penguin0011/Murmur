@@ -58,6 +58,8 @@ struct SettingsView: View {
     @State private var geminiKey = ""
     @State private var openrouterKey = ""
     @State private var serverKey = ""
+    /// Server address and model apply when editing ends (Return or leaving the field), not per keystroke.
+    @FocusState private var serverFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 18) {
@@ -173,7 +175,7 @@ struct SettingsView: View {
                         if controller.usesCustomModelFolder { Button("Use Default", action: controller.useDefaultModelDirectory) }
                         Button("Choose Folder…", action: controller.chooseModelDirectory)
                     }
-                    Text("Local transcription runs on this Mac. Downloading the model uses the network once; dictation does not. A folder you choose takes effect on Apply Settings. Cloud transcription is chosen under Processing routes.")
+                    Text("Local transcription runs on this Mac. Downloading the model uses the network once; dictation does not. A folder you choose takes effect at once. Cloud transcription is chosen under Processing routes.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Recording") }
 
@@ -195,8 +197,10 @@ struct SettingsView: View {
                     }
                     if controller.cleanupChoice == .localServer {
                         placeholderField("Server address, e.g. \(RouteSettings.defaultServerURL)", text: $controller.localServerURL)
+                            .focused($serverFieldFocused).onSubmit(controller.settingsChanged)
                         HStack(spacing: 8) {
                             placeholderField("Model name", text: $controller.localServerModel)
+                                .focused($serverFieldFocused).onSubmit(controller.settingsChanged)
                             Button("Find Models", action: controller.findLocalModels).disabled(controller.findingModels)
                         }
                         if !controller.localServerModels.isEmpty {
@@ -211,7 +215,7 @@ struct SettingsView: View {
                     if controller.cleanupChoice != .localRules, let disclosure = controller.routeDisclosure(.cleanup) {
                         Text(disclosure).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
                     }
-                    Text("Routes take effect on Apply Settings, which first shows what leaves this Mac. Murmur never falls back to another route: if a provider fails, your audio or raw transcript stays here.")
+                    Text("Routes take effect as soon as you choose them; a route that sends data off this Mac first shows what leaves it. Murmur never falls back to another route: if a provider fails, your audio or raw transcript stays here.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Processing routes") }
 
@@ -346,18 +350,17 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .disabled(controller.isBusy)
+            // Every setting applies as soon as it changes; there is no Apply button to forget.
+            .modifier(AutoApplyGeneral(controller: controller))
+            .modifier(AutoApplyRoutes(controller: controller, serverFieldFocused: serverFieldFocused))
 
             GlassEffectContainer(spacing: 12) {
                 HStack(spacing: 12) {
-                    Button("Refresh Permissions", action: controller.refreshPermissions)
+                    Button("Refresh Permissions", action: controller.refreshPermissionsAndShortcut)
                         .modifier(UtilityButton())
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text(controller.isBusy ? "Finish dictating to change settings." : "Apply to save your changes.")
-                            .font(.caption).foregroundStyle(Color.primary.opacity(0.72))
-                    }
-                    Button(action: controller.applySettings) { Text("Apply Settings").foregroundStyle(.white) }
-                        .modifier(UtilityButton(prominent: true)).disabled(controller.isBusy)
+                    Text(controller.isBusy ? "Finish dictating to change settings." : "Changes apply as soon as you make them.")
+                        .font(.caption).foregroundStyle(Color.primary.opacity(0.72))
                 }
             }
         }
@@ -569,6 +572,40 @@ func standardEditMenuItem() -> NSMenuItem {
     let item = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
     item.submenu = edit
     return item
+}
+
+/// Split in two so the compiler can type-check the chains.
+private struct AutoApplyGeneral: ViewModifier {
+    @ObservedObject var controller: AppController
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: controller.shortcut) { controller.settingsChanged() }
+            .onChange(of: controller.automaticInsertion) { controller.settingsChanged() }
+            .onChange(of: controller.intelligentLeadingSpace) { controller.settingsChanged() }
+            .onChange(of: controller.showMenuBar) { controller.settingsChanged() }
+            .onChange(of: controller.retention) { controller.settingsChanged() }
+            .onChange(of: controller.historyMode) { controller.settingsChanged() }
+            .onChange(of: controller.updateChecksEnabled) { controller.settingsChanged() }
+    }
+}
+
+private struct AutoApplyRoutes: ViewModifier {
+    @ObservedObject var controller: AppController
+    let serverFieldFocused: Bool
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: controller.cleanupFillers) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupCorrections) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupLists) { controller.settingsChanged() }
+            .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
+            .onChange(of: controller.transcriptionRoute) { controller.settingsChanged() }
+            .onChange(of: controller.cloudTranscriber) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupChoice) { controller.settingsChanged() }
+            // Typing in a server field waits for Return or focus loss; the Found models picker applies at once.
+            .onChange(of: controller.localServerModel) { if !serverFieldFocused { controller.settingsChanged() } }
+            .onChange(of: controller.localServerURL) { if !serverFieldFocused { controller.settingsChanged() } }
+            .onChange(of: serverFieldFocused) { _, focused in if !focused { controller.settingsChanged() } }
+    }
 }
 
 func showsFloatingIndicator(phase: String) -> Bool {

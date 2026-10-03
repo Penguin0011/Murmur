@@ -83,7 +83,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .localRules: return "Local rules (this Mac)"
         case .localServer: return "Local model server"
-        case .gemini: return "Gemini"
+        case .gemini: return "Gemma 4 (Google AI Studio)"
         case .openrouter: return "OpenRouter"
         }
     }
@@ -244,7 +244,7 @@ enum DisclosureText {
     }
 
     /// Shown when a dictation starts on a route whose disclosure was not confirmed.
-    static let startRefusal = "Confirm what leaves this Mac first: open Settings and click Apply Settings."
+    static let startRefusal = "Confirm what leaves this Mac first: open Settings and choose the route again."
 
     /// One-line description for Settings, shown before any cloud use.
     static func summary(_ plan: RoutePlan, stage: ProcessingStage) -> String? {
