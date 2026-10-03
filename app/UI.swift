@@ -122,7 +122,7 @@ struct SettingsView: View {
                         Text("Fn / Globe").tag("fn")
                         Text("Control–Option–Space").tag("ctrl-option-space")
                     }
-                    Text("Tap to start and finish. Hold to record until release. Escape cancels.")
+                    Text("Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top, spacing: 16) {
@@ -581,7 +581,7 @@ private struct VoiceBubbles: View {
         }
 
         .accessibilityElement(children: .ignore).accessibilityLabel(phase)
-        .help(phase == "Listening" ? "Release or tap the shortcut to finish. Escape cancels." : phase)
+        .help(phase == "Listening" ? "Release, or press the shortcut again after a double-press, to finish. Escape cancels." : phase)
     }
 }
 

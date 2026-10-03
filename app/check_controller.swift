@@ -71,6 +71,16 @@ import AppKit
         controller.dismissStatus()
         precondition(controller.phase == "Processing" && controller.message == "busy")
         precondition(controller.history.first?.id == entry.id && manager.fileExists(atPath: recovery.path))
+        // "No speech" clears itself after 2 s; a status that replaced it in the meantime stays.
+        controller.phase = "Ready"
+        controller.setPhase("Error", "No speech was detected. Check your microphone and try again.")
+        RunLoop.main.run(until: Date().addingTimeInterval(2.3))
+        precondition(controller.phase == "Ready", "no-speech popup dismisses itself")
+        controller.setPhase("Error", "No speech was detected. Check your microphone and try again.")
+        RunLoop.main.run(until: Date().addingTimeInterval(1))
+        controller.setPhase("Error", "Transcription failed. Audio is saved for retry for up to 24 hours.")
+        RunLoop.main.run(until: Date().addingTimeInterval(1.5))
+        precondition(controller.phase == "Error" && controller.message.hasPrefix("Transcription failed"), "a newer error is not dismissed")
         controller.phase = "Saved"
         // The check binary has no bundled artifact-pins.json: the model row offers nothing and refuses quietly, without an alert.
         precondition(controller.modelRow.actions.isEmpty && !controller.usesCustomModelFolder)

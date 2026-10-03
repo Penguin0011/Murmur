@@ -14,7 +14,7 @@ Proposed launch boundary: dictation and recovery, without meeting recording, an 
 
 | ID | Requirement | Acceptance criteria |
 |---|---|---|
-| R1 | User-configurable global dictation shortcut; tap and hold modes. [Certain] | Tap begins recording; another tap ends it. Holding records until release. Key repeat cannot start extra sessions. Settings detect unsupported bindings or conflicts where possible. |
+| R1 | User-configurable global dictation shortcut; double-press toggle and hold modes. [Certain] | A double press begins a toggle recording that continues until the next press. Holding records until release. A lone short tap records nothing. Key repeat cannot start extra sessions. Settings detect unsupported bindings or conflicts where possible. |
 | R2 | Selectable transcription models with a researched quick, accurate recommendation. [Certain] | Show download size, supported language, processing location, and measured device performance. Download, cancel, retry, remove, and select models. Do not start recording when the selected model is unavailable without explaining recovery. |
 | R3 | Filler removal, spoken corrections, and formatting can each be enabled or disabled. [Certain] | Each toggle operates independently. All disabled means no cleanup rewrite beyond the transcription engine's output. Preserve raw and processed text for recovery. |
 | R4 | Independent local/cloud choices for transcription and cleanup. [Certain] | Support local/local, local/cloud, cloud/local, and cloud/cloud. Show what leaves the device before cloud use. No silent cloud fallback. |
@@ -29,7 +29,7 @@ Proposed launch boundary: dictation and recovery, without meeting recording, an 
 
 ## 3. Proposed interaction and failure rules
 
-- Shortcut state machine (diagram required in the spike): press always starts capture; on release, a press shorter than the threshold is a **tap** (recording continues until the next tap); longer is a **hold** (release stops and finishes). A tap while recording stops it. Key repeat is ignored. Modifier-only bindings (e.g. Fn, Right Option) are supported via a CGEventTap and therefore need the Input Monitoring permission in addition to Microphone and Accessibility.
+- Shortcut state machine (diagram required in the spike): press always starts capture; on release, a press longer than the threshold is a **hold** (release stops and finishes). A shorter press waits up to 400 ms for a second press: a **double press** latches a toggle recording that only the next press stops; without a second press the recording is cancelled and deleted. User decision, October 3, 2026. Key repeat is ignored. Modifier-only bindings (e.g. Fn, Right Option) are supported via a CGEventTap and therefore need the Input Monitoring permission in addition to Microphone and Accessibility.
 - Begin microphone capture on shortcut press; determine hold versus tap on release so the first spoken word is not discarded. Proposed hold threshold: 250 ms, to validate on real keyboards.
 - State sequence: idle → listening → transcribing → optional cleanup → saving → insertion → idle/recovery. Allow only one active session initially.
 - Escape cancels recording; do not insert canceled speech. A new shortcut press while processing must not duplicate the prior session.

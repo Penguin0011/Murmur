@@ -93,7 +93,7 @@ final class PreStart: @unchecked Sendable {
 
 @MainActor final class AppController: ObservableObject {
     @Published var phase = "Ready"
-    @Published var message = "Hold your configured shortcut to dictate, or tap to start and tap again to finish."
+    @Published var message = "Hold your shortcut to dictate, or double-press it to dictate until you press it again."
     @Published var history: [HistoryEntry] = []
     @Published var recoveryEntryID: String?
     @Published var recoveryAudio: URL?
@@ -202,6 +202,7 @@ final class PreStart: @unchecked Sendable {
     private var activeModelDirectory = ""
     private var listeningStarted = Date()
     private var phaseBeforeEarly: (String, String)?
+    private var statusShown = UUID()
     private var preview = false
     private var previewDirectory: URL?
     private lazy var session: CaptureSession = {
@@ -541,8 +542,16 @@ final class PreStart: @unchecked Sendable {
         setPhase("Ready", stage == .transcription ? CloudTranscription.message(.cancelled) ?? "Canceled." : "Canceled. The raw transcript is saved in History and was not inserted.")
         bubble.hide(); historySaved(); done()
     }
-    private func setPhase(_ phase: String, _ message: String) {
+    func setPhase(_ phase: String, _ message: String) {
         self.phase = phase; self.message = message
+        // "No speech" needs no action, so its popup leaves on its own after 2 s unless replaced.
+        let shown = UUID(); statusShown = shown
+        if phase == "Error" && message.hasPrefix("No speech was detected") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, self.statusShown == shown else { return }
+                self.dismissStatus()
+            }
+        }
         // Errors raised while processing leave that session's audio retained for retry.
         // Audio already deleted after a usable transcript (e.g. a held cleanup) is not offered.
         recoveryAudio = phase == "Error" && sessionAvailable && session.state == .processing ? session.audio.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil } : nil
@@ -805,7 +814,7 @@ final class PreStart: @unchecked Sendable {
     func dismissStatus() {
         guard !isBusy else { return }
         if sessionAvailable {
-            setPhase("Ready", "Hold your configured shortcut to dictate, or tap to start and tap again to finish.")
+            setPhase("Ready", "Hold your shortcut to dictate, or double-press it to dictate until you press it again.")
         } else {
             phase = "Error"; message = "Private storage is unavailable. Murmur cannot start."
             updateMenu?()
@@ -919,7 +928,7 @@ final class PreStart: @unchecked Sendable {
     // MARK: API keys (R5) and the local model server
 
     /// Publishes which providers have a key. The key itself never leaves the Keychain store.
-    func refreshKeys() { savedKeys = Set(KeyText.providers.filter { (try? credentials.read($0)) != nil }) }
+    func refreshKeys() { savedKeys = Set(KeyText.providers.filter { credentials.exists($0) }) }
     @discardableResult
     func saveKey(_ provider: ProviderID, _ raw: String) -> Bool {
         guard let key = APIKey(raw) else { keyMessages[provider] = KeyText.invalid; return false }
