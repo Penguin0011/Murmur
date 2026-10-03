@@ -4,7 +4,7 @@ Implemented shortcut → capture → local processor → durable text history. R
 
 Build/run commands and precise results are in `module-one/session/README.md`. Model cache: `~/Library/Caches/Dictation/module-one/unified-d32e972`; speech/recovery/cache artifacts are excluded from Git. Recovery history uses the standalone app-support directory. Privacy, retention settings/UI, memory-only capture, and production insertion remain product work. [Certain]
 
-Independent review found queued-action ordering, continuous retry-audio expiry, and processor signal/spawn gaps. The processor signal gap is fixed and regression-checked; shortcut ordering and periodic expiry are being corrected before final validation. [Certain]
+Independent review found queued-action ordering, continuous retry-audio expiry, and processor signal/spawn gaps. All three findings are fixed: processor cancellation reaps its child, keyboard transition/action delivery is serialized with a queued failed-start regression, and a minute timer expires retry audio while the listener runs. Relevant synthetic checks pass. [Certain]
 
 # Superseding hardware scope — October 2, 2026
 
