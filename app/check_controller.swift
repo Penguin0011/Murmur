@@ -35,6 +35,24 @@ import AppKit
         }
         for phase in ["Error", "Saved", "Ready"] { precondition(!usesMinimalTranscriptionDisplay(true, phase: phase, message: "normal")) }
         precondition(!usesMinimalTranscriptionDisplay(true, phase: "Inserted", message: "unverified"))
+        func spaced(_ text: String, _ value: String?, _ location: Int, _ length: Int = 0, _ enabled: Bool = true) -> String {
+            textWithLeadingSpace(text, value: value, selection: CFRange(location: location, length: length), enabled: enabled)
+        }
+        precondition(spaced("world", "Hello", 5) == " world")
+        precondition(spaced("word", "HelloWorld", 5) == "word")
+        precondition(spaced("Next", "Done.", 5) == " Next")
+        precondition(spaced("world", "Hello ", 6) == "world")
+        precondition(spaced("world", "Hello\n", 6) == "world")
+        precondition(spaced(" world", "Hello", 5) == " world")
+        precondition(spaced(", yes", "Hello", 5) == ", yes")
+        precondition(spaced("word", "(", 1) == "word")
+        precondition(spaced("word", "", 0) == "word")
+        precondition(spaced("word", nil, 3) == "word")
+        precondition(spaced("word", "Hello", 2, 3) == "word")
+        precondition(spaced("world", "Hello", 5, 0, false) == "world")
+        precondition(spaced("word", "😀", 1) == "word")
+        precondition(spaced("word", "😀", 2) == " word")
+        precondition(spaced("word", "Hello", 99) == "word")
         _ = NSApplication.shared
         let manager = FileManager.default
         let temp = manager.temporaryDirectory

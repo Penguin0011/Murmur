@@ -123,6 +123,19 @@ func sameDestination(_ original: FocusSnapshot, _ current: FocusSnapshot) -> Boo
         && original.selection?.length == current.selection?.length
 }
 
+// Unknown context and selected-text replacement leave the transcript unchanged.
+func textWithLeadingSpace(_ text: String, value: String?, selection: CFRange?, enabled: Bool) -> String {
+    guard enabled, let first = text.first, !first.isWhitespace,
+          !#",.!?;:)]}’'""#.contains(first), let value, let selection,
+          selection.length == 0, selection.location > 0,
+          let prefixRange = Range(NSRange(location: 0, length: selection.location), in: value),
+          let previous = value[prefixRange].last, !previous.isWhitespace,
+          !#"([{‘'"/\-–—"#.contains(previous) else { return text }
+    let suffix = value[prefixRange.upperBound...]
+    if let next = suffix.first, next.isLetter || next.isNumber { return text }
+    return " " + text
+}
+
 func insertText(_ text: String, into destination: FocusSnapshot, policy: InsertionPolicy = .experimentalFallback) -> InsertionResult {
     func result(_ status: InsertionResult.Status, _ detail: String, _ snapshot: FocusSnapshot? = nil) -> InsertionResult {
         InsertionResult(status: status, detail: detail, snapshot: snapshot)

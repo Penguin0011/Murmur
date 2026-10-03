@@ -22,6 +22,7 @@ import Darwin
     var accessibilityAuthorized: Bool { AXIsProcessTrusted() }
     var inputMonitoringAuthorized: Bool { CGPreflightListenEventAccess() }
     var modelAvailable: Bool { modelFilesAvailable() }
+    @Published var intelligentLeadingSpace: Bool
     @Published var automaticInsertion: Bool
     @Published var retention: String
     var isBusy: Bool { phase == "Listening" || phase == "Processing" || (sessionAvailable && session.state != .idle) }
@@ -35,6 +36,7 @@ import Darwin
     private var destinationScreen: NSScreen?
     private var focusStable = true
     private var insertThisSession = true
+    private var leadingSpaceThisSession = false
     private var shortcutGeneration = UUID()
     private var listener: ShortcutListener?
     private var source: CFRunLoopSource?
@@ -78,6 +80,7 @@ import Darwin
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
         minimalTranscriptionDisplay = defaults.bool(forKey: "minimalTranscriptionDisplay")
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
+        intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
@@ -157,6 +160,7 @@ import Darwin
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion")
+        defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(retention, forKey: "retention")
         defaults.set(minimalTranscriptionDisplay, forKey: "minimalTranscriptionDisplay")
         do { try store?.purge(retention: appliedRetention); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
@@ -197,7 +201,7 @@ import Darwin
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }
-            focusStable = true; insertThisSession = automaticInsertion; activeModelDirectory = modelDirectory
+            focusStable = true; insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
             listeningStarted = Date(); generation = UUID(); recoveryEntryID = nil; recordingFailed = false
             destinationScreen = screenForDestination(destination)
         }
@@ -295,10 +299,11 @@ import Darwin
                     self.recoveryEntryID = entry.id
                     if self.insertThisSession, self.focusStable, let destination = self.destination {
                         // Persist uncertainty before the one permitted delivery attempt.
-                        entry.insertionStatus = "insertion-pending"
+                        let insertionText = textWithLeadingSpace(text, value: destination.value, selection: destination.selection, enabled: self.leadingSpaceThisSession)
+                        entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
                         do {
                             try store.save(entry)
-                            let insertion = insertText(text, into: destination, policy: .singleAttempt)
+                            let insertion = insertText(entry.finalText, into: destination, policy: .singleAttempt)
                             entry.insertionStatus = insertion.status.rawValue
                             try store.save(entry)
                             self.setPhase(insertion.status == .verified ? "Inserted" : "Saved", insertion.status == .verified ? "Inserted." : "Saved in History. Delivery could not be verified; no retry was attempted.")
@@ -323,7 +328,7 @@ import Darwin
         do { ownedAudio = try copyProbeAudio(audio, into: retry) } catch {
             fputs("app-check=refused audio-copy-failed\n", stderr); completion(); return
         }
-        destination = focused; focusStable = true; insertThisSession = true
+        destination = focused; focusStable = true; insertThisSession = true; leadingSpaceThisSession = intelligentLeadingSpace
         activeModelDirectory = modelDirectory; listeningStarted = Date(); generation = UUID()
         destinationScreen = screenForDestination(focused); recoveryEntryID = nil
         transcribe(ownedAudio) { [weak self] in

@@ -139,6 +139,9 @@ struct SettingsView: View {
                     Toggle("Insert into the original text field", isOn: $controller.automaticInsertion)
                     Text("Saved before insertion. If the destination changes or delivery is uncertain, copy the text from History. Dictation never sends a message.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                    Toggle("Intelligently add a leading space", isOn: $controller.intelligentLeadingSpace)
+                    Text("Separate dictation from existing text at the cursor. Existing whitespace, punctuation, and selected text are left alone.")
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     Picker("Keep transcripts", selection: $controller.retention) {
                         Text("30 days").tag("30-days")
                         Text("Six months").tag("six-months")
