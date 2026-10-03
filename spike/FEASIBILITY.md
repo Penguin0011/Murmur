@@ -47,9 +47,9 @@ Repeated down events do not create sessions. A release belonging to the tap that
 | Category | Intended test target | Insertion | Observation | Evidence |
 |---|---|---|---|---|
 | Native editor | TextEdit 1.20 | Verified AX write | Pass for live-testable cases | Replacement, Undo, appended text, cursor outside span, focus departure, 60-second expiry, consecutive dictations; permission revocation and clipboard fallback pending |
-| Browser text field | Arc 1.166.0, local textarea | Unverified; visible text unchanged | Ineligible in tested setup | Native focus exposed AXWebArea; AX write reported success without insertion |
+| Browser text field | Arc 1.166.0, local textarea | Unverified; AX write silently dropped; fallback skipped (unknown browser field type) | Ineligible | Field now exposed as AXTextArea (earlier AXWebArea); visible text unchanged |
 | Rich text | Safari 26.6.2, synthetic Google Doc | Default: no field exposed. With Docs screen reader support: AX write delivered (user-observed), harness-unverified | Ineligible (browser field type unknown) | Requires a user-enabled Docs setting; product requirement says this must not be needed |
-| Chat composer | ChatGPT/Codex desktop 26.928.40906 (`com.openai.codex`), new unsent chat | Fails: AX write reports success, nothing delivered; harness-unverified | Not reached | Readable AXTextArea, learning-eligible by role; no paste fallback after a successful-looking write |
+| Chat composer | ChatGPT/Codex desktop 26.928.40906 (`com.openai.codex`), new unsent chat | Verified via paste fallback after unchanged AX write | Pass for live-testable cases | Replacement, Undo, append, focus departure, consecutive dictations; AX write alone silently drops text |
 | Code editor | Synthetic disposable editor buffer | Pending | Pending | No live result yet |
 
 Remaining rows are pending, not classified unsupported. Target versions must be recorded when executed. [Certain]
@@ -124,6 +124,27 @@ insertion=unverified detail=AX selected-text write delivery unverified; retain o
 
 This matches the Arc silent-success pattern in a second Chromium-based surface. Under the current safety rule (paste only when the AX write is unsupported), dictation delivers nothing to this composer. Read-back here showed the field unchanged, which is distinguishable from an unexpected change; whether "unchanged after a successful-looking write" may safely trigger the paste fallback is an open design decision, not implemented. Slack, Discord, Messages, and the Claude desktop composer remain untested. [Certain]
 
+### Paste fallback after an unchanged AX write (retest)
+
+New rule in `insertText`: if an AX selected-text write reports success but read-back does not verify, the harness waits 300 ms and, only if the same non-browser field still reads exactly as before (value and selection), stages the clipboard and pastes once. Browser fields of unknown type never take this path. A write the app applies later than 300 ms would double-insert; that bounded wait is a spike shortcut. Deterministic checks cover the decision predicate. [Certain]
+
+Codex composer retest: every insertion reported `clipboard paste after unchanged AX write matched full-field readback`, and the clipboard was restored afterwards. Observation then behaved like TextEdit: [Certain]
+
+| Scenario | Result |
+|---|---|
+| Replace, Undo, append | `provisionalCandidate=true` → `false` → `observationStopped=appended text candidateRetained=false` |
+| Replace, then Finder | `observationStopped=focus departed candidateRetained=true` |
+| Two dictations with a space, replace in second | Both verified; candidate attributed to the second span |
+
+Arc 1.166.0 retest, local `fields.html` textarea focused by the user, Arc brought forward by AppleScript activation only: Arc now exposed a focused `AXTextArea` (the earlier run saw `AXWebArea`). The AX write again reported success, and the visible box still read `Browser probe: `. Arc exposes no `AXDOMInputType` for the textarea, so the field is an unknown browser type: no fallback paste, no learning. [Certain]
+
+```text
+app=company.thebrowser.Browser role=AXTextArea subrole=unknown secure=false valueReadable=true selectionReadable=true learningEligible=false
+insertion=unverified detail=AX selected-text write delivery unverified; retain output, never automatically retry
+```
+
+The Arc exposure change may come from another accessibility client (the computer-use tool) activating Chromium's tree; it is not established as default behavior. Extending the fallback to browser fields needs a separate decision on unknown field types. [Certain]
+
 ## Rich-text synthetic test evidence
 
 Safari 26.6.2 (`com.apple.Safari`), new disposable Google Doc containing `Rich probe: `, run by the user from a terminal holding Accessibility permission (this Claude desktop session lacked it and recorded nothing). Notion and Pages are not installed. [Certain]
@@ -155,7 +176,7 @@ Use synthetic text only. In each category, test verified insertion, an attributa
 
 ## Safety and remaining gates
 
-- AX read-back mismatch must retain the output without another insertion attempt; paste is allowed only when the AX write is unsupported. Clipboard restoration must skip after another writer changes the clipboard. [Certain]
+- AX read-back mismatch must retain the output without another insertion attempt, except one paste when a non-browser field reads exactly unchanged after the settle wait; otherwise paste only when the AX write is unsupported. Clipboard restoration must skip after another writer changes the clipboard. [Certain]
 - Known secure fields must be rejected. Browser fields of unknown type must remain unverified and excluded from learning even when text read-back matches. [Certain]
 - Anchored range attribution does not prove semantic equivalence. A short replacement can change meaning, so candidates alone cannot justify automatic vocabulary promotion. [Certain]
 - Persisted recovery, audio capture, production learning eligibility, model inference, UI, signing, and packaging are outside this standalone spike. [Certain]
