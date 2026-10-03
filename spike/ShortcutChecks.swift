@@ -56,5 +56,27 @@ func runShortcutChecks() throws {
     try check(!ShortcutBinding.controlOptionSpace.consumes(.keyDown, key(49, true, [])), "plain Space passes through")
     try check(!ShortcutBinding.controlOptionSpace.consumes(.keyDown, key(49, true, [.maskControl, .maskAlternate, .maskCommand])), "other chords pass through")
     try check(!ShortcutBinding.rightOption.consumes(.keyDown, key(49, true, chord)), "other bindings consume nothing")
-    print("Shortcut checks passed (tap, hold, threshold, repeats, cancellation, processing guard, chord consumption).")
+    func repeatKey(_ code: CGKeyCode) -> CGEvent {
+        let event = key(code, true, []); event.setIntegerValueField(.keyboardEventAutorepeat, value: 1); return event
+    }
+    for binding in [ShortcutBinding.rightOption, .fn, .controlOptionSpace] {
+        let listener = ShortcutListener(binding: binding, processingSeconds: 0, onAction: { _, _ in })
+        try check(!listener.consumes(.keyDown, key(53, true, [])) && !listener.consumes(.keyUp, key(53, false, [])), "idle Escape passes through")
+        _ = listener.machine.press(at: 0)
+        try check(listener.machine.state == .listening, "listener is recording")
+        try check(listener.consumes(.keyDown, key(53, true, [])), "recording Escape down is swallowed")
+        _ = listener.machine.cancel()
+        try check(listener.consumes(.keyDown, repeatKey(53)), "swallowed Escape repeats stay swallowed after cancel")
+        try check(listener.consumes(.keyUp, key(53, false, [])), "swallowed Escape up is swallowed")
+        try check(!listener.consumes(.keyDown, key(53, true, [])), "fresh Escape after cancel passes through")
+        try check(!listener.consumes(.keyUp, key(53, false, [])), "unswallowed Escape up passes through")
+        _ = listener.machine.release(at: 0.1); _ = listener.machine.press(at: 1); _ = listener.machine.release(at: 1.1); _ = listener.machine.press(at: 2)
+        try check(listener.machine.state == .processing, "listener is processing")
+        try check(!listener.consumes(.keyDown, key(53, true, [])), "processing Escape passes through")
+        try check(!listener.consumes(.keyDown, key(0, true, [])) && !listener.consumes(.keyDown, key(49, true, [])), "plain keys pass through")
+        try check(listener.consumes(.keyDown, key(49, true, chord)) == (binding == .controlOptionSpace), "only the chord binding swallows chord Space")
+        _ = listener.machine.release(at: 2.1); listener.machine.processingFinished(); _ = listener.machine.press(at: 3)
+        try check(!listener.consumes(.keyDown, key(0, true, [])) && !listener.consumes(.keyDown, key(36, true, [])), "plain keys pass through while recording")
+    }
+    print("Shortcut checks passed (tap, hold, threshold, repeats, cancellation, processing guard, chord consumption, Escape consumption).")
 }

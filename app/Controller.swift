@@ -156,17 +156,7 @@ import Darwin
         guard CGPreflightListenEventAccess() else { message = "Allow Input Monitoring, then click Apply Settings to enable the shortcut."; return }
         let binding: ShortcutBinding = shortcut == "fn" ? .fn : shortcut == "ctrl-option-space" ? .controlOptionSpace : .rightOption
         let next = ShortcutListener(binding: binding, processingSeconds: 0, onAction: { [weak self] action, done in self?.handle(action, done: done) })
-        let mask = [CGEventType.keyDown, .keyUp, .flagsChanged].reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
-        // The chord needs an active tap so its Space never reaches the destination field.
-        next.tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: binding == .controlOptionSpace ? .defaultTap : .listenOnly, eventsOfInterest: mask, callback: { _, type, event, context in
-            if let context {
-                let listener = Unmanaged<ShortcutListener>.fromOpaque(context).takeUnretainedValue()
-                listener.enqueue(type: type, event: event)
-                if listener.binding.consumes(type, event) { return nil }
-            }
-            return Unmanaged.passUnretained(event)
-        }, userInfo: Unmanaged.passUnretained(next).toOpaque())
-        guard let tap = next.tap, let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = binding == .controlOptionSpace ? "The shortcut could not start. Check Input Monitoring and Accessibility." : "The shortcut could not start. Check Input Monitoring."; return }
+        guard let tap = next.createTap(), let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = "The shortcut could not start. Check Input Monitoring and Accessibility."; return }
         listener = next; source = nextSource
         CFRunLoopAddSource(CFRunLoopGetMain(), nextSource, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
         session.finishRecording = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }

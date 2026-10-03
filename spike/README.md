@@ -28,7 +28,7 @@ spike/.build/dictation-spike --listen --binding ctrl-option-space
 spike/.build/dictation-spike --listen --listen-seconds 2
 ```
 
-Use Ctrl-C to exit. The listener observes rather than consumes shortcuts, simulates processing, and does not capture microphone audio. Conflict detection, first-word capture, and physical Fn/Right Option behavior require further real-device evidence. Permission preflight does not request grants. [Certain]
+Use Ctrl-C to exit. The listener observes rather than consumes shortcuts (except the Space of Control-Option-Space and Escape while recording, which need Accessibility for the active tap), simulates processing, and does not capture microphone audio. Conflict detection, first-word capture, and physical Fn/Right Option behavior require further real-device evidence. Permission preflight does not request grants. [Certain]
 
 Explicit synthetic insertion and optional bounded correction observation:
 
