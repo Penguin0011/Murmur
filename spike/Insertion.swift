@@ -38,6 +38,8 @@ private func axString(_ element: AXUIElement, _ name: String) -> String? {
 
 func captureFocus() throws -> FocusSnapshot {
     guard AXIsProcessTrusted() else { throw InsertionError.unavailable("Accessibility permission is unavailable; no prompt requested") }
+    // frontmostApplication only refreshes when the run loop delivers workspace notifications; polling callers sleep instead.
+    RunLoop.current.run(until: Date())
     guard let frontmost = NSWorkspace.shared.frontmostApplication else {
         throw InsertionError.unavailable("No frontmost application")
     }

@@ -73,7 +73,8 @@ func observe(_ field: FocusSnapshot, insertedText: String, insertionOffset: Int)
     while !tracker.stopped {
         let current = try? captureFocus()
         let sameField = current.map { $0.pid == field.pid && CFEqual($0.element, field.element) } ?? false
-        let readable = current?.learningEligible == true
+        // Access is about the dictated field; another app's unreadable focus is a departure, not lost access.
+        let readable = AXIsProcessTrusted() && (sameField ? current?.learningEligible == true : true)
         let selected = current?.selection.map { NSRange(location: $0.location, length: $0.length) } ?? NSRange(location: 0, length: 0)
         let candidate = tracker.observe(value: current?.value ?? "", selection: selected,
                                         now: ProcessInfo.processInfo.systemUptime,
