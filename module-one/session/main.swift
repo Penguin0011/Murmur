@@ -12,7 +12,8 @@ func sessionCheck() throws {
     var machine = ShortcutMachine()
     func deliver(_ action: ShortcutMachine.Action?) { if let action { session.receive(action) { machine.processingFinished(); finishes += 1 } } }
     deliver(machine.press(at: 0)); assert(starts == 1 && session.state == .listening)
-    deliver(machine.release(at: 0.1)); assert(stops == 0)
+    deliver(machine.release(at: 0.1)); deliver(machine.press(at: 0.3)); deliver(machine.release(at: 0.4))
+    assert(stops == 0 && session.state == .listening)   // double press: toggle recording
     deliver(machine.press(at: 1)); assert(stops == 1 && session.state == .processing)
     deliver(machine.release(at: 1.1)); deliver(machine.press(at: 2)); assert(starts == 1)
     deliver(machine.release(at: 2.1)); processDone?(); assert(finishes == 1 && session.state == .idle)
@@ -92,6 +93,15 @@ func sessionCheck() throws {
     assert(cappedQueued == 0 && capped2.early == nil && cappedListener.queued.isEmpty && cappedListener.machine.state == .processing)
     try? FileManager.default.removeItem(at: capped2.audio!)
 
+    // A lone tap: the listener's timer cancels it once the double-press window passes.
+    let lone = CaptureSession(store: store, start: { _ in }, stop: { true }, process: { _, done in done() })
+    let loneListener = ShortcutListener(binding: .fn, processingSeconds: 0) { action, done in lone.receive(action, completed: done) }
+    loneListener.receive(type: .flagsChanged, event: fnEvent(true, 50)); let loneAudio = lone.audio!
+    loneListener.receive(type: .flagsChanged, event: fnEvent(false, 50.1))
+    assert(lone.state == .listening && loneListener.machine.awaitingSecondPress)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+    assert(lone.state == .idle && loneListener.machine.state == .idle && !FileManager.default.fileExists(atPath: loneAudio.path))
+
     // Prestart: the tap thread starts capture on a press from idle; .start adopts it instead of
     // starting a second capture, and a press that starts nothing reports itself for cleanup.
     var preStarted: URL?, preStarts = 0, unused = 0, ordinaryStarts = 0
@@ -104,11 +114,18 @@ func sessionCheck() throws {
     preListener.notePress(.flagsChanged, down30); let adopted = preStarted
     preListener.receive(type: .flagsChanged, event: down30)
     assert(preStarts == 1 && ordinaryStarts == 0 && pre.audio == adopted && pre.state == .listening && unused == 0)
-    preListener.receive(type: .flagsChanged, event: fnEvent(false, 30.1))   // tap: keeps listening
-    let stopPress = fnEvent(true, 31)
-    preListener.notePress(.flagsChanged, stopPress); assert(preStarts == 1) // not idle: no prestart
-    preListener.receive(type: .flagsChanged, event: stopPress); assert(unused == 1 && pre.state == .idle)
-    preListener.receive(type: .flagsChanged, event: fnEvent(false, 31.1))
+    preListener.receive(type: .flagsChanged, event: fnEvent(false, 30.6))   // hold: finishes
+    assert(pre.state == .idle)
+    let down32 = fnEvent(true, 32)
+    preListener.notePress(.flagsChanged, down32); preListener.receive(type: .flagsChanged, event: down32)
+    preListener.receive(type: .flagsChanged, event: fnEvent(false, 32.1))
+    let second = fnEvent(true, 32.3)                                          // second press of a double press
+    preListener.notePress(.flagsChanged, second); assert(preStarts == 2)      // not idle: no prestart
+    preListener.receive(type: .flagsChanged, event: second); assert(unused == 1 && pre.state == .listening)
+    preListener.receive(type: .flagsChanged, event: fnEvent(false, 32.4))
+    preListener.receive(type: .flagsChanged, event: fnEvent(true, 33)); assert(pre.state == .idle)
+    preListener.receive(type: .flagsChanged, event: fnEvent(false, 33.1))
+    try? FileManager.default.removeItem(at: preStarted ?? adopted!)
     try? FileManager.default.removeItem(at: adopted!)
 
     var attempts = 0

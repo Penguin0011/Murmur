@@ -93,7 +93,7 @@ final class PreStart: @unchecked Sendable {
 
 @MainActor final class AppController: ObservableObject {
     @Published var phase = "Ready"
-    @Published var message = "Hold your configured shortcut to dictate, or tap to start and tap again to finish."
+    @Published var message = "Hold your shortcut to dictate, or double-press it to dictate until you press it again."
     @Published var history: [HistoryEntry] = []
     @Published var recoveryEntryID: String?
     @Published var recoveryAudio: URL?
@@ -805,7 +805,7 @@ final class PreStart: @unchecked Sendable {
     func dismissStatus() {
         guard !isBusy else { return }
         if sessionAvailable {
-            setPhase("Ready", "Hold your configured shortcut to dictate, or tap to start and tap again to finish.")
+            setPhase("Ready", "Hold your shortcut to dictate, or double-press it to dictate until you press it again.")
         } else {
             phase = "Error"; message = "Private storage is unavailable. Murmur cannot start."
             updateMenu?()

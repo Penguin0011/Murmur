@@ -4,41 +4,66 @@ import os
 
 private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
 
-/// Starts on press so determining tap versus hold never discards the first word.
+/// Hold: press and keep holding; release finishes. Double press: two quick presses latch a toggle
+/// recording that only the next press finishes. Capture starts on the first press, so a hold never
+/// loses its first word; a lone short tap is cancelled once `doublePressWindow` passes without a
+/// second press.
 struct ShortcutMachine {
     enum State: String { case idle, listening, processing }
     enum Action: String { case start, finish, cancel }
+    private enum Mode { case holding, awaitingSecondPress(releasedAt: TimeInterval), toggled }
     private(set) var state = State.idle
+    private var mode = Mode.holding
     private var pressedAt: TimeInterval?
-    private var stopsExistingSession = false
+    /// The press that latched or finished a toggle owns its release, which must do nothing.
+    private var ignoreRelease = false
     let holdThreshold: TimeInterval
+    // ponytail: fixed window; make it a setting if people double-press slower or faster.
+    let doublePressWindow: TimeInterval
 
-    init(holdThreshold: TimeInterval = 0.250) {
-        precondition(holdThreshold > 0)
+    init(holdThreshold: TimeInterval = 0.250, doublePressWindow: TimeInterval = 0.400) {
+        precondition(holdThreshold > 0 && doublePressWindow > 0)
         self.holdThreshold = holdThreshold
+        self.doublePressWindow = doublePressWindow
     }
+
+    var awaitingSecondPress: Bool { if case .awaitingSecondPress = mode { return state == .listening }; return false }
 
     mutating func press(at time: TimeInterval, isRepeat: Bool = false) -> Action? {
         guard !isRepeat, pressedAt == nil else { return nil }
         pressedAt = time
-        stopsExistingSession = state == .listening
-        guard state != .processing else { return nil }
-        if stopsExistingSession {
+        switch state {
+        case .processing: return nil
+        case .idle:
+            state = .listening; mode = .holding; ignoreRelease = false
+            return .start
+        case .listening:
+            ignoreRelease = true
+            if case .awaitingSecondPress = mode { mode = .toggled; return nil }
             state = .processing
             return .finish
         }
-        state = .listening
-        return .start
     }
 
     mutating func release(at time: TimeInterval) -> Action? {
         guard let start = pressedAt else { return nil }
         pressedAt = nil
-        defer { stopsExistingSession = false }
-        guard state == .listening, !stopsExistingSession,
-              time - start >= holdThreshold else { return nil }
-        state = .processing
-        return .finish
+        if ignoreRelease { ignoreRelease = false; return nil }
+        guard state == .listening, case .holding = mode else { return nil }
+        if time - start >= holdThreshold {
+            state = .processing
+            return .finish
+        }
+        mode = .awaitingSecondPress(releasedAt: time)
+        return nil
+    }
+
+    /// A lone short tap: no second press arrived in time, so the recording is discarded.
+    mutating func doublePressExpired(at time: TimeInterval) -> Action? {
+        guard state == .listening, case .awaitingSecondPress(let released) = mode,
+              time - released >= doublePressWindow else { return nil }
+        state = .idle
+        return .cancel
     }
 
     mutating func cancel() -> Action? {
@@ -59,7 +84,7 @@ struct ShortcutMachine {
     mutating func eventStreamLost() -> Action? {
         let action = cancel()
         pressedAt = nil
-        stopsExistingSession = false
+        ignoreRelease = false
         return action
     }
 }
@@ -145,6 +170,15 @@ final class ShortcutListener {
         for (n, e) in events.enumerated() {
             if n > 0 && machine.state == .idle { break } // The replayed start was refused.
             emit(e.down ? machine.press(at: e.at) : machine.release(at: e.at))
+            if !e.down { scheduleDoublePressExpiry() }
+        }
+    }
+    /// After a short tap, wait out the double-press window; a lone tap is then cancelled. A timer
+    /// left from a tap that became a toggle finds nothing to expire.
+    private func scheduleDoublePressExpiry() {
+        guard machine.awaitingSecondPress else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + machine.doublePressWindow + 0.02) { [self] in
+            emit(machine.doublePressExpired(at: ProcessInfo.processInfo.systemUptime))
         }
     }
     func cancelQueued() {
@@ -232,6 +266,7 @@ final class ShortcutListener {
             let action = machine.release(at: time)
             if action == .finish { print("shortcut gesture=hold-release") }
             emit(action)
+            scheduleDoublePressExpiry()
         } else if (type == .keyDown || type == .flagsChanged) && binding.isDown(event) {
             let action = machine.press(at: time, isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
             if action == .finish { print("shortcut gesture=tap-stop") }
