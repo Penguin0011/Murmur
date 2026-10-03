@@ -336,27 +336,25 @@ private struct VoiceBubbles: View {
                 ForEach(0..<5) { index in
                     let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 4 - Double(index)) + 1) / 2
                     let level = phase == "Listening" ? controller.voiceLevel : phase == "Processing" ? (reduceMotion ? 0.35 : pulse * 0.45) : 0.15
-                    Capsule().fill(Color.primary.opacity(0.65))
-                        .frame(width: 7, height: 8 + level * Double(index == 2 ? 16 : 12))
-                        .modifier(VoicePillGlass(opaque: reduceTransparency || contrast == .increased))
+                    Circle().fill(Color.primary.opacity(0.35))
+                        .frame(width: 6 + level * Double(index == 2 ? 10 : 7), height: 6 + level * Double(index == 2 ? 10 : 7))
+                        .modifier(VoiceDotGlass(opaque: reduceTransparency || contrast == .increased))
                 }
             }
             .frame(width: 80, height: 24)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: controller.voiceLevel)
         }
-        .padding(8)
-        .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.25), lineWidth: 1))
+
         .accessibilityElement(children: .ignore).accessibilityLabel(phase)
         .help(phase == "Listening" ? "Release or tap the shortcut to finish. Escape cancels." : phase)
     }
 }
 
-private struct VoicePillGlass: ViewModifier {
+private struct VoiceDotGlass: ViewModifier {
     let opaque: Bool
     @ViewBuilder func body(content: Content) -> some View {
-        if opaque { content }
-        else { content.glassEffect(.regular.tint(.white.opacity(0.15)), in: Capsule()) }
+        if opaque { content.overlay(Circle().fill(Color.primary.opacity(0.65))) }
+        else { content.glassEffect(.regular, in: Circle()) }
     }
 }
 
@@ -425,7 +423,8 @@ final class BubblePresenter {
         guard showsFloatingIndicator(phase: phase) else { hide(); return }
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let minimal = phase != "Error"
-        let width = minimal ? 96 : min(240, max(180, frame.width - 32))
+        panel.hasShadow = !minimal
+        let width = minimal ? 80 : min(240, max(180, frame.width - 32))
         let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase)) : AnyView(BubbleView(controller: controller, message: message))
         let host = NSHostingView(rootView: content.frame(width: width))
         panel.contentView = host

@@ -3,7 +3,7 @@ name: Dictation
 description: Native macOS Liquid Glass utility
 rounded:
   utility: "18pt"
-  bubble: "20pt live / 18pt error"
+  bubble: "no live container / 18pt error"
 spacing:
   compact: "4pt"
   related: "8pt"
@@ -75,4 +75,4 @@ Implementation values are extracted from app/UI.swift and app/main.swift. Integr
 
 ## Compact floating indicators
 
-Recording and processing always use a 96-point glass panel containing five neutral voice-reactive glass capsules over an opaque matte background. Processing becomes static with Reduce Motion. The phase remains an accessibility label; the shortcut controls finish/cancel. Saved output and successful insertion hide the panel. Error messages use a 240-point maximum panel, a clickable short summary, Dismiss, and conditional Audio. Settings retain full error details; History retains delivery results and copy controls. [Certain]
+Recording and processing always use a 80×24-point transparent panel containing five standalone voice-reactive native glass circles. Processing becomes static with Reduce Motion. The phase remains an accessibility label; the shortcut controls finish/cancel. Saved output and successful insertion hide the panel. Error messages use a 240-point maximum panel, a clickable short summary, Dismiss, and conditional Audio. Settings retain full error details; History retains delivery results and copy controls. [Certain]

@@ -1,3 +1,9 @@
+# Standalone glass dots — in progress, October 2, 2026
+
+User requested removal of the live indicator capsule: standalone voice-reactive Liquid Glass dots on a transparent background. Plan: remove matte background, border, and padding; use circular native glass surfaces and preserve reduced-transparency/increased-contrast fallback. Implemented standalone circular native glass dots, transparent unpadded 80×24-point live panel, and no outer panel shadow. Production/fixture builds passed; native dark preview showed only dots with accessible Listening label. Installation and commit/push pending; live microphone responsiveness not newly tested. [Certain]
+
+---
+
 # Matte glass indicators — in progress, October 2, 2026
 
 User requested a smaller clickable error popup and neutral glass voice pills over a contrasting matte surface. Plan: narrow the error panel and reduce its padding/type; replace blue circles with reactive capsules using native glass and an opaque accessibility fallback. Preserve popup click-through, dismissal, and recovery audio. [Certain]
