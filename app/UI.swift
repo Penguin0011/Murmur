@@ -121,10 +121,44 @@ struct SettingsView: View {
                     }
                     Text("Tap to start and finish. Hold to record until release. Escape cancels.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(ModelFacts.displayName)
+                                if !controller.modelSummary.isEmpty {
+                                    Text(controller.modelSummary).font(.caption).foregroundStyle(Color.primary.opacity(0.72))
+                                }
+                                Label(controller.modelRow.statusText, systemImage: controller.modelRow.isReady ? "checkmark.circle" : controller.modelRow.isWorking ? "arrow.down.circle" : "exclamationmark.circle")
+                                    .font(.callout).foregroundStyle(controller.modelRow.isReady ? Color.primary.opacity(0.72) : Color.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            if controller.modelRow.actions.contains(.download) { Button("Download…", action: controller.downloadModel) }
+                            if controller.modelRow.actions.contains(.retry) { Button("Retry…", action: controller.downloadModel) }
+                            if controller.modelRow.actions.contains(.cancel) { Button("Cancel", action: controller.cancelModelDownload) }
+                            if controller.modelRow.actions.contains(.remove) { Button("Remove…", role: .destructive, action: controller.removeModel) }
+                        }
+                        if let progress = controller.modelRow.progress { ProgressView(value: progress) }
+                        if !controller.modelMessage.isEmpty {
+                            Text(controller.modelMessage).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if let license = controller.modelLicense {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("License").font(.callout.weight(.medium))
+                            ForEach(license.declarations) { declaration in
+                                Button { controller.openLink(declaration.url) } label: { Text(declaration.name + " · " + declaration.source) }
+                                    .buttonStyle(.plain).foregroundStyle(Color.accentColor).help(declaration.url.absoluteString)
+                            }
+                            Text(license.note).font(.caption).foregroundStyle(Color.primary.opacity(0.72))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                     HStack(spacing: 16) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Local transcription model")
-                            Label(controller.modelAvailable ? "Model files found" : "Choose a model folder", systemImage: controller.modelAvailable ? "checkmark.circle" : "exclamationmark.circle")
+                            Text("Advanced: model folder")
+                            Label(controller.modelAvailable ? "Model files found" : "No model files in this folder", systemImage: controller.modelAvailable ? "checkmark.circle" : "exclamationmark.circle")
                                 .font(.callout).foregroundStyle(controller.modelAvailable ? Color.primary.opacity(0.72) : Color.primary)
                             if !controller.modelDirectory.isEmpty {
                                 Text(URL(fileURLWithPath: controller.modelDirectory).lastPathComponent)
@@ -133,9 +167,10 @@ struct SettingsView: View {
                             }
                         }
                         Spacer()
+                        if controller.usesCustomModelFolder { Button("Use Default", action: controller.useDefaultModelDirectory) }
                         Button("Choose Folder…", action: controller.chooseModelDirectory)
                     }
-                    Text("Parakeet runs locally. This build requires a downloaded model; model downloads and cloud transcription are not available yet.")
+                    Text("Transcription runs on this Mac. Downloading the model uses the network once; dictation does not. A folder you choose takes effect on Apply Settings. Cloud transcription is not available yet.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Recording") }
 
@@ -207,10 +242,52 @@ struct SettingsView: View {
                         Text("Six months").tag("six-months")
                         Text("Forever").tag("forever")
                     }
+                    if let warning = controller.historyCapWarning {
+                        Text(warning).font(.callout).foregroundStyle(Color.orange).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Picker("Transcript history", selection: $controller.historyMode) {
+                        Text("Save on this Mac").tag(HistoryMode.on)
+                        Text("Off").tag(HistoryMode.off)
+                    }
+                    if controller.historyMode == .off {
+                        Text(HistoryMode.offDisclosure).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 16) {
+                        Text(DeleteAllDataText.explanation).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                        Spacer()
+                        Button("Delete All Data…", role: .destructive, action: controller.deleteAllData)
+                    }
                     Toggle("Show menu bar icon", isOn: $controller.showMenuBar)
                     Text("When hidden, reopen Murmur from Finder or Spotlight.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Output and history") }
+
+                Section {
+                    Toggle("Check for updates automatically", isOn: $controller.updateChecksEnabled)
+                    Text(UpdateText.explanation).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                    HStack(spacing: 16) {
+                        Text(controller.updateStatus.isEmpty ? "Murmur " + controller.currentVersion : controller.updateStatus)
+                            .font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("Check for Updates", action: controller.checkForUpdates).disabled(controller.checkingForUpdates)
+                    }
+                    if let release = controller.availableRelease {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(UpdateText.headline(release)).font(.headline)
+                            if !release.notes.isEmpty {
+                                Text(UpdateText.notesExcerpt(release.notes)).font(.callout).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            HStack(spacing: 16) {
+                                Text("Murmur never downloads or installs updates. Download the new version from GitHub and replace the app yourself.")
+                                    .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+                                Spacer()
+                                Button("Open Release Page…", action: controller.openReleasePage)
+                            }
+                        }
+                    }
+                } header: { Text("Updates") }
 
                 Section {
                     permissionRow("Microphone", allowed: controller.microphoneAuthorized, actionTitle: "Allow Microphone", action: controller.requestMicrophone)
@@ -263,7 +340,7 @@ struct SettingsView: View {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("History").font(.title2.weight(.semibold))
-                    Text("Saved locally · \(controller.history.count) transcripts")
+                    Text(controller.historySummary)
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 }
                 Spacer()
@@ -318,6 +395,9 @@ struct SettingsView: View {
                                             .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                                         Label(statusLabel(entry.insertionStatus), systemImage: statusSymbol(entry.insertionStatus))
                                             .font(.callout.weight(.medium))
+                                        if controller.sessionOnlyIDs.contains(entry.id) {
+                                            Text(HistoryText.sessionOnlyNote).font(.callout).foregroundStyle(Color.orange)
+                                        }
                                     }
                                     transcript("Final text", entry.finalText)
                                     if entry.rawText != entry.finalText { transcript("Raw transcription", entry.rawText) }
