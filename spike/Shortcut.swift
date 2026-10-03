@@ -181,6 +181,16 @@ final class ShortcutListener {
             emit(machine.doublePressExpired(at: ProcessInfo.processInfo.systemUptime))
         }
     }
+    /// A lone short tap queued during processing must not keep its early capture recording until
+    /// the replay: expire it at its own deadline. A second press in time makes it a double press.
+    private func scheduleQueuedTapExpiry() {
+        guard queued.count == 2, queued[1].at - queued[0].at < machine.holdThreshold else { return }
+        let pressedAt = queued[0].at
+        DispatchQueue.main.asyncAfter(deadline: .now() + machine.doublePressWindow + 0.02) { [self] in
+            guard queued.count == 2, queued[0].at == pressedAt else { return }
+            cancelQueued(); publishState()
+        }
+    }
     func cancelQueued() {
         guard !queued.isEmpty else { return }
         queued.removeAll(); onQueuedCancel?()
@@ -260,7 +270,7 @@ final class ShortcutListener {
                 onPressWithoutStart?()
                 if !queued.isEmpty || onQueuedPress() { queued.append((true, time)); return }
             }
-            if !down, !queued.isEmpty { queued.append((false, time)); return }
+            if !down, !queued.isEmpty { queued.append((false, time)); scheduleQueuedTapExpiry(); return }
         }
         if type == .keyUp || (type == .flagsChanged && !binding.isDown(event)) {
             let action = machine.release(at: time)

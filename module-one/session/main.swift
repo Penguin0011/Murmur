@@ -82,6 +82,25 @@ func sessionCheck() throws {
     assert(b2b.state == .idle && b2bListener.machine.state == .idle && processed.count == 3)
     try? FileManager.default.removeItem(at: processed[2])
 
+    // A lone tap queued during processing expires at its own deadline, not at replay.
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 60)); b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 61))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))                 // #1 is processing
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 62)); let loneQueued = b2b.early!
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 62.1))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+    assert(b2b.early == nil && !FileManager.default.fileExists(atPath: loneQueued.path) && b2bListener.queued.isEmpty && b2b.state == .processing)
+    // A double press queued during processing still survives the window and is adopted.
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 63)); let dblQueued = b2b.early!
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 63.1)); b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 63.3))
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 63.4))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+    assert(b2b.early == dblQueued && b2bListener.queued.count == 4)
+    finishProcessing.removeFirst()()                                        // #1 done: the toggle is adopted
+    assert(b2b.audio == dblQueued && b2b.state == .listening && b2bListener.machine.state == .listening)
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 70)); b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 70.1))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2)); finishProcessing.removeFirst()()
+    assert(b2b.state == .idle)
+
     // After an automatic stop (time cap, interruption) a press means "stop", not a new dictation.
     let capped2 = CaptureSession(store: store, start: { _ in }, stop: { true }, process: { _, _ in })
     let cappedListener = ShortcutListener(binding: .fn, processingSeconds: 0) { action, done in capped2.receive(action, completed: done) }
