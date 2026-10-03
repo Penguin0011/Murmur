@@ -190,6 +190,8 @@ final class PreStart: @unchecked Sendable {
     private var source: CFRunLoopSource?
     private var tapThread: TapThread?
     private let prestart = PreStart()
+    /// Recording continues this long after release so the last word survives.
+    nonisolated static let releaseTail: TimeInterval = 0.4
     private let warm = WarmRunner()
     private var noNap: NSObjectProtocol?
     private var monitor: Timer?
@@ -461,6 +463,8 @@ final class PreStart: @unchecked Sendable {
             if self.session.state == .processing, let (phase, message) = self.phaseBeforeEarly { self.setPhase(phase, message) }
         }
         listener = next; source = nextSource
+        // A stalled main thread must not keep recording after a hold's release.
+        next.onHoldRelease = { released in Capture.current?.cut(after: released + AppController.releaseTail) }
         if let retry {
             next.onPressFromIdle = { [prestart] in prestart.begin(store: retry) }
             next.onPressWithoutStart = { [prestart] in prestart.discard(store: retry) }
@@ -468,7 +472,7 @@ final class PreStart: @unchecked Sendable {
         let thread = TapThread(source: nextSource); thread.startAndWait(); tapThread = thread
         CGEvent.tapEnable(tap: tap, enable: true)
         // ponytail: fixed tail; measured: long dictations lost the last word at 0 s, kept it at 0.6 s.
-        session.releaseTail = 0.4
+        session.releaseTail = Self.releaseTail
         session.takePrestarted = { [weak self] in
             guard let self, let (capture, url) = self.prestart.take() else { return nil }
             self.capture = capture; return url

@@ -145,6 +145,17 @@ func sessionCheck() throws {
     preListener.receive(type: .flagsChanged, event: fnEvent(true, 33)); assert(pre.state == .idle)
     preListener.receive(type: .flagsChanged, event: fnEvent(false, 33.1))
     try? FileManager.default.removeItem(at: preStarted ?? adopted!)
+    // The tap thread reports a hold's release at once; taps and double presses are not cut.
+    var released: [TimeInterval] = []
+    let cutListener = ShortcutListener(binding: .fn, processingSeconds: 0, onAction: nil)
+    cutListener.onHoldRelease = { released.append($0) }
+    cutListener.notePress(.flagsChanged, fnEvent(true, 80)); cutListener.notePress(.flagsChanged, fnEvent(false, 81))
+    assert(released == [81], "hold release reported")
+    cutListener.notePress(.flagsChanged, fnEvent(true, 90)); cutListener.notePress(.flagsChanged, fnEvent(false, 90.1))
+    assert(released == [81], "a tap is not a hold")
+    cutListener.machine = ShortcutMachine(); _ = cutListener.machine.press(at: 100); cutListener.publishState()   // listening
+    cutListener.notePress(.flagsChanged, fnEvent(true, 100.3)); cutListener.notePress(.flagsChanged, fnEvent(false, 101))
+    assert(released == [81], "a press while recording (double press, toggle) is not cut")
     try? FileManager.default.removeItem(at: adopted!)
 
     var attempts = 0

@@ -137,6 +137,12 @@ final class ShortcutListener {
     var onPressFromIdle: (() -> Void)?
     /// Called on the main thread when a shortcut press did not start a session.
     var onPressWithoutStart: (() -> Void)?
+    /// Called on the tap thread with the release time when a press from idle was held past the
+    /// hold threshold: the hold is over, even if the main thread has not handled it yet.
+    var onHoldRelease: ((TimeInterval) -> Void)?
+    /// Tap thread only: when the current press from idle went down.
+    private var tapThreadPressAt: TimeInterval?
+    private let tapHoldThreshold = ShortcutMachine().holdThreshold
     /// The machine state as last published by the main thread; the tap thread reads only this.
     private let mirrorLock = NSLock()
     private var mirror: (state: ShortcutMachine.State, queued: Bool) = (.idle, false)
@@ -229,13 +235,23 @@ final class ShortcutListener {
             }, userInfo: Unmanaged.passUnretained(self).toOpaque())
         return tap
     }
-    /// Tap thread: a fresh press of the binding while idle.
+    /// Tap thread: a fresh press of the binding while idle starts capture; that press's release,
+    /// if it was a hold, ends the recording's audio at once (see `onHoldRelease`).
     func notePress(_ type: CGEventType, _ event: CGEvent) {
-        guard let onPressFromIdle, type == .keyDown || type == .flagsChanged,
-              event.getIntegerValueField(.keyboardEventKeycode) == binding.keyCode, binding.isDown(event),
+        guard type == .keyDown || type == .keyUp || type == .flagsChanged,
+              event.getIntegerValueField(.keyboardEventKeycode) == binding.keyCode,
               event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
+        let time = Double(event.timestamp) / 1_000_000_000
+        if type == .keyUp || (type == .flagsChanged && !binding.isDown(event)) {
+            if let pressed = tapThreadPressAt, time - pressed >= tapHoldThreshold { onHoldRelease?(time) }
+            tapThreadPressAt = nil
+            return
+        }
+        guard binding.isDown(event) else { return }
         let m = mirrored
-        if m.state == .idle && !m.queued { onPressFromIdle() }
+        guard m.state == .idle && !m.queued else { tapThreadPressAt = nil; return }
+        tapThreadPressAt = time
+        onPressFromIdle?()
     }
     func enqueue(type: CGEventType, event: CGEvent) {
         // Copy the borrowed event; defer the entire mutation/action pair together.
