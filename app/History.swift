@@ -1,0 +1,90 @@
+import Foundation
+import CryptoKit
+import Darwin
+
+struct HistoryEntry: Codable, Identifiable {
+    let id: String
+    let recordedAt: Date
+    let rawText: String
+    let finalText: String
+    var insertionStatus: String
+}
+
+struct HistoryStore {
+    let directory: URL
+    init(directory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Dictation/history")) throws {
+        self.directory = directory
+        if FileManager.default.fileExists(atPath: directory.path) {
+            let attrs = try FileManager.default.attributesOfItem(atPath: directory.path)
+            guard attrs[.type] as? FileAttributeType == .typeDirectory else { throw CaptureError("History requires a real directory") }
+        } else {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+    }
+    func save(_ entry: HistoryEntry) throws {
+        guard UUID(uuidString: entry.id) != nil else { throw CaptureError("Invalid history identifier") }
+        let target = directory.appendingPathComponent(entry.id + ".json")
+        let temporary = directory.appendingPathComponent(".pending-" + UUID().uuidString)
+        let descriptor = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        guard descriptor >= 0 else { throw CaptureError("Cannot create private history") }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        defer { try? handle.close(); try? FileManager.default.removeItem(at: temporary) }
+        try handle.write(contentsOf: JSONEncoder().encode(entry))
+        try handle.synchronize()
+        guard rename(temporary.path, target.path) == 0 else { throw CaptureError("Cannot commit history") }
+        let folder = open(directory.path, O_RDONLY)
+        guard folder >= 0 else { throw CaptureError("Cannot flush history directory") }
+        defer { close(folder) }
+        guard fsync(folder) == 0 else { throw CaptureError("Cannot flush history directory") }
+    }
+    func entries() throws -> [HistoryEntry] {
+        try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey])
+            .filter { $0.pathExtension == "json" && ((try? $0.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true) }
+            .compactMap { try? JSONDecoder().decode(HistoryEntry.self, from: Data(contentsOf: $0)) }
+            .sorted { $0.recordedAt > $1.recordedAt }
+    }
+    func delete(_ entry: HistoryEntry) throws {
+        guard UUID(uuidString: entry.id) != nil else { throw CaptureError("Invalid history identifier") }
+        try FileManager.default.removeItem(at: directory.appendingPathComponent(entry.id + ".json"))
+    }
+    func expired(retention: String, now: Date = Date(), calendar: Calendar = .current) throws -> [HistoryEntry] {
+        guard retention != "forever" else { return [] }
+        let cutoff: Date
+        if retention == "six-months" {
+            guard let date = calendar.date(byAdding: .month, value: -6, to: now) else { throw CaptureError("Invalid retention date") }
+            cutoff = date
+        } else { cutoff = now.addingTimeInterval(-30 * 86400) }
+        return try entries().filter { $0.recordedAt <= cutoff }
+    }
+    func purge(retention: String) throws { for entry in try expired(retention: retention) { try delete(entry) } }
+}
+
+func verifyAppModels(_ directory: URL, manifest: URL) throws {
+    let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
+    guard let models = object?["models"] as? [String: Any],
+          let model = models["FluidInference/parakeet-unified-en-0.6b-coreml"] as? [String: Any],
+          let files = model["files"] as? [[String: Any]], let batch = model["batch_files"] as? [String] else {
+        throw CaptureError("Invalid model manifest")
+    }
+    for name in batch {
+        guard !name.hasPrefix("/"), !name.split(separator: "/").contains(".."),
+              let metadata = files.first(where: { $0["rfilename"] as? String == name }),
+              let size = metadata["size"] as? Int else { throw CaptureError("Invalid model file") }
+        let path = directory.appendingPathComponent(name)
+        let attrs = try FileManager.default.attributesOfItem(atPath: path.path)
+        guard (attrs[.size] as? NSNumber)?.intValue == size else { throw CaptureError("Model file size mismatch") }
+        let handle = try FileHandle(forReadingFrom: path)
+        defer { try? handle.close() }
+        if let lfs = metadata["lfs"] as? [String: Any], let expected = lfs["sha256"] as? String {
+            var hash = SHA256()
+            while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
+            guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == expected else { throw CaptureError("Model checksum mismatch") }
+        } else if let expected = metadata["git_blob_sha1"] as? String {
+            var hash = Insecure.SHA1()
+            hash.update(data: Data("blob \(size)\0".utf8))
+            while let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty { hash.update(data: data) }
+            guard hash.finalize().map({ String(format: "%02x", $0) }).joined() == expected else { throw CaptureError("Model checksum mismatch") }
+        } else { throw CaptureError("Missing model checksum") }
+    }
+}
