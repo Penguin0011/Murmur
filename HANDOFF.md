@@ -43,3 +43,5 @@ Automated TextEdit run (Claude-driven, harness outside the command sandbox): app
 Chat composer (ChatGPT/Codex desktop 26.928.40906, new unsent chat): readable AXTextArea, but the AX write reports success without delivering; harness correctly reports unverified with no paste. Open decision: allow paste fallback when read-back shows the field unchanged. [Certain]
 
 Paste fallback added for AX writes that report success but leave a non-browser field unchanged (300 ms settle). Codex composer now verifies via the fallback, and observation passes the live-testable cases. Arc exposed a focused AXTextArea this time, but the write was dropped again and the fallback correctly skipped the unknown browser field type. Open decision: whether browser fields may use the fallback. [Certain]
+
+Fallback extended to browser fields of unknown type (user decision; secure fields still rejected). Arc textarea now receives the text exactly once via paste, screen-confirmed; it stays harness-unverified and learning-ineligible. [Certain]

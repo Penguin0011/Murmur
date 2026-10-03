@@ -47,7 +47,7 @@ Repeated down events do not create sessions. A release belonging to the tap that
 | Category | Intended test target | Insertion | Observation | Evidence |
 |---|---|---|---|---|
 | Native editor | TextEdit 1.20 | Verified AX write | Pass for live-testable cases | Replacement, Undo, appended text, cursor outside span, focus departure, 60-second expiry, consecutive dictations; permission revocation and clipboard fallback pending |
-| Browser text field | Arc 1.166.0, local textarea | Unverified; AX write silently dropped; fallback skipped (unknown browser field type) | Ineligible | Field now exposed as AXTextArea (earlier AXWebArea); visible text unchanged |
+| Browser text field | Arc 1.166.0, local textarea | Delivered once via paste fallback (screen-confirmed); harness-unverified by design | Ineligible (unknown browser field type) | AX write alone silently drops text; field exposed as AXTextArea this session |
 | Rich text | Safari 26.6.2, synthetic Google Doc | Default: no field exposed. With Docs screen reader support: AX write delivered (user-observed), harness-unverified | Ineligible (browser field type unknown) | Requires a user-enabled Docs setting; product requirement says this must not be needed |
 | Chat composer | ChatGPT/Codex desktop 26.928.40906 (`com.openai.codex`), new unsent chat | Verified via paste fallback after unchanged AX write | Pass for live-testable cases | Replacement, Undo, append, focus departure, consecutive dictations; AX write alone silently drops text |
 | Code editor | Synthetic disposable editor buffer | Pending | Pending | No live result yet |
@@ -145,6 +145,19 @@ insertion=unverified detail=AX selected-text write delivery unverified; retain o
 
 The Arc exposure change may come from another accessibility client (the computer-use tool) activating Chromium's tree; it is not established as default behavior. Extending the fallback to browser fields needs a separate decision on unknown field types. [Certain]
 
+### Paste fallback extended to browser fields (Arc retest)
+
+At the user's direction, browser fields of unknown type now also take the unchanged-write paste fallback. Secure fields are still rejected before any write (AXSecureTextField, `AXDOMInputType=password`, protected content), and a secure field has no readable value, so the fallback predicate cannot pass for it. A browser paste remains `unverified` because read-back of unknown browser fields is not trusted, and learning stays excluded. A password field a browser fails to mark as secure would now receive a paste; that is the accepted risk of this decision. [Certain]
+
+Arc 1.166.0, same focused local textarea: [Certain]
+
+```text
+app=company.thebrowser.Browser role=AXTextArea subrole=unknown secure=false valueReadable=true selectionReadable=true learningEligible=false
+insertion=unverified detail=clipboard paste after unchanged AX write delivery unverified; retain output, never automatically retry
+```
+
+A screenshot afterwards showed `Browser probe: Acme dictation probe`: delivered exactly once, no duplicate. [Certain]
+
 ## Rich-text synthetic test evidence
 
 Safari 26.6.2 (`com.apple.Safari`), new disposable Google Doc containing `Rich probe: `, run by the user from a terminal holding Accessibility permission (this Claude desktop session lacked it and recorded nothing). Notion and Pages are not installed. [Certain]
@@ -176,7 +189,7 @@ Use synthetic text only. In each category, test verified insertion, an attributa
 
 ## Safety and remaining gates
 
-- AX read-back mismatch must retain the output without another insertion attempt, except one paste when a non-browser field reads exactly unchanged after the settle wait; otherwise paste only when the AX write is unsupported. Clipboard restoration must skip after another writer changes the clipboard. [Certain]
+- AX read-back mismatch must retain the output without another insertion attempt, except one paste when a nonsecure field (browser fields included) reads exactly unchanged after the settle wait; otherwise paste only when the AX write is unsupported. Clipboard restoration must skip after another writer changes the clipboard. [Certain]
 - Known secure fields must be rejected. Browser fields of unknown type must remain unverified and excluded from learning even when text read-back matches. [Certain]
 - Anchored range attribution does not prove semantic equivalence. A short replacement can change meaning, so candidates alone cannot justify automatic vocabulary promotion. [Certain]
 - Persisted recovery, audio capture, production learning eligibility, model inference, UI, signing, and packaging are outside this standalone spike. [Certain]
