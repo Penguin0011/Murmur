@@ -38,7 +38,16 @@ runtime/Dictation.app/Contents/MacOS/Dictation --preview
 
 Preview disables shortcut capture and uses temporary history/retry storage. Permission buttons and Apply Settings are real controls; inspecting preview does not require using them. [Certain]
 
-`check_ui.swift` is an explicit synthetic visual fixture for errors and populated history. Compile it instead of `main.swift` with the controller/UI dependencies used above, using `/tmp/dictation-ui-check` as the output, then run it. It creates temporary storage, synthetic transcripts, and an error bubble, without capture or insertion; dismissal asserts that recovery history remains. [Certain]
+`check_ui.sh` builds and runs the synthetic visual fixture with temporary storage, synthetic transcripts, and an error bubble. It performs no capture or insertion; dismissal asserts that recovery history remains. The fixture has a working Quit menu and closes its temporary storage on normal exit. [Certain]
+
+```sh
+app/check_ui.sh
+app/check_ui.sh --light
+app/check_ui.sh --light --compact --opaque
+app/check_ui.sh --bubble-only
+```
+
+The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
 
 The developer audio probe requires both flags and must target a disposable field:
 
@@ -50,6 +59,6 @@ This explicitly performs transcription and one insertion attempt. It preserves t
 
 ## Evidence from October 2, 2026
 
-The app bundle built and ad-hoc signing passed. Launch, history/model-verifier, controller dismissal/audio ownership, session state, processor fault/signal, and spike insertion/observation checks passed. Native screenshots/AX inspection confirmed settings and empty/populated History, error dismissal to Ready, preserved synthetic entries, matching-transcript selection, and no-results search. The UI mechanical detector reported no findings. [Certain]
+The app bundle built and ad-hoc signing passed. Launch, history/model-verifier, controller dismissal/audio ownership, session state, processor fault/signal, and spike insertion/observation checks passed. Native screenshots/AX inspection confirmed settings and empty/populated History, error dismissal to Ready, preserved synthetic entries, matching-transcript selection, and no-results search. The native Liquid Glass update was captured in light, dark, and forced opaque compact appearances. Scoped screenshot review resolved supporting-text and search-placeholder contrast findings. Native History filtering/clearing and the floating bubble Dismiss click passed; the fixture confirmed preserved recovery history. [Certain]
 
-Physical shortcut/microphone first-word behavior, real speech quality, clipboard-manager races, and live insertion after these changes remain unverified. The floating bubble's new dismissal control is compiled and shares the checked dismissal handler; its own native click path was not exercised in this pass. [Certain]
+Physical shortcut/microphone first-word behavior, real speech quality, clipboard-manager races, and live insertion after these changes remain unverified. The synthetic bubble click does not establish focus preservation in a real destination app. [Certain]

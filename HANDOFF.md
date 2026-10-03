@@ -1,3 +1,13 @@
+# Liquid Glass checkpoint — October 2, 2026
+
+User approved autonomous native Liquid Glass direction across settings, History, and the status bubble. Implemented native glass surfaces and controls, fixed action footers, semantic text contrast, and opaque accessibility fallbacks. Production build and synthetic UI fixture compile passed. [Certain]
+
+Captured light, dark, and forced opaque compact appearances. Independent scoped contrast review resolved its findings; the final light search placeholder measured approximately 5.8:1. Native search filtering/clearing passed. The real floating panel Dismiss click hid the panel, and the fixture asserted recovery history remained. Evidence is local and ignored under runtime/glass-review/. [Certain]
+
+Remaining validation: actual destination focus preservation, physical shortcut/microphone behavior, live speech, insertion, and clipboard races. The opaque fixture exercises the fallback branch without changing system accessibility preferences. See app/README.md for repeatable fixture commands and DESIGN.md for native design values. [Certain]
+
+---
+
 # Native app recovery and UI checkpoint — October 2, 2026
 
 This supersedes the older no-app-skeleton continuation below. Branch `aakash-module-one` now contains the native app in `app/`; build/run/check instructions and current evidence are in `app/README.md`. [Certain]

@@ -24,7 +24,7 @@ The selected local model is Parakeet Unified. M1 performance validation is defer
 
 ## Visual commitment
 
-The PRD requires a minimal liquid-glass bubble near the destination display's bottom edge. Native settings/history should prioritize familiar controls, clear states, and recovery. [Certain]
+The approved visual direction extends native macOS Liquid Glass from the bottom-screen recording bubble to floating status, navigation, search, and action surfaces over calm settings/history content. Keep system typography, semantic colors, familiar controls, and clear recovery; avoid stacked glass cards. [Certain]
 
 ## Evidence on hand
 
