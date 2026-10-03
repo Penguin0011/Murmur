@@ -6,7 +6,7 @@ import SwiftUI
     let controller: AppController
     init(options: LaunchOptions) {
         self.options = options
-        controller = AppController(preview: options.preview || options.testAudio != nil)
+        controller = AppController(preview: options.preview || options.testAudio != nil, isolatedStorage: options.preview)
         super.init()
     }
     var window: NSWindow?
