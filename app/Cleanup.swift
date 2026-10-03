@@ -388,6 +388,8 @@ enum CleanupGuard {
     }
 
     static func check(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String] = []) -> CleanupGuardResult {
+        // Judge corrections against the comma form the cleaner rewrote ("Tuesday. No wait." -> "Tuesday, no wait,").
+        let raw = options.corrections ? RuleCleaner.mergeSplitCues(raw) : raw
         let rawWords = words(raw)
         let outWords = words(cleaned)
         if rawWords.isEmpty { return cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .pass : .fail(.insertedWords) }
@@ -823,7 +825,37 @@ struct RuleCleaner: Cleaner {
         t[i].kind == .word && CleanupText.ordinals[t[i].lower] == nil && CleanupText.numberValue(t[i].lower) != nil
     }
 
+    /// Speech models often end a sentence around a cue ("Tuesday. No wait. Wednesday."). Rejoin it
+    /// into the comma form the rules expect, and keep the rejoined text only if a correction applies.
     static func applyCorrections(_ text: String) -> String {
+        let merged = mergeSplitCues(text)
+        if merged != text {
+            let corrected = applyCommaCorrections(merged)
+            if corrected != merged { return corrected }
+        }
+        return applyCommaCorrections(text)
+    }
+
+    // "Actually" and "scratch that" are left out: the first often starts a real sentence, the
+    // second already accepts a preceding period.
+    static let splitCue = try! NSRegularExpression(pattern: #"(?<=[\p{L}\p{N}])\. (No wait|Wait,? no|I mean|I meant|Or rather|Sorry|No)[.,] +(\p{L}+|\p{N}+)"#)
+
+    static func mergeSplitCues(_ text: String) -> String {
+        let ns = text as NSString
+        var out = text
+        for m in splitCue.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+            let cue = ns.substring(with: m.range(at: 1)).lowercased().replacingOccurrences(of: ",", with: "")
+            var word = ns.substring(with: m.range(at: 2))
+            // Only words known to be lowercase mid-sentence; names, weekdays and months keep their capital.
+            let lower = word.lowercased()
+            if relativeTimes.contains(lower) || colors.contains(lower) || anchors.contains(lower)
+                || CleanupText.ordinals[lower] != nil || CleanupText.numberValue(lower) != nil { word = lower }
+            out = (out as NSString).replacingCharacters(in: m.range, with: ", \(cue), \(word)")
+        }
+        return out
+    }
+
+    static func applyCommaCorrections(_ text: String) -> String {
         var t = CleanupText.tokenize(text)
         var changed = false
         var edits = 0
