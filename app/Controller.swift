@@ -10,6 +10,63 @@ import Darwin
 /// Content-free timing and stop reasons, alongside the capture and shortcut timing.
 private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
 
+/// Keeps `ModelBench MODEL_DIRECTORY --serve` running with the model loaded, so a dictation skips
+/// process launch and model load (about 0.4 s). One request at a time on a private queue. Any
+/// failure (not ready, died, timed out) answers nil so the caller falls back to a one-shot helper;
+/// the warm process restarts on the next request. A changed model fingerprint restarts it.
+final class WarmRunner: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "murmur.warm-runner", qos: .userInitiated)
+    private var task: Process?, input: FileHandle?, output: FileHandle?, key: String?
+    private var buffered = Data()
+
+    func prepare(helper: URL, models: URL, key: String) { queue.async { [self] in _ = start(helper, models, key) } }
+    func transcribe(_ audio: URL, helper: URL, models: URL, key: String, completion: @escaping (Data?) -> Void) {
+        queue.async { [self] in
+            guard !audio.path.contains("\n"), start(helper, models, key), let input,
+                  (try? input.write(contentsOf: Data((audio.path + "\n").utf8))) != nil,
+                  let line = readLine(timeout: 300) else { stopLocked(); completion(nil); return }
+            completion(line)
+        }
+    }
+    func stop() { queue.async { [self] in stopLocked() } }
+    func stopNow() { queue.sync { stopLocked() } }
+
+    private func start(_ helper: URL, _ models: URL, _ key: String) -> Bool {
+        if let task, task.isRunning, self.key == key { return true }
+        stopLocked()
+        let next = Process(), toChild = Pipe(), fromChild = Pipe()
+        next.executableURL = helper; next.arguments = [models.path, "--serve"]
+        next.standardInput = toChild; next.standardOutput = fromChild; next.standardError = FileHandle.nullDevice
+        do { try next.run() } catch { return false }
+        task = next; input = toChild.fileHandleForWriting; output = fromChild.fileHandleForReading; self.key = key; buffered = Data()
+        guard let ready = readLine(timeout: 60),
+              (try? JSONSerialization.jsonObject(with: ready) as? [String: Any])?["ready"] as? Bool == true else { stopLocked(); return false }
+        timingLog.notice("warm-runner ready pid=\(next.processIdentifier)")
+        return true
+    }
+    /// Reads one line; a watchdog terminates the helper on timeout, which ends the read with EOF.
+    private func readLine(timeout: TimeInterval) -> Data? {
+        guard let output, let task else { return nil }
+        let watchdog = DispatchWorkItem { if task.isRunning { task.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+        defer { watchdog.cancel() }
+        while true {
+            if let newline = buffered.firstIndex(of: 0x0A) {
+                let line = buffered[buffered.startIndex..<newline]; buffered = Data(buffered[(newline + 1)...])
+                return Data(line)
+            }
+            let chunk = output.availableData
+            if chunk.isEmpty { return nil }
+            buffered.append(chunk)
+        }
+    }
+    private func stopLocked() {
+        try? input?.close()
+        if let task, task.isRunning { task.terminate() }
+        task = nil; input = nil; output = nil; key = nil; buffered = Data()
+    }
+}
+
 /// Starts capture on a dedicated queue as soon as the tap thread sees a shortcut press, so a slow
 /// main thread does not delay the microphone. The session adopts it; anything unclaimed is deleted.
 final class PreStart: @unchecked Sendable {
@@ -133,6 +190,7 @@ final class PreStart: @unchecked Sendable {
     private var source: CFRunLoopSource?
     private var tapThread: TapThread?
     private let prestart = PreStart()
+    private let warm = WarmRunner()
     private var noNap: NSObjectProtocol?
     private var monitor: Timer?
     private var expiry: Timer?
@@ -219,11 +277,19 @@ final class PreStart: @unchecked Sendable {
         refreshKeys()
     }
     func start() {
+        // Writing to a warm helper that died must fail with EPIPE, not kill Murmur.
+        signal(SIGPIPE, SIG_IGN)
         // App Nap would delay the shortcut; idle system sleep stays allowed.
         // Verify the model now so the first dictation does not hash 1.8 GB.
         if !preview, let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") {
             let directory = URL(fileURLWithPath: modelDirectory)
-            DispatchQueue.global(qos: .utility).async { try? ModelVerificationCache.shared.verify(directory, manifest: manifest) }
+            let warm = warm
+            DispatchQueue.global(qos: .utility).async {
+                guard (try? ModelVerificationCache.shared.verify(directory, manifest: manifest)) != nil,
+                      let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"),
+                      let fingerprint = try? ModelVerificationCache.fingerprint(directory, manifest: manifest) else { return }
+                warm.prepare(helper: helper, models: directory, key: directory.path + "|" + fingerprint.joined(separator: ","))
+            }
         }
         noNap = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Respond to the dictation shortcut without delay")
         refreshPermissions()
@@ -498,11 +564,24 @@ final class PreStart: @unchecked Sendable {
             catch { DispatchQueue.main.async { guard let self, self.generation == token else { return }; self.setPhase("Error", "Model verification failed. Choose the pinned model folder. Audio is saved for retry."); done() }; return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
-                self.launchRunner(helper, models: models, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+                self.runTranscription(helper, models: models, manifest: manifest, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
             }
         }
     }
     private struct NoSpeech: Error {}
+    /// Warm helper first; if it cannot answer, the one-shot helper transcribes the same audio.
+    private func runTranscription(_ helper: URL, models: URL, manifest: URL, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
+        let key = models.path + "|" + ((try? ModelVerificationCache.fingerprint(models, manifest: manifest))?.joined(separator: ",") ?? "")
+        let began = ProcessInfo.processInfo.systemUptime
+        warm.transcribe(audio, helper: helper, models: models, key: key) { [weak self] line in
+            timingLog.notice("warm-runner took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3)) answered=\(line != nil, privacy: .public)")
+            if let line { self?.handleTranscript(.success(line), audio: audio, store: store, timestamp: timestamp, token: token, done: done); return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.generation == token else { return }
+                self.launchRunner(helper, models: models, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+            }
+        }
+    }
     private func launchRunner(_ helper: URL, models: URL, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
         let temp = audio.deletingLastPathComponent().appendingPathComponent(".result-" + UUID().uuidString)
         let fd = open(temp.path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
@@ -518,27 +597,34 @@ final class PreStart: @unchecked Sendable {
             task.waitUntilExit(); timeout.cancel()
             timingLog.notice("runner took=\(ProcessInfo.processInfo.systemUptime - launched, format: .fixed(precision: 3)) status=\(task.terminationStatus)")
             defer { try? output.close(); try? FileManager.default.removeItem(at: temp) }
-            do {
+            let result = Result<Data, Error> {
                 guard task.terminationStatus == 0 else { throw CaptureError("Transcription failed") }
                 try output.synchronize(); try output.seek(toOffset: 0)
-                let data = try output.readToEnd() ?? Data()
-                guard let last = String(data: data, encoding: .utf8)?.split(separator: "\n").last,
-                      let result = try JSONSerialization.jsonObject(with: Data(last.utf8)) as? [String: Any],
-                      let text = result["text"] as? String else { throw CaptureError("No usable transcript") }
-                // The model ran and answered, but heard nothing; audio stays until the 24-hour purge.
-                guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NoSpeech() }
-                let savedEntry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: text, insertionStatus: "saved-not-inserted")
-                try store.save(savedEntry)
-                try? FileManager.default.removeItem(at: audio)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.generation == token else { return }
-                    self.runner = nil; self.runnerOutput = nil
-                    self.deliver(savedEntry, store: store, token: token, done: done)
-                }
-            } catch {
-                let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
-                DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.runnerOutput = nil; self.setPhase("Error", message); done() }
+                return try output.readToEnd() ?? Data()
             }
+            self?.handleTranscript(result, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+        }
+    }
+    /// Shared by the warm and one-shot helpers: parse the last JSON line, save, then deliver. Runs off main.
+    nonisolated private func handleTranscript(_ result: Result<Data, Error>, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
+        do {
+            let data = try result.get()
+            guard let last = String(data: data, encoding: .utf8)?.split(separator: "\n").last,
+                  let result = try JSONSerialization.jsonObject(with: Data(last.utf8)) as? [String: Any],
+                  let text = result["text"] as? String else { throw CaptureError("No usable transcript") }
+            // The model ran and answered, but heard nothing; audio stays until the 24-hour purge.
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NoSpeech() }
+            let savedEntry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: text, insertionStatus: "saved-not-inserted")
+            try store.save(savedEntry)
+            try? FileManager.default.removeItem(at: audio)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.generation == token else { return }
+                self.runner = nil; self.runnerOutput = nil
+                self.deliver(savedEntry, store: store, token: token, done: done)
+            }
+        } catch {
+            let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
+            DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.runnerOutput = nil; self.setPhase("Error", message); done() }
         }
     }
     /// Cloud transcription (R4): one provider call in a cancellable Task, never the local model.
@@ -757,6 +843,7 @@ final class PreStart: @unchecked Sendable {
         alert.addButton(withTitle: "Remove"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: modelDownloadInFlight) { modelMessage = refusal; return }
+        warm.stopNow() // Release the helper's open model files before deleting them.
         do { try downloader.remove(); modelMessage = "The model was removed." }
         catch { modelMessage = (error as? ModelDownloadError)?.userMessage ?? ModelDownloadError.fileSystem.userMessage }
         modelStatus = downloader.status()
@@ -896,6 +983,7 @@ final class PreStart: @unchecked Sendable {
             runner.waitUntilExit()
         }
         if let runnerOutput { try? FileManager.default.removeItem(at: runnerOutput) }
+        warm.stopNow()
         bubble.hide()
         if let previewDirectory { try? FileManager.default.removeItem(at: previewDirectory) }
     }

@@ -88,5 +88,33 @@ import AppKit
         // The learning lexicon uses the real English spell checker.
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
+        try warmRunnerChecks()
+    }
+
+    /// A fake helper speaks the --serve protocol: ready line, one answer per path, "die" exits.
+    static func warmRunnerChecks() throws {
+        signal(SIGPIPE, SIG_IGN)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("warm-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let helper = dir.appendingPathComponent("helper"), starts = dir.appendingPathComponent("starts")
+        try "#!/bin/sh\necho start >> '\(starts.path)'\necho '{\"ready\":true}'\nwhile read p; do [ \"$p\" = \"$(dirname \"$p\")/die\" ] && exit 1; echo \"{\\\"text\\\":\\\"$(basename \"$p\")\\\"}\"; done\n"
+            .write(to: helper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
+        let runner = WarmRunner(), models = dir
+        func ask(_ name: String, key: String = "k1") -> String? {
+            let done = DispatchSemaphore(value: 0); var answer: String?
+            runner.transcribe(dir.appendingPathComponent(name), helper: helper, models: models, key: key) { line in
+                answer = line.flatMap { (try? JSONSerialization.jsonObject(with: $0) as? [String: Any])?["text"] as? String }; done.signal()
+            }
+            done.wait(); return answer
+        }
+        func launches() -> Int { ((try? String(contentsOf: starts, encoding: .utf8)) ?? "").split(separator: "\n").count }
+        precondition(ask("a.wav") == "a.wav" && ask("b.wav") == "b.wav" && launches() == 1, "warm helper answers repeatedly from one launch")
+        precondition(ask("die") == nil, "a helper that dies answers nil so the caller falls back")
+        precondition(ask("c.wav") == "c.wav" && launches() == 2, "the next request restarts the helper")
+        precondition(ask("d.wav", key: "k2") == "d.wav" && launches() == 3, "a new model fingerprint restarts the helper")
+        runner.stopNow()
+        print("Warm runner checks passed (one launch, fallback on death, restart, model change).")
     }
 }
