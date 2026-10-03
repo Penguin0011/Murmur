@@ -77,6 +77,16 @@ import AppKit
         controller.downloadModel()
         precondition(controller.modelMessage == ModelDownloadError.invalidManifest.userMessage && controller.phase == "Saved")
         precondition(controller.historySummary.hasPrefix(controller.historyMode == .on ? "Saved locally" : "History is off"))
+        // Routes and keys (R4, R5): nothing to cancel while idle; preview keeps keys in memory and publishes only presence.
+        precondition(!controller.canCancelRequest)
+        controller.cancelCloudRequest()
+        precondition(controller.phase == "Saved")
+        precondition(!controller.saveKey(.gemini, "sk bad 99") && controller.keyMessages[.gemini] == KeyText.invalid && !controller.savedKeys.contains(.gemini))
+        precondition(controller.saveKey(.gemini, "test-key-123") && controller.savedKeys.contains(.gemini) && controller.keyMessages[.gemini] == KeyText.saved)
+        controller.removeKey(.gemini)
+        precondition(!controller.savedKeys.contains(.gemini))
+        // The learning lexicon uses the real English spell checker.
+        precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
     }
 }

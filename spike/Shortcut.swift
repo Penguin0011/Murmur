@@ -89,6 +89,9 @@ final class ShortcutListener {
     let binding: ShortcutBinding
     let processingSeconds: Double
     let onAction: ((ShortcutMachine.Action, @escaping () -> Void) -> Void)?
+    /// Called on the main thread for a fresh Escape press while a session is processing; the app
+    /// uses it to cancel a cloud request. Escape is not swallowed then.
+    var onEscapeWhileProcessing: (() -> Void)?
     init(binding: ShortcutBinding, processingSeconds: Double, onAction: ((ShortcutMachine.Action, @escaping () -> Void) -> Void)?) {
         self.binding = binding
         self.processingSeconds = processingSeconds
@@ -153,7 +156,10 @@ final class ShortcutListener {
             return
         }
         let key = event.getIntegerValueField(.keyboardEventKeycode)
-        if type == .keyDown && key == 53 { emit(machine.cancel()); return }
+        if type == .keyDown && key == 53 {
+            if machine.state == .processing && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { onEscapeWhileProcessing?() }
+            emit(machine.cancel()); return
+        }
         guard key == binding.keyCode else { return }
         let time = Double(event.timestamp) / 1_000_000_000
         if type == .keyUp || (type == .flagsChanged && !binding.isDown(event)) {

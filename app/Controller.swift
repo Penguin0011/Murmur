@@ -51,6 +51,25 @@ import Darwin
     @Published var availableRelease: ReleaseInfo?
     @Published var checkingForUpdates = false
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0" }
+    // Processing routes (R4) apply on Apply Settings, after any disclosure is confirmed.
+    // API keys (R5) save immediately to the Keychain; only their presence is published.
+    @Published var transcriptionRoute: TranscriptionRoute
+    @Published var cloudTranscriber: CloudTranscriber
+    @Published var cleanupChoice: CleanupChoice
+    @Published var localServerURL: String
+    @Published var localServerModel: String
+    @Published var localServerModels: [String] = []
+    @Published var localServerMessage = ""
+    @Published var findingModels = false
+    @Published var savedKeys: Set<ProviderID> = []
+    @Published var keyMessages: [ProviderID: String] = [:]
+    var routeSettings: RouteSettings { RouteSettings(transcription: transcriptionRoute, cloudTranscriber: cloudTranscriber, cleanup: cleanupChoice, serverURL: localServerURL, serverModel: localServerModel) }
+    var appliedTranscriptionIsLocal: Bool { appliedRoutes.transcription == .local }
+    var appliedCleanupIsLocal: Bool { appliedRoutes.cleanup == .localRules }
+    /// What a stage would send off this Mac with the settings as edited, or nil when nothing leaves.
+    /// Reads no key (SwiftUI calls it on every render); the Apply alert uses the saved keys.
+    func routeDisclosure(_ stage: ProcessingStage) -> String? { DisclosureText.summary(RoutePlan.make(routeSettings, cleanupSendsText: true) { _ in nil }, stage: stage) }
+    var canCancelRequest: Bool { cloudRequest.isActive }
     var isBusy: Bool { phase == "Listening" || phase == "Processing" || (sessionAvailable && session.state != .idle) }
     var openSettings: (() -> Void)?
     var updateMenu: (() -> Void)?
@@ -67,6 +86,14 @@ import Darwin
     private lazy var updateChecker: UpdateChecker? = (try? UpdateConfiguration(currentVersion: currentVersion)).map { UpdateChecker(configuration: $0) }
     private var retry: RetryAudio?
     private var processing: ProcessingCoordinator?
+    private var appliedRoutes: RouteSettings
+    // Preview and the developer probe never touch the login Keychain.
+    private lazy var credentials: CredentialStore = preview ? InMemoryCredentialStore() : KeychainCredentialStore(service: "Murmur")
+    private let cloudRequest = CloudRequest()
+    private var cloudDone: (() -> Void)?
+    private var cloudStage: ProcessingStage?
+    /// This session's cloud transcriber, chosen at start; nil means local Parakeet.
+    private var sessionTranscriber: TranscriptionProvider?
     private var capture: Capture?
     private var destination: FocusSnapshot?
     private var destinationScreen: NSScreen?
@@ -130,6 +157,9 @@ import Darwin
         historyMode = processingSettings.historyMode
         appliedHistoryMode = processingSettings.historyMode
         updateChecksEnabled = processingSettings.updateChecksEnabled
+        let routes = RouteSettings.load(from: defaults)
+        transcriptionRoute = routes.transcription; cloudTranscriber = routes.cloudTranscriber; cleanupChoice = routes.cleanup
+        localServerURL = routes.serverURL; localServerModel = routes.serverModel; appliedRoutes = routes
         self.preview = preview
         let isolatedStorage = isolatedStorage ?? preview
         do {
@@ -140,8 +170,11 @@ import Darwin
             if let store { records = HistoryRouter(disk: historyDisk(store), persists: appliedHistoryMode.persistsTranscripts) }
             retry = try RetryAudio(directory: base.appendingPathComponent("retry-audio"))
             // Dictionary/ledger corruption disables only cleanup and the dictionary: dictations are then held for review in History rather than blocking all dictation.
-            do { processing = try ProcessingCoordinator(directory: base.appendingPathComponent("dictionary")) }
+            do { processing = try ProcessingCoordinator(directory: base.appendingPathComponent("dictionary"), isCommonWord: isCommonEnglishWord) }
             catch { processing = nil; dictionaryMessage = "The dictionary could not be read. Dictations are held in History until it is repaired." }
+            if let processing, processing.settings.route != routes.cleanup.processingRoute {
+                var next = processing.settings; next.route = routes.cleanup.processingRoute; try? processing.update(next)
+            }
             if let retry {
                 for file in try FileManager.default.contentsOfDirectory(at: retry.directory, includingPropertiesForKeys: nil) where file.lastPathComponent.hasPrefix(".result-") {
                     try FileManager.default.removeItem(at: file)
@@ -151,6 +184,7 @@ import Darwin
             historySaved(); refreshRecoveryAudio(); refreshDictionary()
         } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
         modelStatus = downloader?.status() ?? .notDownloaded
+        refreshKeys()
     }
     func start() {
         refreshPermissions()
@@ -231,6 +265,17 @@ import Darwin
             alert.addButton(withTitle: "Turn Off History"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { historyMode = appliedHistoryMode; return }
         }
+        // R4: confirm what leaves this Mac before the first use of a route, provider or endpoint.
+        let routes = routeSettings
+        let plan = routePlan(routes, cleanupSendsText: cleanupFillers || cleanupCorrections || cleanupLists)
+        let pending = DisclosureAcknowledgement.pending(plan, acknowledged: DisclosureAcknowledgement.acknowledged(.standard))
+        if !pending.isEmpty {
+            let text = DisclosureText.alert(pending)
+            let alert = NSAlert(); alert.messageText = text.title; alert.informativeText = text.body
+            alert.addButton(withTitle: "Send and Apply"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { revertRoutes(); return }
+        }
+        appliedRoutes = routes; routes.save(to: .standard); DisclosureAcknowledgement.record(plan, in: .standard)
         appliedRetention = retention
         appliedHistoryMode = historyMode; records?.persistsTranscripts = historyMode.persistsTranscripts
         let defaults = UserDefaults.standard
@@ -241,7 +286,7 @@ import Darwin
         if let processing {
             var next = processing.settings
             next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists)
-            next.learningEnabled = learningEnabled
+            next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
             next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled
             do { try processing.update(next) } catch { setPhase("Error", "Could not save cleanup and learning settings.") }
         }
@@ -250,6 +295,13 @@ import Darwin
         defaults.set(updateChecksEnabled, forKey: ProcessingSettings.Key.updateChecks)
         do { try store?.purge(retention: appliedRetention); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }; updateMenu?()
+    }
+    private func revertRoutes() {
+        transcriptionRoute = appliedRoutes.transcription; cloudTranscriber = appliedRoutes.cloudTranscriber; cleanupChoice = appliedRoutes.cleanup
+        localServerURL = appliedRoutes.serverURL; localServerModel = appliedRoutes.serverModel
+    }
+    private func routePlan(_ routes: RouteSettings, cleanupSendsText: Bool) -> RoutePlan {
+        RoutePlan.make(routes, cleanupSendsText: cleanupSendsText) { try? self.credentials.read($0) }
     }
     private func configureShortcut() {
         removeShortcut()
@@ -262,6 +314,7 @@ import Darwin
             self.handle(action, done: done)
         })
         guard let tap = next.createTap(), let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = "The shortcut could not start. Check Input Monitoring and Accessibility."; return }
+        next.onEscapeWhileProcessing = { [weak self] in self?.cancelCloudRequest() }
         listener = next; source = nextSource
         CFRunLoopAddSource(CFRunLoopGetMain(), nextSource, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
         session.finishRecording = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
@@ -277,9 +330,16 @@ import Darwin
         guard sessionAvailable else { done(); return }
         if action == .start {
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
-            if let refusal = ModelGate.startRefusal(modelAvailable: modelFilesAvailable(), runtimeAvailable: Bundle.main.url(forAuxiliaryExecutable: "ModelBench") != nil, downloadingActiveModel: modelDownloadInFlight && !usesCustomModelFolder) {
+            // An unconfigured or unconfirmed cloud route refuses; it never falls back to local.
+            let plan = routePlan(appliedRoutes, cleanupSendsText: processing?.settings.options.anyEnabled ?? false)
+            let unconfirmed = !DisclosureAcknowledgement.pending(plan, acknowledged: DisclosureAcknowledgement.acknowledged(.standard)).isEmpty
+            if let refusal = plan.refusal ?? (unconfirmed ? DisclosureText.startRefusal : nil) {
                 session.resetShortcut?(); setPhase("Error", refusal); done(); return
             }
+            if plan.usesLocalModel, let refusal = ModelGate.startRefusal(modelAvailable: modelFilesAvailable(), runtimeAvailable: Bundle.main.url(forAuxiliaryExecutable: "ModelBench") != nil, downloadingActiveModel: modelDownloadInFlight && !usesCustomModelFolder) {
+                session.resetShortcut?(); setPhase("Error", refusal); done(); return
+            }
+            sessionTranscriber = plan.transcriber; processing?.cloudCleaner = plan.cleaner
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }
@@ -325,7 +385,22 @@ import Darwin
         return NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
     }
     func stopRecording() { guard let listener else { return }; listener.emit(listener.machine.finish()) }
-    func cancelRecording() { guard let listener else { return }; listener.emit(listener.machine.cancel()) }
+    func cancelRecording() {
+        if cloudRequest.isActive { cancelCloudRequest(); return }
+        guard let listener else { return }; listener.emit(listener.machine.cancel())
+    }
+    /// Escape or Cancel during a cloud request cancels its Task (and HTTP request); nothing from
+    /// this session is inserted. Audio is deleted, as for a canceled recording; a transcript that
+    /// was already saved stays in History.
+    func cancelCloudRequest() {
+        guard cloudRequest.isActive, let done = cloudDone else { return }
+        generation = UUID(); cloudRequest.cancel(); cloudDone = nil
+        let stage = cloudStage; cloudStage = nil
+        if stage == .transcription, let audio = session.audio { try? FileManager.default.removeItem(at: audio) }
+        destination = nil
+        setPhase("Ready", stage == .transcription ? CloudTranscription.message(.cancelled) ?? "Canceled." : "Canceled. The raw transcript is saved in History and was not inserted.")
+        bubble.hide(); historySaved(); done()
+    }
     private func setPhase(_ phase: String, _ message: String) {
         self.phase = phase; self.message = message
         // Errors raised while processing leave that session's audio retained for retry.
@@ -337,6 +412,7 @@ import Darwin
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
     private func transcribe(_ audio: URL, done: @escaping () -> Void) {
+        if let provider = sessionTranscriber { transcribeInCloud(audio, with: provider, done: done); return }
         setPhase("Processing", "Transcribing on this Mac…")
         let token = generation; let models = URL(fileURLWithPath: activeModelDirectory)
         guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let store = records else { setPhase("Error", "The model runtime is unavailable. Audio is saved for retry."); done(); return }
@@ -379,44 +455,93 @@ import Darwin
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == token else { return }
                     self.runner = nil; self.runnerOutput = nil
-                    var entry = savedEntry
-                    self.recoveryEntryID = entry.id
-                    let saved = HistoryText.saved(persists: !store.sessionOnlyIDs.contains(entry.id))
-                    // Dictionary, then cleanup. A held result keeps only the raw transcript and is never inserted.
-                    let outcome = self.processing?.process(text) ?? .heldForRecovery(raw: text, reason: .cleanerFailed)
-                    guard case .insert(let processed) = outcome else {
-                        entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
-                        do { try store.save(entry); self.setPhase("Error", "Cleanup was held for review. The raw transcript is in History.") }
-                        catch { self.setPhase("Error", "Cleanup was held for review. The raw transcript is in History; its status could not be saved.") }
-                        self.destination = nil; self.historySaved(); done(); return
-                    }
-                    if processed != text {
-                        entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus)
-                        do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); self.destination = nil; self.historySaved(); done(); return }
-                    }
-                    if self.insertThisSession, self.focusStable, let destination = self.destination {
-                        // Persist uncertainty before the one permitted delivery attempt.
-                        let insertionText = textWithLeadingSpace(processed, value: destination.value, selection: destination.selection, enabled: self.leadingSpaceThisSession)
-                        entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
-                        do {
-                            try store.save(entry)
-                            let insertion = insertText(entry.finalText, into: destination, policy: .singleAttempt)
-                            entry.insertionStatus = insertion.status.rawValue
-                            try store.save(entry)
-                            switch insertion.status {
-                            case .verified: self.setPhase("Inserted", "Inserted.")
-                            case .unverified: self.setPhase("Saved", "\(saved) Delivery could not be verified; no retry was attempted.")
-                            case .failed: self.setPhase("Saved", "\(saved) The text could not be inserted into this field, so nothing was typed.")
-                            }
-                        } catch { self.setPhase("Saved", "\(saved) Insertion status could not be saved.") }
-                    } else { self.setPhase("Saved", "\(saved) The destination changed or automatic insertion is off.") }
-                    self.destination = nil; self.historySaved(); done()
+                    self.deliver(savedEntry, store: store, token: token, done: done)
                 }
             } catch {
                 let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
                 DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.runnerOutput = nil; self.setPhase("Error", message); done() }
             }
         }
+    }
+    /// Cloud transcription (R4): one provider call in a cancellable Task, never the local model.
+    /// The result then follows the local path: history save, processing, insertion.
+    private func transcribeInCloud(_ audio: URL, with provider: TranscriptionProvider, done: @escaping () -> Void) {
+        guard let store = records else { setPhase("Error", "Private storage is unavailable. Audio is saved for retry."); done(); return }
+        let token = generation; let timestamp = listeningStarted
+        cloudStage = .transcription; cloudDone = done
+        cloudRequest.start({ await CloudTranscription.run(provider: provider, audioFile: audio) }) { [weak self] outcome in
+            guard let self, self.generation == token else { return }
+            self.cloudStage = nil; self.cloudDone = nil
+            let text: String, held: Bool
+            switch outcome {
+            case .transcript(let value): text = value; held = false
+            case .heldAnswerSuspected(let value): text = value; held = true
+            case .noSpeech, .failed, .cancelled:
+                // Audio stays for retry (until the 24-hour purge) unless the provider error discards it.
+                if case .failed(_, false) = outcome { try? FileManager.default.removeItem(at: audio) }
+                self.setPhase("Error", CloudTranscription.message(outcome) ?? CloudTranscription.unknownFailure); done(); return
+            }
+            // An answer-shaped LLM transcript is held like a failed cleanup: raw text only, never inserted.
+            let entry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: held ? "" : text, insertionStatus: held ? "held-transcript" : "saved-not-inserted")
+            do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the transcript. Audio is saved for retry for up to 24 hours."); done(); return }
+            try? FileManager.default.removeItem(at: audio)
+            guard !held else {
+                self.recoveryEntryID = entry.id
+                self.setPhase("Error", CloudTranscription.message(outcome) ?? ""); self.destination = nil; self.historySaved(); done(); return
+            }
+            self.deliver(entry, store: store, token: token, done: done)
+        }
+        setPhase("Processing", "Transcribing with \(provider.id.displayName)…")
+    }
+    /// Dictionary, then cleanup, for a transcript already saved to History. Local rules run here;
+    /// any other cleanup route makes one provider call in a cancellable Task (no local fallback).
+    private func deliver(_ savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, token: UUID, done: @escaping () -> Void) {
+        recoveryEntryID = savedEntry.id
+        let text = savedEntry.rawText
+        guard let processing, processing.settings.route != .local else {
+            complete(processing?.process(text) ?? .heldForRecovery(raw: text, reason: .cleanerFailed), entry: savedEntry, store: store, done: done); return
+        }
+        cloudStage = .cleanup; cloudDone = done
+        cloudRequest.start({ await processing.processAsync(text) }) { [weak self] outcome in
+            guard let self, self.generation == token else { return }
+            self.cloudStage = nil; self.cloudDone = nil
+            self.complete(outcome, entry: savedEntry, store: store, done: done)
+        }
+        setPhase("Processing", "Cleaning up with \(processing.cloudCleaner?.id.displayName ?? "the cleanup provider")…")
+    }
+    private func complete(_ outcome: ProcessingOutcome, entry savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, done: @escaping () -> Void) {
+        var entry = savedEntry
+        let text = entry.rawText
+        let saved = HistoryText.saved(persists: !store.sessionOnlyIDs.contains(entry.id))
+        // A held result keeps only the raw transcript and is never inserted.
+        guard case .insert(let processed) = outcome else {
+            let reason = processing?.lastProviderError.map { " " + $0.userMessage } ?? ""
+            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
+            do { try store.save(entry); setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History.") }
+            catch { setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History; its status could not be saved.") }
+            destination = nil; historySaved(); done(); return
+        }
+        if processed != text {
+            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus)
+            do { try store.save(entry) } catch { setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); destination = nil; historySaved(); done(); return }
+        }
+        if insertThisSession, focusStable, let destination {
+            // Persist uncertainty before the one permitted delivery attempt.
+            let insertionText = textWithLeadingSpace(processed, value: destination.value, selection: destination.selection, enabled: leadingSpaceThisSession)
+            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
+            do {
+                try store.save(entry)
+                let insertion = insertText(entry.finalText, into: destination, policy: .singleAttempt)
+                entry.insertionStatus = insertion.status.rawValue
+                try store.save(entry)
+                switch insertion.status {
+                case .verified: setPhase("Inserted", "Inserted.")
+                case .unverified: setPhase("Saved", "\(saved) Delivery could not be verified; no retry was attempted.")
+                case .failed: setPhase("Saved", "\(saved) The text could not be inserted into this field, so nothing was typed.")
+                }
+            } catch { setPhase("Saved", "\(saved) Insertion status could not be saved.") }
+        } else { setPhase("Saved", "\(saved) The destination changed or automatic insertion is off.") }
+        destination = nil; historySaved(); done()
     }
     // Explicit developer check of the production pipeline, using a synthetic file
     // and an exact disposable destination. Never enabled during ordinary launch.
@@ -430,6 +555,8 @@ import Darwin
         do { ownedAudio = try copyProbeAudio(audio, into: retry) } catch {
             fputs("app-check=refused audio-copy-failed\n", stderr); completion(); return
         }
+        // The probe is local only: it never sends audio or text to a provider.
+        sessionTranscriber = nil; processing?.cloudCleaner = nil
         destination = focused; focusStable = true; insertThisSession = true; leadingSpaceThisSession = intelligentLeadingSpace
         activeModelDirectory = modelDirectory; listeningStarted = Date(); generation = UUID()
         destinationScreen = screenForDestination(focused); recoveryEntryID = nil
@@ -586,15 +713,58 @@ import Darwin
             case .recreateRetryAudio:
                 retry = try RetryAudio(directory: locations.retryAudio)
             case .reloadDictionary:
-                do { processing = try ProcessingCoordinator(directory: locations.dictionary); dictionaryMessage = "" }
+                do { processing = try ProcessingCoordinator(directory: locations.dictionary, isCommonWord: isCommonEnglishWord); dictionaryMessage = "" }
                 catch { dictionaryMessage = "The dictionary could not be read. Dictations are held in History until it is repaired."; throw error }
             case .refreshViews:
-                refreshHistory(); refreshRecoveryAudio(); refreshDictionary()
+                refreshHistory(); refreshRecoveryAudio(); refreshDictionary(); refreshKeys()
             }
         }
         let outcome = PostWipeStep.message(report: report, failedSteps: failed)
         if !sessionAvailable { phase = "Error"; message = outcome.text + " Private storage is unavailable. Restart Murmur."; updateMenu?(); return }
         setPhase(outcome.succeeded ? "Ready" : "Error", outcome.text)
+    }
+
+    // MARK: API keys (R5) and the local model server
+
+    /// Publishes which providers have a key. The key itself never leaves the Keychain store.
+    func refreshKeys() { savedKeys = Set(KeyText.providers.filter { (try? credentials.read($0)) != nil }) }
+    @discardableResult
+    func saveKey(_ provider: ProviderID, _ raw: String) -> Bool {
+        guard let key = APIKey(raw) else { keyMessages[provider] = KeyText.invalid; return false }
+        do { try credentials.save(key, for: provider); keyMessages[provider] = KeyText.saved }
+        catch { keyMessages[provider] = KeyText.storeFailed; return false }
+        refreshKeys(); return true
+    }
+    func removeKey(_ provider: ProviderID) {
+        do { try credentials.delete(provider); keyMessages[provider] = KeyText.removed } catch { keyMessages[provider] = KeyText.removeFailed }
+        refreshKeys()
+    }
+    func validateKey(_ provider: ProviderID) {
+        let key: APIKey?
+        do { key = try credentials.read(provider) } catch { keyMessages[provider] = KeyText.unreadable; return }
+        keyMessages[provider] = KeyText.checking
+        let server = localServerURL
+        Task { @MainActor [weak self] in
+            let message = await KeyCheck.run(provider, key: key, serverURL: server)
+            self?.keyMessages[provider] = message
+        }
+    }
+    /// Lists the local server's models (sends no transcript). Fills the model name if it is empty.
+    func findLocalModels() {
+        guard !findingModels else { return }
+        let key = try? credentials.read(.localServer)
+        findingModels = true; localServerMessage = KeyText.checking
+        let server = localServerURL
+        Task { @MainActor [weak self] in
+            let result = await KeyCheck.discoverModels(serverURL: server, key: key)
+            guard let self else { return }
+            self.findingModels = false
+            self.localServerMessage = KeyCheck.discoveryMessage(result)
+            if case .success(let models) = result {
+                self.localServerModels = models
+                if self.localServerModel.isEmpty, let first = models.first { self.localServerModel = first }
+            }
+        }
     }
 
     // MARK: Update checks (R12)
@@ -623,7 +793,7 @@ import Darwin
     func openReleasePage() { if let url = availableRelease?.pageURL { NSWorkspace.shared.open(url) } }
 
     func shutdown() {
-        generation = UUID(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
+        generation = UUID(); cloudRequest.cancel(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
         downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.
         if sessionAvailable { session.shutdown() }
         if let runner, runner.isRunning {
@@ -639,6 +809,15 @@ import Darwin
 }
 
 extension HistoryEntry: RetainedHistoryItem {}
+
+/// The learning lexicon (PRD approved condition): a word is common when the English spell checker
+/// finds no misspelling in it, so ordinary-word swaps (lunch→launch) are never learned.
+/// CorrectionLedger calls it on the main thread only.
+func isCommonEnglishWord(_ word: String) -> Bool {
+    MainActor.assumeIsolated {
+        NSSpellChecker.shared.checkSpelling(of: word, startingAt: 0, language: "en", wrap: false, inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound
+    }
+}
 
 // Probe inputs belong to the caller; only the private copy follows retry cleanup.
 func copyProbeAudio(_ audio: URL, into retry: RetryAudio) throws -> URL {

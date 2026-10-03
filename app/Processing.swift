@@ -10,7 +10,8 @@ import Foundation
 // Failure policy (PRD §3, §4, Milestone 1 decisions): a cleaner error or a guard failure holds the
 // raw transcript for recovery with a content-free reason. Nothing falls back to another route.
 
-/// Where cleanup runs. Only `.local` (RuleCleaner) is offered in Settings in this pass.
+/// Where cleanup runs. `.local` is the RuleCleaner. `.cloud` means "through a `CleanupProvider`":
+/// Gemini, OpenRouter, or a user-run local model server (see `CleanupChoice` in Routes.swift).
 enum CleanupRoute: String, Codable, CaseIterable, Sendable {
     case local
     case cloud
@@ -78,14 +79,18 @@ final class ProcessingCoordinator {
     /// The local route's cleaner. Tests substitute failing or misbehaving cleaners.
     var localCleaner: Cleaner = RuleCleaner()
     /// The cloud route's provider. Nil means the cloud route is not configured, so it holds.
-    /// TODO(cloud UI): set from the selected provider and Keychain key; not exposed in this pass.
+    /// AppController sets it from `RoutePlan` (selected provider and Keychain key) at each start.
     var cloudCleaner: CleanupProvider?
+    /// The last provider error from `processAsync`, for a content-free hold message. Main thread.
+    private(set) var lastProviderError: ProviderError?
 
     /// `directory` holds dictionary.json and ledger.json (MurmurDataLocations.standard layout).
-    init(directory: URL, defaults: UserDefaults = .standard) throws {
+    /// `isCommonWord` is the learning lexicon (NSSpellChecker in the app; a fake set in checks).
+    init(directory: URL, defaults: UserDefaults = .standard, isCommonWord: ((String) -> Bool)? = nil) throws {
         self.defaults = defaults
         dictionary = try DictionaryStore(directory: directory)
         ledger = try CorrectionLedger(directory: directory, dictionary: dictionary)
+        ledger.isCommonWord = isCommonWord
         settings = ProcessingSettings.load(from: defaults)
         if ledger.learningEnabled != settings.learningEnabled { try ledger.setLearningEnabled(settings.learningEnabled) }
     }
@@ -117,9 +122,11 @@ final class ProcessingCoordinator {
         }
     }
 
-    /// Synchronous path used by the app. On the cloud route this never calls the network and
-    /// never substitutes the local cleaner: it holds, unless no cleanup option is enabled.
+    /// Synchronous path, used by the app on the local route. On the cloud route this never calls
+    /// the network and never substitutes the local cleaner: it holds, unless no cleanup option is
+    /// enabled. The app calls `processAsync` whenever the route is not local rules.
     func process(_ raw: String) -> ProcessingOutcome {
+        lastProviderError = nil
         let prepared = prepare(raw)
         let options = settings.options
         switch settings.route {
@@ -132,7 +139,9 @@ final class ProcessingCoordinator {
     }
 
     /// Full path including the cloud route: one provider call, no retry, no fallback to local.
-    func processAsync(_ raw: String) async -> ProcessingOutcome {
+    /// Main actor: the dictionary is read on the main thread; only the provider call runs elsewhere.
+    @MainActor func processAsync(_ raw: String) async -> ProcessingOutcome {
+        lastProviderError = nil
         guard settings.route == .cloud else { return process(raw) }
         let prepared = prepare(raw)
         let options = settings.options
@@ -140,7 +149,10 @@ final class ProcessingCoordinator {
         guard let provider = cloudCleaner else { return .heldForRecovery(raw: raw, reason: .cleanerFailed) }
         let messages = CleanupPrompt.build(transcript: prepared.text, options: options, dictionaryTerms: prepared.terms)
         let cleaned: String
-        do { cleaned = try await provider.cleanup(messages) } catch { return .heldForRecovery(raw: raw, reason: .cleanerFailed) }
+        do { cleaned = try await provider.cleanup(messages) } catch {
+            lastProviderError = error as? ProviderError
+            return .heldForRecovery(raw: raw, reason: .cleanerFailed)
+        }
         return Self.outcome(CleanupPipeline.judge(raw: prepared.text, cleaned: cleaned, options: options, allowedTerms: prepared.terms), raw: raw)
     }
 
