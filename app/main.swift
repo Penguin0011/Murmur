@@ -48,6 +48,9 @@ import SwiftUI
         if controller.phase == "Listening" {
             menu.addItem(withTitle: "Finish Dictation", action: #selector(finish), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Cancel Recording", action: #selector(cancel), keyEquivalent: "").target = self
+        } else if controller.canCancelRequest {
+            // A cloud request in flight; canceling it inserts nothing.
+            menu.addItem(withTitle: "Cancel Request", action: #selector(cancel), keyEquivalent: "").target = self
         }
         menu.addItem(.separator()); menu.addItem(withTitle: "Quit Murmur", action: #selector(quit), keyEquivalent: "q").target = self
         statusItem?.menu = menu
