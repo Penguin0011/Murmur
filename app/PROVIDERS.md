@@ -8,7 +8,9 @@ Verified on **2026-10-03** from official documentation, fetched that day. Tags: 
 |---|---|---|
 | Speech to text | Fireworks | **Not usable as the launch STT provider.** Fireworks' changelog says "Audio inference and image generation are deprecated" (2026-06-10). The transcription guide and API reference now return 404, and audio pricing no longer appears on the pricing page. [Certain] Unauthenticated probes on 2026-10-03: `audio-turbo.api.fireworks.ai` and `audio-turbo.us-virginia-1.direct.fireworks.ai` returned `503 no healthy upstream`, and `audio-prod.api.fireworks.ai` returned 401. [Certain] |
 | Speech to text | OpenRouter | **Documented and current.** `POST https://openrouter.ai/api/v1/audio/transcriptions` accepts OpenAI-style multipart. [Certain] Recommended as the launch STT route, pending a live test with a real key. [Likely] |
-| Speech to text | Gemini | Possible only as audio-in prompting ("Generate a transcript of the speech"). There is no dedicated transcription endpoint. The docs send users who need dedicated speech to text to Google Cloud Speech-to-Text. [Certain] This route is not implemented. |
+| Speech to text | Gemini (audio-in LLM) | `generateContent` with inline audio. **Implemented as an LLM transcriber** (`GeminiTranscriptionProvider`), with mitigations; see "Gemini audio transcription" below. It is not ASR. [Certain] |
+| Speech to text | Gemini 3.5 Transcribe | A dedicated ASR model, `gemini-3.5-transcribe`, is documented, but only through the Beta Interactions API (`POST /v1beta/interactions`). [Certain] **Not implemented**; it needs a decision (see below). |
+| Cleanup | Local OpenAI-compatible server | Ollama, LM Studio, llama.cpp `llama-server` and vLLM all document `POST /v1/chat/completions` and `GET /v1/models`. [Certain] Implemented as `OpenAICompatibleCleanupProvider`. |
 | Cleanup | Gemini | `models.generateContent` is documented and "remains fully supported". [Certain] Implemented. |
 | Cleanup | OpenRouter | `POST https://openrouter.ai/api/v1/chat/completions`. [Certain] Implemented. |
 
@@ -61,11 +63,73 @@ Facts:
 - **Model IDs:** `gemini-3.5-flash-lite` (stable, updated July 2026) is the default for cleanup, and `gemini-3.8-flash` (stable, updated September 2026) is an alternative. Both accept text, image, video, audio and PDF input and produce text. [Certain] Google limits the 2.5 models to existing users. [Certain]
 - **Pricing (paid tier, per 1M tokens):** `gemini-3.5-flash-lite` costs $0.30 input (text, image, video and audio) and $2.50 output. `gemini-3.8-flash` costs $0.75 input and $3.75 output through 2026-12-31, then $1.50 and $7.50. A free tier exists. [Certain]
 - **Data use:** on the unpaid tier, Google uses submitted content to improve products and "human reviewers may read, annotate, and process your API input and output … Do not submit sensitive, confidential, or personal information to the Unpaid Services." On the paid tier, prompts are not used to improve products; they are logged "for a limited period of time" for abuse detection. [Certain] **The disclosure must tell users that a free-tier key exposes dictation to human review.**
-- **Audio transcription:** possible by prompting with audio. Inline audio is limited to 20 MB total request size; use the Files API for larger files. Formats: WAV, MP3, AIFF, AAC, OGG, FLAC, MPEG, M4A, L16, Opus, ALAW, MULAW and WebM. Audio counts as 32 tokens per second, up to 9.5 hours per prompt. [Certain] There is no dedicated STT endpoint, and output is LLM-generated, so it can paraphrase or obey speech content. [Likely] Not implemented.
+- **Audio transcription:** see "Gemini audio transcription" below.
 - **Errors:** 429 `RESOURCE_EXHAUSTED` and 503 `UNAVAILABLE` are retryable; 400, 402 and 403 are not. [Certain] The Interactions error table lists 401 authentication, 402 payment_required (Prepay credits depleted), 403 permission_denied, 404 model_not_found, 429 rate_limit_exceeded or quota_exceeded ("daily quota"), 499 cancelled, 500, 503 and 504. [Certain, for Interactions] For generateContent, the observed unauthenticated body is the Google RPC shape `{"error":{"code":403,"message":"...","status":"PERMISSION_DENIED"}}`. [Certain, as observed] Google RPC errors usually carry `RetryInfo.retryDelay` (for example `"30s"`) in `error.details`. [Likely; not shown in current docs] An invalid key is commonly reported as 400 `INVALID_ARGUMENT` with reason `API_KEY_INVALID`, not 401. [Likely; not in current docs] The classifier handles both.
 - **Rate limits:** RPM, TPM and RPD limits apply per project, not per key. RPD resets at midnight Pacific. Spend caps return 429 `RESOURCE_EXHAUSTED`. [Certain]
 - **Payload limit:** 20 MB total request size for inline data. [Certain] The 413 status for generateContent is not documented. [Guessing]
 - **Validation call:** `GET https://generativelanguage.googleapis.com/v1beta/models?pageSize=1` (models.list, which costs no tokens). [Certain]
+
+## Gemini audio transcription
+
+Sources (fetched 2026-10-03):
+- Audio understanding (last updated 2026-09-23): https://ai.google.dev/gemini-api/docs/audio
+- Audio transcription with Gemini 3.5 Transcribe (last updated 2026-09-23): https://ai.google.dev/gemini-api/docs/transcribe
+- Model pages: https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe and https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite
+- generateContent reference (GenerationConfig, Blob, FinishReason, BlockReason): https://ai.google.dev/api/generate-content
+- Structured outputs: https://ai.google.dev/gemini-api/docs/structured-output
+- Pricing: https://ai.google.dev/gemini-api/docs/pricing
+
+Facts:
+- **Limits:** "Maximum request size is 20 MB total (including prompts and all files)"; above that, use the Files API. The limit is 9.5 hours of audio per prompt. Audio is downsampled to 16 Kbps, and multi-channel audio is combined into one channel. [Certain] Inline audio is base64-encoded, so `GeminiTranscriptionProvider` caps raw audio at about 14.95 MB and rechecks the encoded body against 20 MB. [Certain, as implemented]
+- **MIME types:** `audio/wav`, `audio/mp3`, `audio/aiff`, `audio/aac`, `audio/ogg`, `audio/flac`, `audio/mpeg`, `audio/m4a`, `audio/l16`, `audio/opus`, `audio/alaw`, `audio/mulaw`, `audio/webm`. [Certain] Other types are rejected locally.
+- **Token cost:** "32 tokens per second of audio (1 minute = 1,920 tokens)". [Certain] At the paid input price for `gemini-3.5-flash-lite` ($0.30 per 1M tokens), one minute of audio costs about $0.00058 in input tokens. Output tokens cost $2.50 per 1M on top of that. [Likely; arithmetic from the documented prices]
+- **Request shape:** `contents[].parts[]` takes `inlineData: {mimeType, data}`, with `data` in base64. [Certain] `systemInstruction` is text only. [Certain]
+- **Structured output:** the `gemini-3.5-flash-lite` model page lists "Structured outputs: Supported". [Certain] The generateContent reference marks `responseSchema` and `_responseJsonSchema` "Deprecated. Use responseFormat instead". `responseFormat.text` takes `mimeType` (`APPLICATION_JSON`) and a JSON `schema`, and `additionalProperties` is among the supported schema keywords. [Certain] The structured-output guide says output "is syntactically correct JSON", but values must still be validated. [Certain] Whether generateContent honours `responseFormat` for this model has not been tested with a key. [Guessing] For the live test, `schemaStyle = .legacyResponseSchema` sends the deprecated `responseMimeType` plus `responseSchema` instead. Parsing is strict either way.
+- **Blocks:** `promptFeedback.blockReason` (SAFETY, OTHER, BLOCKLIST, PROHIBITED_CONTENT, IMAGE_SAFETY) means "the prompt was blocked and no candidates are returned". The finish reasons SAFETY, RECITATION, LANGUAGE, BLOCKLIST, PROHIBITED_CONTENT and SPII stop generation. [Certain] All of these map to `contentBlocked`, and MAX_TOKENS maps to `malformedResponse`. [Certain, as implemented]
+- **Why it is an LLM, not ASR:** the audio-understanding page sends users who need "dedicated speech to text models" to Google Cloud Speech-to-Text. [Certain] The output is generated text, so it can answer or obey spoken requests, hallucinate text for silence, and tidy wording. [Likely; standard LLM behaviour, not tested here]
+- **Mitigations implemented:**
+  - temperature 0;
+  - a system instruction that the audio is data to transcribe verbatim;
+  - a `{"transcript": string}` schema with `additionalProperties: false`;
+  - strict parsing, so non-JSON, code fences, prose or extra fields are `malformedResponse`;
+  - `shouldSkipForSilence(peakLevel:durationSeconds:)` for the caller, defaulting to a -40 dBFS peak and a 0.3 s minimum [Guessing; needs tuning];
+  - `LLMTranscriptCheck.answerSuspected`. This heuristic cannot prove that the model answered, because there is no raw ASR text to compare against. [Certain]
+- **Gemini 3.5 Transcribe:** Google describes `gemini-3.5-transcribe` as "a speech-to-text model". [Certain]
+  - Features: a `verbatim` mode (the default, which keeps fillers and false starts), a `smart` mode, language hints, and up to 1,000 `custom_vocabulary` terms. Requests can be up to 1 hour long. [Certain]
+  - Price: $2.00 per 1M input audio tokens and $12.00 per 1M output tokens on the paid tier; Google estimates about $0.005/min. Free-tier content is "used to improve our products". [Certain]
+  - Endpoint: every documented example uses the Interactions API (`POST https://generativelanguage.googleapis.com/v1beta/interactions`, `generation_config.transcription_config`), and most use a Files API URI. Interactions is Beta and stores interactions on the server by default (see above). [Certain]
+  - Not documented: whether `gemini-3.5-transcribe` accepts generateContent or inline audio. [Guessing]
+  - The generateContent `GenerationConfig` also lists `audioTranscriptionConfig` ("Config for audio transcription (speech recognition)"). No guide covers using it outside the Live API. [Certain that the field exists; its behaviour is unverified]
+- **Data use:** the same terms apply as for cleanup. The free tier allows human review, so the disclosure says so, and it says that audio leaves this Mac to Google. [Certain]
+
+## Local OpenAI-compatible servers
+
+Sources (fetched 2026-10-03):
+- Ollama OpenAI compatibility: https://docs.ollama.com/api/openai-compatibility
+- Ollama list local models: https://docs.ollama.com/api/tags
+- LM Studio OpenAI compatibility: https://lmstudio.ai/docs/developer/openai-compat
+- LM Studio server settings and authentication: https://lmstudio.ai/docs/developer/core/server/settings and https://lmstudio.ai/docs/developer/core/authentication
+- llama.cpp server README: https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md
+- vLLM quickstart (OpenAI-compatible server): https://github.com/vllm-project/vllm/blob/main/docs/getting_started/quickstart.md
+
+| Server | Default base | Chat | Model list | Key |
+|---|---|---|---|---|
+| Ollama | `http://localhost:11434/v1/` [Certain] | `POST /v1/chat/completions` [Certain] | `GET /v1/models` [Certain]. The native `GET /api/tags` returns `{"models":[{"name","model","modified_at","size","digest","details"}]}`. [Certain] | "Required but ignored": any value works for OpenAI clients. [Certain] |
+| LM Studio | `http://localhost:1234/v1` [Certain] | `POST /v1/chat/completions` [Certain] | `GET /v1/models` [Certain] | Off by default. With "Require Authentication" on, send `Authorization: Bearer <token>`. [Certain] A "Serve on Local Network" toggle exists. [Certain] |
+| llama.cpp `llama-server` | `--host` 127.0.0.1, `--port` 8080 [Certain] | `POST /v1/chat/completions` [Certain] | `GET /v1/models`. The id defaults to the model path or `--alias`. [Certain] | `--api-key`, default none. [Certain] `GET /health` returns 503 while the model loads. [Certain] |
+| vLLM | `http://localhost:8000` [Certain] | `POST /v1/chat/completions` [Certain] | `GET /v1/models` [Certain] | `--api-key` or `VLLM_API_KEY`, checked "in the header". [Certain] Sent as a Bearer token. [Likely] |
+
+Facts and choices:
+- **Model discovery:** all four document `GET /v1/models` in the OpenAI list form `{"object":"list","data":[{"id":...}]}`. [Certain for Ollama, LM Studio and llama-server; Likely for vLLM's exact shape] `discoverModels()` therefore uses `/v1/models`. It calls Ollama's `/api/tags` only when `/v1/models` returns 404, as older Ollama builds may. [Likely that only old builds lack it] Both calls go to the same host and carry no transcript.
+- **Base URL:** the URL may be given with or without `/v1`. The provider strips a trailing `/v1` and builds `{base}/v1/chat/completions`. [Certain, as implemented]
+- **On-device rule** [Certain, as implemented and checked]:
+  - On-device: only `localhost`, strict dotted-decimal 127.0.0.0/8, and IPv6 `::1` in any spelling, with or without brackets.
+  - Everything else is disclosed as "the transcript leaves this Mac to <host>". This includes LAN, `.local` and private IPs, as well as spellings that may reach loopback (`127.1`, `2130706433`, `localhost.`, `::ffff:127.0.0.1`). Over-disclosure is the safe direction.
+  - Rejected: `0.0.0.0` and `::` (listen addresses, not destinations), schemes other than http and https, user info, queries, fragments and percent-encoded hosts.
+  - Plain http to a non-loopback host adds a warning that the connection is unencrypted. The warning also mentions the API key when one is set.
+- **Redirects:** local servers' redirects are not followed; a 3xx becomes `rejected`. A server therefore cannot forward the transcript to a host the disclosure did not name. This was checked live on Linux against a local test server. [Certain] It has not been checked on macOS. [Guessing that it behaves the same]
+- **Connection refused:** `URLError.cannotConnectToHost` becomes `serverNotRunning(address:)`, for example "No local model server is running at localhost:11434". The address comes from the configured URL and never includes the path, key or transcript. This was checked live on Linux. [Certain]
+- **Timeout:** 120 s by default, because a cold model load can be slow, clamped to 1–300 s. [Guessing at the right default]
 
 ## OpenRouter
 
@@ -99,12 +163,14 @@ Facts:
 | `authentication` | 401 or 403 on any provider; Gemini 400 whose status is `INVALID_ARGUMENT` and whose message or reason mentions an API key |
 | `quota` | 402 on any provider; Fireworks 412; Gemini 429 whose body says the daily quota or billing limit is reached (`quota_exceeded`, "quota" plus "per day", or "billing") |
 | `rateLimited(retryAfter)` | other 429s; `Retry-After` (seconds or HTTP-date) or Gemini `RetryInfo.retryDelay` |
-| `payloadTooLarge` | 413; a local size check before upload (25 MB for OpenRouter STT; 20 MB for Gemini inline) |
+| `payloadTooLarge` | 413; a local size check before upload (25 MB for OpenRouter STT; 20 MB total request for Gemini, so about 14.95 MB of raw audio for Gemini STT) |
 | `timeout` | 408, 504, `URLError.timedOut`, or the explicit request timeout |
-| `network` | offline, DNS or connection failures |
+| `network` | offline, DNS or connection failures (cloud); DNS or other failures for a local server |
+| `serverNotRunning(address)` | local server only: connection refused (`URLError.cannotConnectToHost`) |
 | `server` | 5xx (other than 504) and 520–530; OpenRouter 200-with-error |
-| `malformedResponse` | 2xx whose body is not parseable or has no text; Gemini prompt blocked or empty candidates |
-| `rejected` | other 4xx (bad request, model not found) |
+| `malformedResponse` | 2xx whose body is not parseable or has no text; Gemini empty candidates or MAX_TOKENS; Gemini STT text that is not exactly `{"transcript": string}` |
+| `contentBlocked` | Gemini `promptFeedback.blockReason` or a safety finish reason; OpenRouter moderation 403; `content_filter` finish |
+| `rejected` | other 4xx (bad request, model not found); any 3xx (redirects are not followed for local servers) |
 
 `cancelled` is separate, and the caller should treat it as a user action rather than a provider fault.
 
@@ -116,3 +182,6 @@ User messages contain only the provider name, the category and a retry hint. The
 - Gemini's 413 behaviour, the exact status for an invalid key, and `RetryInfo` presence on generateContent.
 - OpenRouter STT and chat with a real key; the ZDR availability of specific models.
 - Whether the OpenRouter STT catalogue's `prompt` price is per second.
+- Gemini STT with a real key: whether generateContent honours `responseFormat`, how often the model answers, tidies or hallucinates, and the right silence threshold.
+- Whether `gemini-3.5-transcribe` works through generateContent with inline audio.
+- Local servers: no real Ollama, LM Studio, llama-server or vLLM was run. Request and response shapes come from their docs. Transport behaviour was checked against a Python stand-in on Linux.
