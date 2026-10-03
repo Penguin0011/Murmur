@@ -7,7 +7,7 @@ app/build.sh
 open runtime/Murmur.app
 ```
 
-The bundle uses the pinned local ModelBench helper. `build.sh` compiles the app with `-O` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)). Cloud providers in the UI, automatic correction learning, signing/notarization, and production release remain separate work. [Certain]
+The bundle uses the pinned local ModelBench helper. `build.sh` compiles the app with `-O` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)). Cloud transcription and cleanup routes and API keys are wired in (see [Processing routes and API keys](#processing-routes-and-api-keys-wired-in)) but untested with real keys. Automatic correction observation, signing/notarization, and production release remain separate work. [Certain]
 
 ## Recovery and interface
 
@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 ```
 
@@ -37,10 +37,10 @@ swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/ca
 `Processing.swift` is Foundation-only and is compiled into the app. `ProcessingCoordinator` runs after transcription, on the main thread:
 
 1. `DictionaryStore.apply` runs first, in every mode including faithful transcription.
-2. Cleanup runs on the selected route with the enabled options. Settings offer only the local `RuleCleaner` route. The cloud route (`CleanupProvider` via `CleanupPrompt`, with only the relevant dictionary entries) is tested but not exposed, and the app's synchronous path never calls the network: a cloud route holds rather than falling back to local.
+2. Cleanup runs on the selected route with the enabled options. Local rules (`RuleCleaner`) run synchronously through `process`. Any other route (Gemini, OpenRouter or a local model server) goes through `processAsync`: one `CleanupProvider` call via `CleanupPrompt`, with only the relevant dictionary entries, on the main actor except for the request itself. An unconfigured provider or a provider error holds; nothing falls back to local rules. The synchronous path still never calls the network.
 3. A cleaner error or a guard failure returns `.heldForRecovery(raw:reason:)`. The controller saves the raw transcript with status `held-cleanup` and shows an error. It does not insert. History offers **Copy Raw**. The reason is content-free and is not stored.
 
-Settings has three independent cleanup toggles, a Faithful Transcription button, a learning toggle, and a dictionary editor (add, delete, learned/manual badge, Reset Learned). Cleanup and learning settings take effect on Apply Settings; dictionary edits save immediately. Automatic observation of edits is not wired in, so nothing feeds learning yet. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute`, `learningEnabled`, `historyMode` and `updateChecksEnabled`. The last two are wired in (see below) and are also written directly on Apply Settings, so they persist when the dictionary is unavailable. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
+Settings has three independent cleanup toggles, a Faithful Transcription button, a learning toggle, and a dictionary editor (add, delete, learned/manual badge, Reset Learned). Cleanup and learning settings take effect on Apply Settings; dictionary edits save immediately. Automatic observation of edits is not wired in, so nothing feeds learning yet. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute` (derived from `cleanupChoice`, see below), `learningEnabled`, `historyMode` and `updateChecksEnabled`. The last two are wired in (see below) and are also written directly on Apply Settings, so they persist when the dictionary is unavailable. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
 
 ```sh
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/check_processing.swift -o /tmp/murmur-processing-check
@@ -64,15 +64,15 @@ swiftc app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dic
 **Proposed promotion rule (pending user approval).** A correction counts as learning evidence only if the target is a plausible respelling of the source. All of these must hold:
 
 1. Structure: 1–3 words per side after trimming shared context words. Case-only, punctuation-only and spacing-only edits are rejected, as are deletions, insertions/appends and longer rewrites.
-2. Meaning guards: reject negation flips (not/n't/un-/dis-…), digits or number words, listed antonyms, function words and listed homophones, inflection-only changes and vowel-only changes in short words. When an optional `isCommonWord` lexicon is supplied (NSSpellChecker on macOS), reject swaps where every word on both sides is an ordinary word.
+2. Meaning guards: reject negation flips (not/n't/un-/dis-…), digits or number words, listed antonyms, function words and listed homophones, inflection-only changes and vowel-only changes in short words. When an `isCommonWord` lexicon is supplied, reject swaps where every word on both sides is an ordinary word. The app supplies NSSpellChecker (English) through `ProcessingCoordinator(directory:isCommonWord:)`: a word is common when the checker finds no misspelling.
 3. Respelling: at least 4 letters per side, and either edit similarity ≥ 0.75, or equal consonant-class phonetic keys with similarity ≥ 0.5.
 4. Known terms: if the target is already a manual entry's preferred spelling, rule 3 is waived, but not rules 1–2.
 
-Known failure modes: without the lexicon, real-word swaps that look like respellings (casual→causal, lunch→launch, Cloud→Claude) are accepted, and two such corrections would promote them. Similar names (Robert→Rupert) are accepted, because they look like transcription errors. Legitimate respellings are skipped when they are short (Jon→John), add an `s` (Postgres→Postgress), only change spacing (Micro soft→Microsoft), or involve numbers. [Certain]
+Known failure modes: without the lexicon (the Linux checks, or if the spell checker misjudges a word), real-word swaps that look like respellings (casual→causal, lunch→launch, Cloud→Claude) are accepted, and two such corrections would promote them. Similar names (Robert→Rupert) are accepted, because they look like transcription errors. Legitimate respellings are skipped when they are short (Jon→John), add an `s` (Postgres→Postgress), only change spacing (Micro soft→Microsoft), or involve numbers. [Certain]
 
 ### Cloud providers, credentials, and updates
 
-`Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation. `build.sh` compiles all three. No provider or key entry is reachable from the app yet. The only Keychain call is Delete All Data's `KeychainCredentialStore(service: "Murmur").deleteAll()`. The update checker is wired in (see below). Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. They have not yet been compiled on the macOS 26 host (Swift 6.3.3, `-swift-version 5`), and the Keychain store is compiled only on macOS. [Certain]
+`Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation. `build.sh` compiles all three. Providers and keys are reachable from Settings through `Routes.swift` (see [Processing routes and API keys](#processing-routes-and-api-keys-wired-in)). The update checker is wired in (see below). Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. They have not yet been compiled on the macOS 26 host (Swift 6.3.3, `-swift-version 5`), and the Keychain store is compiled only on macOS. [Certain]
 
 ```sh
 swiftc app/Cleanup.swift app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check
@@ -214,11 +214,60 @@ Physical shortcut/microphone first-word behavior, real speech quality, clipboard
 
 Enable **Intelligently add a leading space** and apply settings to separate inserted dictation from existing text. The option defaults off. It uses the original field value and UTF-16 cursor position, and only inserts a space when preceding text needs separation. It skips existing whitespace, opening delimiters, punctuation-led output, selected-text replacement, word interiors, and unavailable/invalid context. The insertion safety check still rejects changed destinations. Raw transcription stays unchanged; History final text records the attempted insertion including its added space. Copy-only output remains unchanged. [Certain]
 
-## Gemini transcription and local cleanup servers (not yet wired in)
+## Gemini transcription and local cleanup servers
 
-`Providers.swift` adds `GeminiTranscriptionProvider` and `OpenAICompatibleCleanupProvider`. Neither is wired into the controller or settings yet. Both are covered by `check_providers.swift`, which uses no network and no keys. [Certain]
+`Providers.swift` adds `GeminiTranscriptionProvider` and `OpenAICompatibleCleanupProvider`. Both are wired in through `Routes.swift` (next section) and covered by `check_providers.swift`, which uses no network and no keys. [Certain]
 
 - **Gemini transcription** is a language model asked to transcribe, not a speech recognizer. Before sending, call `GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel:durationSeconds:)` and skip silent recordings. Use `transcribeChecked(_:)` and hold the result for recovery when `answerSuspected` is true. Its disclosure says that audio leaves this Mac to Google, and that free-tier keys allow human review. [Certain]
 - **Local cleanup** sends the cleanup prompt to `{base}/v1/chat/completions` on a server the user runs. Documented defaults: Ollama `http://localhost:11434`, LM Studio `http://localhost:1234`, llama-server `http://127.0.0.1:8080`, vLLM `http://localhost:8000`. `discoverModels()` lists the server's models. Only loopback addresses count as on this Mac; any other host is disclosed as leaving it. If nothing is listening, the error reads "No local model server is running at host:port". [Certain]
 
 No real Gemini key or local model server has been used yet; see [PROVIDERS.md](PROVIDERS.md). [Certain]
+
+## Processing routes and API keys (wired in)
+
+`Routes.swift` is Foundation-only and holds the route decisions; Controller and UI display and act on them. [Certain]
+
+```sh
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/check_routes.swift -o /tmp/murmur-routes-check
+/tmp/murmur-routes-check
+```
+
+**Settings → Processing routes (R4).** Routes take effect on Apply Settings. The settings keys are `transcriptionRoute`, `cloudTranscriber`, `cleanupChoice`, `localServerURL` and `localServerModel`. Keys are never stored in UserDefaults.
+- Transcription: On this Mac (Parakeet, the default) or Cloud. The cloud picker lists only implemented, non-deprecated providers: OpenRouter Whisper (`OpenRouterTranscriptionProvider`) and Gemini audio (`GeminiTranscriptionProvider`, a language model). Fireworks is not listed. `makeTranscriptionProvider(id:key:)` is the single factory. To add Gemini 3.5 Transcribe, add a `CloudTranscriber` case (with `displayName` and `providerID` `.gemini`) and one factory case; its own `disclosure` must say that Google stores the audio (PRD §5 user decision).
+- Cleanup: Local rules (the default), Local model server, Gemini or OpenRouter. The local server has an address (default `http://localhost:11434`), a model name, Find Models (`discoverModels()`, which sends no transcript) and an optional key.
+
+**A dictation on a cloud route.**
+- At start, `RoutePlan` picks the transcriber and cleaner from the applied settings and the Keychain. It refuses, without fallback, when a key is missing, the local server address or model is invalid, or a disclosure is unconfirmed. The model gate applies only to local transcription.
+- `CloudTranscription.run` replaces the ModelBench runner. It converts the recording to 16 kHz mono 16-bit WAV (`CloudAudio`) and makes one provider call. If the provider has a silence pre-check (Gemini), silent or very short recordings are skipped and reported as "No speech was detected".
+- A transcript then follows the local path: history save, dictionary and cleanup, insertion. An empty transcript is "no speech".
+- A provider error shows its `userMessage` in the Error phase. On preserve dispositions the audio stays for retry (24-hour policy).
+- A Gemini transcript that looks like an answer (`answerSuspected`) is saved with status `held-transcript` (raw text only, Copy Raw) and never inserted.
+- Cloud cleanup calls `processAsync`. A hold names the provider error, for example "Gemini reports no remaining quota…".
+- Nothing falls back to the local model, local rules or another provider.
+- Both calls run in a main-actor `CloudRequest` Task. Results are delivered behind the session's generation token. Escape while processing (through `ShortcutListener.onEscapeWhileProcessing`) or the menu bar's Cancel Request cancels the Task and its HTTP request. Nothing is inserted; during transcription the audio is deleted, and a transcript that was already saved stays in History. Escape is not swallowed in that state.
+
+**Disclosure before cloud use.** Apply Settings computes each stage that sends data off this Mac. For any stage whose signature (route, provider, endpoint) is not yet confirmed, it shows an NSAlert with the provider's `DataDisclosure` summary and warning. Cancel reverts the route fields and applies nothing. The confirmed signatures are stored in `acknowledgedCloudRoutes`, replaced on every Apply. A change of route, provider or endpoint, or switching away and back, asks again. A loopback local server sends nothing off this Mac and needs no alert; any other host does. The Gemini disclosure says that audio leaves this Mac to Google, that free-tier content may be read by human reviewers, and that paid-tier prompts are logged for a limited time. Settings also shows the summary under each cloud choice. [Certain]
+
+**API keys (R5).** Settings → API keys has a row each for Gemini, OpenRouter and the local model server (optional). Each row has a SecureField, Save (`KeychainCredentialStore(service: "Murmur")`), Validate (`validate()`, showing its `userMessage`) and Remove. The row shows only "Key saved" or "No key saved". The typed key lives only in the field until Save and is cleared after it. Messages come from fixed strings and `ProviderError.userMessage`, never from the key or a response body. Preview uses an in-memory store. [Certain]
+
+**Learning lexicon.** `isCommonEnglishWord` in Controller.swift backs `CorrectionLedger.isCommonWord` with `NSSpellChecker` (language "en"): a word is common when no misspelling is found. `ProcessingCoordinator(directory:defaults:isCommonWord:)` injects it, including after Delete All Data. [Certain]
+
+**Verified on Linux (Swift 6.1.2), October 3, 2026:** `check_routes.swift` passes (86 checks). It uses mock providers and transports and no network. It covers:
+- no fallback: an unconfigured route refuses, never uses the local model, makes one call and no retry;
+- the silence skip with the real `GeminiTranscriptionProvider` (no request sent);
+- the answer-suspected hold;
+- disclosure needed, acknowledged, provider or endpoint changed, and switched away and back; loopback versus LAN;
+- keys never in messages, including 401 bodies that echo the key, and no key in UserDefaults;
+- cancel preventing delivery (in flight, finished-but-canceled, superseded);
+- WAV conversion;
+- cloud cleanup holds;
+- the lexicon condition: with a fake lexicon, lunch→launch and casual→causal are rejected.
+
+`Routes.swift` also typechecks under `-swift-version 6`. `check_processing.swift` still passes. Controller.swift, UI.swift and check_controller.swift typecheck under `-swift-version 5` against hand-written AppKit/SwiftUI stubs, which check identifiers and bindings, not real SDK signatures. main.swift was not typechecked. [Certain]
+
+**Not verified until the Mac build:**
+- the app and fixture builds, the new SwiftUI rows (`SecureField` and `ForEach(_:id:)` are new to UI.swift), the NSAlert, and the Escape hook in a real event tap;
+- Keychain save, read and remove, including whether ad-hoc signed builds prompt on read;
+- `NSSpellChecker` with language "en";
+- the WAV format AVAudioFile actually writes;
+- every live provider call with a real key or a real local server. [Certain]
