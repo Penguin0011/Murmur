@@ -1,3 +1,11 @@
+# Matte glass indicators — in progress, October 2, 2026
+
+User requested a smaller clickable error popup and neutral glass voice pills over a contrasting matte surface. Plan: narrow the error panel and reduce its padding/type; replace blue circles with reactive capsules using native glass and an opaque accessibility fallback. Preserve popup click-through, dismissal, and recovery audio. [Certain]
+
+Checkpoint: source changes implemented: 240-point error panel, 12-point summary, 8-point padding; reactive neutral 7-point capsules with native glass over an opaque matte background and Reduce Transparency/increased-contrast fallback. Production and fixture builds passed. Native dark-mode error and listening previews passed: smaller clickable error, neutral contrasting pills without blue. Light appearance also passed native visual inspection. Evidence: runtime/glass-review/matte-glass-dark.png and matte-glass-light.png. Commit/push and installed Murmur update remain pending. [Certain]
+
+---
+
 # Clickable errors — October 2, 2026
 
 Removed Details from the compact error panel. Clicking its surface opens the app and selects Dictation to show the full error; Dismiss and Audio remain independent controls. The popup is exposed as an accessible button with an error label and open-app hint. [Certain]

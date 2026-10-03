@@ -328,22 +328,35 @@ private struct VoiceBubbles: View {
     @ObservedObject var controller: AppController
     let phase: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
     var body: some View {
         TimelineView(.animation(minimumInterval: 0.15, paused: phase != "Processing" || reduceMotion)) { context in
             HStack(spacing: 5) {
                 ForEach(0..<5) { index in
                     let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 4 - Double(index)) + 1) / 2
                     let level = phase == "Listening" ? controller.voiceLevel : phase == "Processing" ? (reduceMotion ? 0.35 : pulse * 0.45) : 0.15
-                    Circle().fill(Color.accentColor)
-                        .frame(width: 6 + level * Double(index == 2 ? 12 : 8), height: 6 + level * Double(index == 2 ? 12 : 8))
+                    Capsule().fill(Color.primary.opacity(0.65))
+                        .frame(width: 7, height: 8 + level * Double(index == 2 ? 16 : 12))
+                        .modifier(VoicePillGlass(opaque: reduceTransparency || contrast == .increased))
                 }
             }
             .frame(width: 80, height: 24)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: controller.voiceLevel)
         }
-        .padding(8).modifier(UtilityGlass(radius: 20))
+        .padding(8)
+        .background(Color(nsColor: .windowBackgroundColor), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.25), lineWidth: 1))
         .accessibilityElement(children: .ignore).accessibilityLabel(phase)
         .help(phase == "Listening" ? "Release or tap the shortcut to finish. Escape cancels." : phase)
+    }
+}
+
+private struct VoicePillGlass: ViewModifier {
+    let opaque: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if opaque { content }
+        else { content.glassEffect(.regular.tint(.white.opacity(0.15)), in: Capsule()) }
     }
 }
 
@@ -357,11 +370,11 @@ private struct BubbleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityHidden(true).allowsHitTesting(false)
-                Text(summary).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+                Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(.orange).accessibilityHidden(true).allowsHitTesting(false)
+                Text(summary).font(.system(size: 12, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                     .help(message).allowsHitTesting(false).accessibilityHidden(true)
                 Spacer(minLength: 4)
-                Button(action: controller.dismissStatus) { Image(systemName: "xmark") }
+                Button(action: controller.dismissStatus) { Image(systemName: "xmark").font(.system(size: 11)) }
                     .buttonStyle(.plain).help("Dismiss error").accessibilityLabel("Dismiss error")
             }
             if controller.hasRecoveryAudio {
@@ -369,7 +382,7 @@ private struct BubbleView: View {
                     .buttonStyle(.bordered).controlSize(.small)
             }
         }
-        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
         .background {
             Button {
                 controller.showSettings()
@@ -412,7 +425,7 @@ final class BubblePresenter {
         guard showsFloatingIndicator(phase: phase) else { hide(); return }
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let minimal = phase != "Error"
-        let width = minimal ? 96 : min(320, max(240, frame.width - 32))
+        let width = minimal ? 96 : min(240, max(180, frame.width - 32))
         let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase)) : AnyView(BubbleView(controller: controller, message: message))
         let host = NSHostingView(rootView: content.frame(width: width))
         panel.contentView = host

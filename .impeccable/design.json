@@ -43,7 +43,7 @@
         },
         "historyDetailMinimumPoints": 300,
         "glassContainerSpacingPoints": 12,
-        "bubbleWidth": "96pt live; min(320, max(240, screen.visibleFrame.width - 32)) error",
+        "bubbleWidth": "96pt live; min(240, max(180, screen.visibleFrame.width - 32)) error",
         "bubbleBottomOffsetPoints": 24,
         "windowContentMinimumPoints": [
           700,
