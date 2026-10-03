@@ -222,3 +222,14 @@ Enable **Intelligently add a leading space** and apply settings to separate inse
 - **Local cleanup** sends the cleanup prompt to `{base}/v1/chat/completions` on a server the user runs. Documented defaults: Ollama `http://localhost:11434`, LM Studio `http://localhost:1234`, llama-server `http://127.0.0.1:8080`, vLLM `http://localhost:8000`. `discoverModels()` lists the server's models. Only loopback addresses count as on this Mac; any other host is disclosed as leaving it. If nothing is listening, the error reads "No local model server is running at host:port". [Certain]
 
 No real Gemini key or local model server has been used yet; see [PROVIDERS.md](PROVIDERS.md). [Certain]
+
+## Gemini 3.5 Transcribe (not yet wired in)
+
+`Providers.swift` adds `GeminiTranscribeProvider`, which uses Google's dedicated speech model `gemini-3.5-transcribe` through the Beta Interactions API (`POST https://generativelanguage.googleapis.com/v1beta/interactions`). It conforms to `TranscriptionProvider`, so wiring it in takes one factory line: `GeminiTranscribeProvider(apiKey: key)`. Facts and sources are in [PROVIDERS.md](PROVIDERS.md). [Certain]
+
+- **Defaults:** verbatim mode, the payload language as `language_codes` (`["en"]`), and `AudioPayload.vocabularyHint` as `custom_vocabulary` (one term per line or comma-separated; pass only relevant terms). `store = true`, per the user's decision of October 3, 2026. [Certain]
+- **Disclosure:** audio and the relevant dictionary terms are sent to and stored by Google. Google keeps them 55 days on a paid-tier key or 1 day on a free-tier key, and they can be deleted earlier. Free-tier keys also allow product use and human review. [Certain]
+- **Interaction ids:** `transcribeDetailed(_:onInteractionCreated:)` returns `GeminiTranscribeResult` with `interactionID`, and `deleteStored(interactionID:)` deletes the stored record. The provider persists no ids. Whether to keep them in memory, in History, or delete right after insertion is the integrator's decision. [Certain]
+- **Polling:** if the server answers `in_progress` or `queued`, the same interaction is polled with GET, never re-submitted. Polling is bounded by `overallDeadline` (90 s) and `maxPolls`, and Task cancellation stops it. [Certain]
+
+The checks pass with Swift 6.1.2 on Linux, in both `-swift-version 5` and the default mode. No real key has been used. [Certain]
