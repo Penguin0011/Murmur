@@ -1,3 +1,9 @@
+# Minimal transcription display — October 2, 2026
+
+Added a locally saved, default-off setting that shows only compact voice-reactive circles during Listening, a processing pulse, and brief completion. Errors, saved output, and uncertain delivery retain recovery details. Native minimal Listening/Processing panel inspection confirmed no visible status text and accessible phase labels with Listening shortcut help. The toggle switched both ways, and minimal-mode errors retained Copy Text, History, Settings, and Dismiss. Production build and controller mode/recovery checks passed. Live microphone responsiveness remains unverified in this checkpoint. [Certain]
+
+---
+
 # Liquid Glass checkpoint — October 2, 2026
 
 User approved autonomous native Liquid Glass direction across settings, History, and the status bubble. Implemented native glass surfaces and controls, fixed action footers, semantic text contrast, and opaque accessibility fallbacks. Production build and synthetic UI fixture compile passed. [Certain]

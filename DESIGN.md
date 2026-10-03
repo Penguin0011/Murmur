@@ -72,3 +72,7 @@ Utility surfaces and the bubble use the frontmatter radii. Buttons, tabs, lists,
 
 
 Implementation values are extracted from app/UI.swift and app/main.swift. Integrated source compilation passed. The lead captured the dark floating bubble and clicked its native Dismiss control; the fixture asserted that synthetic recovery history remained. Light, dark, and forced opaque compact captures were reviewed. The scoped contrast review resolved its findings; the explicit search placeholder overlay measures approximately 5.8:1 in the captured light appearance. These checks do not establish real destination focus, physical recording, or live insertion behavior. [Certain]
+
+## Minimal transcription display
+
+An optional, default-off setting replaces normal floating status details with a 160-point glass panel containing five circles. Listening scales the circles from microphone level; processing uses a pulse that becomes static with Reduce Motion. The phase remains an accessibility label. Error and saved-output recovery retain the detailed panel and actions. Finish/cancel use the configured shortcut in minimal mode. [Certain]

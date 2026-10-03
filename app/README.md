@@ -15,6 +15,8 @@ Idle errors and saved-output bubbles have a Dismiss control. Dismissal hides sta
 
 Settings show the current state above the scrollable form, model file availability, individual permission rows, and an always-visible Apply Settings button. Model availability checks file sizes; full checksums are verified before inference. History supports search, delivery status, initial selection, and recovery-entry selection. [Certain]
 
+Enable **Minimal transcription display** and apply settings to replace normal status details with compact voice-reactive bubbles. Listening follows microphone level, processing pulses, and completion briefly remains visible. Errors and saved-text recovery retain their details and actions; shortcut finish/cancel behavior remains available. The option defaults off and is saved locally. [Certain]
+
 Corrupt or mismatched history files produce an error and prevent retention from silently skipping data; corruption at startup currently blocks dictation. Automatic repair/quarantine is not implemented. [Certain]
 
 ## Checks
@@ -45,6 +47,9 @@ app/check_ui.sh
 app/check_ui.sh --light
 app/check_ui.sh --light --compact --opaque
 app/check_ui.sh --bubble-only
+app/check_ui.sh --minimal --bubble-only
+app/check_ui.sh --minimal --processing --bubble-only
+app/check_ui.sh --minimal --error --bubble-only
 ```
 
 The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
