@@ -16,6 +16,16 @@ import CryptoKit
         precondition(permissions.intValue == 0o600)
         let thirty = try store.expired(retention: "30-days", now: now); precondition(thirty.count == 1)
         let forever = try store.expired(retention: "forever", now: now); precondition(forever.isEmpty)
+        do { try store.purge(retention: "invalid"); fatalError("Unknown retention policy accepted") } catch {}
+        let afterInvalidPolicy = try store.entries(); precondition(afterInvalidPolicy.count == 1)
+        let mismatched = root.appendingPathComponent(UUID().uuidString + ".json")
+        try JSONEncoder().encode(entry).write(to: mismatched)
+        do { _ = try store.entries(); fatalError("Mismatched history identity accepted") } catch {}
+        try FileManager.default.removeItem(at: mismatched)
+        let corrupt = root.appendingPathComponent(UUID().uuidString + ".json")
+        try Data("broken JSON".utf8).write(to: corrupt)
+        do { _ = try store.entries(); fatalError("Unreadable history silently hidden") } catch {}
+        try FileManager.default.removeItem(at: corrupt)
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let sixMonths = calendar.date(from: DateComponents(year: 2026, month: 8, day: 31))!
         let cutoff = calendar.date(byAdding: .month, value: -6, to: sixMonths)!
@@ -36,6 +46,6 @@ import CryptoKit
         try verifyAppModels(modelRoot, manifest: manifest)
         try Data(repeating: 0, count: bytes.count).write(to: weight)
         do { try verifyAppModels(modelRoot, manifest: manifest); fatalError("Corrupt weights accepted") } catch {}
-        print("Native history and verifier checks passed (atomic roundtrip, permissions, calendar expiry, deletion, absent/corrupt weights).")
+        print("Native history and verifier checks passed (atomic roundtrip, permissions, calendar expiry, invalid policy, mismatched/corrupt history, deletion, absent/corrupt weights).")
     }
 }

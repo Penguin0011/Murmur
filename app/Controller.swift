@@ -8,14 +8,21 @@ import Darwin
 
 @MainActor final class AppController: ObservableObject {
     @Published var phase = "Ready"
-    @Published var message = "Hold Right Option to dictate, or tap to start and tap again to finish."
+    @Published var message = "Hold your configured shortcut to dictate, or tap to start and tap again to finish."
     @Published var history: [HistoryEntry] = []
     @Published var recoveryEntryID: String?
     @Published var recoveryAudio: URL?
     @Published var modelDirectory: String
     @Published var shortcut: String
+    @Published var voiceLevel = 0.0
     @Published var showMenuBar: Bool
     @Published var permissionsSummary = ""
+    @Published var hasRecoveryAudio = false
+    var microphoneAuthorized: Bool { permission() == "authorized" }
+    var accessibilityAuthorized: Bool { AXIsProcessTrusted() }
+    var inputMonitoringAuthorized: Bool { CGPreflightListenEventAccess() }
+    var modelAvailable: Bool { modelFilesAvailable() }
+    @Published var intelligentLeadingSpace: Bool
     @Published var automaticInsertion: Bool
     @Published var retention: String
     var isBusy: Bool { phase == "Listening" || phase == "Processing" || (sessionAvailable && session.state != .idle) }
@@ -29,6 +36,8 @@ import Darwin
     private var destinationScreen: NSScreen?
     private var focusStable = true
     private var insertThisSession = true
+    private var leadingSpaceThisSession = false
+    private var shortcutGeneration = UUID()
     private var listener: ShortcutListener?
     private var source: CFRunLoopSource?
     private var monitor: Timer?
@@ -37,11 +46,11 @@ import Darwin
     private var runnerOutput: URL?
     private var recordingFailed = false
     private var generation = UUID()
-    private var hideGeneration = UUID()
     private var appliedRetention: String
     private var activeModelDirectory = ""
     private var listeningStarted = Date()
     private var preview = false
+    private var previewDirectory: URL?
     private lazy var session: CaptureSession = {
         CaptureSession(store: retry!, start: { [weak self] url in
             guard let self else { throw CaptureError("Application stopped") }
@@ -64,26 +73,29 @@ import Darwin
         })
     }()
 
-    init(preview: Bool = false) {
+    init(preview: Bool = false, isolatedStorage: Bool? = nil) {
         let defaults = UserDefaults.standard
         modelDirectory = defaults.string(forKey: "modelDirectory") ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/Dictation/module-one/unified-d32e972").path
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
+        intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
         self.preview = preview
+        let isolatedStorage = isolatedStorage ?? preview
         do {
-            store = try HistoryStore()
-            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            retry = try RetryAudio(directory: base.appendingPathComponent("Dictation/retry-audio"))
+            let base = isolatedStorage ? FileManager.default.temporaryDirectory.appendingPathComponent("Dictation-preview-" + UUID().uuidString) : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Dictation")
+            if isolatedStorage { previewDirectory = base }
+            store = try HistoryStore(directory: base.appendingPathComponent("history"))
+            retry = try RetryAudio(directory: base.appendingPathComponent("retry-audio"))
             if let retry {
                 for file in try FileManager.default.contentsOfDirectory(at: retry.directory, includingPropertiesForKeys: nil) where file.lastPathComponent.hasPrefix(".result-") {
                     try FileManager.default.removeItem(at: file)
                 }
             }
             try store?.purge(retention: appliedRetention)
-            refreshHistory()
+            refreshHistory(); refreshRecoveryAudio()
         } catch { store = nil; retry = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
     }
     func start() {
@@ -100,9 +112,10 @@ import Darwin
         monitor = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.voiceLevel = self.capture?.queue.sync { self.capture?.level ?? 0 } ?? 0
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
                    !capture.engine.isRunning || capture.queue.sync(execute: { capture.writeError != nil }) { self.recordingFailed = true; self.stopRecording() }
-                if self.sessionAvailable && self.session.state != .idle, let initial = self.destination {
+                if self.isBusy, let initial = self.destination {
                     guard let current = try? captureFocus(), current.pid == initial.pid, CFEqual(current.element, initial.element),
                           !current.secure, current.value == initial.value,
                           current.selection?.location == initial.selection?.location,
@@ -110,11 +123,15 @@ import Darwin
                 }
             }
         }
+        if let monitor { RunLoop.main.add(monitor, forMode: .common) }
         expiry = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                do { try self.retry?.purge(); try self.store?.purge(retention: self.appliedRetention); self.refreshHistory() }
-                catch { self.setPhase("Error", "Data expiry failed. Open History to review saved data.") }
+                do { try self.retry?.purge(); try self.store?.purge(retention: self.appliedRetention); self.refreshHistory(); self.refreshRecoveryAudio() }
+                catch {
+                    if self.isBusy { self.message = "Data expiry failed. Open History after this dictation to review saved data." }
+                    else { self.setPhase("Error", "Data expiry failed. Open History to review saved data.") }
+                }
             }
         }
     }
@@ -136,7 +153,10 @@ import Darwin
     }
     func applySettings() {
         guard !isBusy else { message = "Finish the current dictation before changing settings."; return }
-        if retention != appliedRetention, let expired = try? store?.expired(retention: retention), !expired.isEmpty {
+        let expired: [HistoryEntry]
+        do { expired = try store?.expired(retention: retention) ?? [] }
+        catch { message = "Could not review history retention. Settings were not applied."; return }
+        if retention != appliedRetention, !expired.isEmpty {
             let alert = NSAlert(); alert.messageText = "Delete \(expired.count) expired transcripts?"
             alert.informativeText = "Applying this retention period permanently removes these older entries."
             alert.addButton(withTitle: "Apply and Delete"); alert.addButton(withTitle: "Cancel")
@@ -146,6 +166,7 @@ import Darwin
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion")
+        defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(retention, forKey: "retention")
         do { try store?.purge(retention: appliedRetention); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }; updateMenu?()
@@ -155,7 +176,11 @@ import Darwin
         guard sessionAvailable else { return }
         guard CGPreflightListenEventAccess() else { message = "Allow Input Monitoring, then click Apply Settings to enable the shortcut."; return }
         let binding: ShortcutBinding = shortcut == "fn" ? .fn : shortcut == "ctrl-option-space" ? .controlOptionSpace : .rightOption
-        let next = ShortcutListener(binding: binding, processingSeconds: 0, onAction: { [weak self] action, done in self?.handle(action, done: done) })
+        let token = shortcutGeneration
+        let next = ShortcutListener(binding: binding, processingSeconds: 0, onAction: { [weak self] action, done in
+            guard let self, self.shortcutGeneration == token else { done(); return }
+            self.handle(action, done: done)
+        })
         guard let tap = next.createTap(), let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = "The shortcut could not start. Check Input Monitoring and Accessibility."; return }
         listener = next; source = nextSource
         CFRunLoopAddSource(CFRunLoopGetMain(), nextSource, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
@@ -163,6 +188,7 @@ import Darwin
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
     private func removeShortcut() {
+        shortcutGeneration = UUID()
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         if let tap = listener?.tap { CFMachPortInvalidate(tap) }
         source = nil; listener = nil
@@ -175,7 +201,7 @@ import Darwin
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }
-            focusStable = true; insertThisSession = automaticInsertion; activeModelDirectory = modelDirectory
+            focusStable = true; insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
             listeningStarted = Date(); generation = UUID(); recoveryEntryID = nil; recordingFailed = false
             destinationScreen = screenForDestination(destination)
         }
@@ -222,12 +248,9 @@ import Darwin
         self.phase = phase; self.message = message
         // Errors raised while processing leave that session's audio retained for retry.
         recoveryAudio = phase == "Error" && sessionAvailable && session.state == .processing ? session.audio : nil
-        hideGeneration = UUID(); updateMenu?()
-        if phase != "Ready" { bubble.show(phase: phase, message: message, screen: destinationScreen) }
-        if phase == "Inserted" {
-            let token = hideGeneration
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) { [weak self] in guard self?.hideGeneration == token else { return }; self?.bubble.hide() }
-        }
+        refreshRecoveryAudio()
+        updateMenu?()
+        bubble.show(phase: phase, message: message, screen: destinationScreen)
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
     private func transcribe(_ audio: URL, done: @escaping () -> Void) {
@@ -277,10 +300,11 @@ import Darwin
                     self.recoveryEntryID = entry.id
                     if self.insertThisSession, self.focusStable, let destination = self.destination {
                         // Persist uncertainty before the one permitted delivery attempt.
-                        entry.insertionStatus = "insertion-pending"
+                        let insertionText = textWithLeadingSpace(text, value: destination.value, selection: destination.selection, enabled: self.leadingSpaceThisSession)
+                        entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
                         do {
                             try store.save(entry)
-                            let insertion = insertText(text, into: destination, policy: .singleAttempt)
+                            let insertion = insertText(entry.finalText, into: destination, policy: .singleAttempt)
                             entry.insertionStatus = insertion.status.rawValue
                             try store.save(entry)
                             self.setPhase(insertion.status == .verified ? "Inserted" : "Saved", insertion.status == .verified ? "Inserted." : "Saved in History. Delivery could not be verified; no retry was attempted.")
@@ -301,24 +325,54 @@ import Darwin
               focused.bundleID == expectedApp, focused.pid != getpid(), !focused.secure else {
             fputs("app-check=refused destination-or-model-unavailable\n", stderr); completion(); return
         }
-        destination = focused; focusStable = true; insertThisSession = true
+        guard !isBusy, let retry else { completion(); return }
+        let ownedAudio: URL
+        do { ownedAudio = try copyProbeAudio(audio, into: retry) } catch {
+            fputs("app-check=refused audio-copy-failed\n", stderr); completion(); return
+        }
+        destination = focused; focusStable = true; insertThisSession = true; leadingSpaceThisSession = intelligentLeadingSpace
         activeModelDirectory = modelDirectory; listeningStarted = Date(); generation = UUID()
         destinationScreen = screenForDestination(focused); recoveryEntryID = nil
-        transcribe(audio) { [weak self] in
+        transcribe(ownedAudio) { [weak self] in
             print("app-check=complete state=\(self?.phase ?? "unknown")")
             fflush(stdout); completion()
         }
     }
-    func refreshHistory() { history = (try? store?.entries()) ?? [] }
+    private func refreshRecoveryAudio() {
+        guard let retry else { hasRecoveryAudio = false; return }
+        hasRecoveryAudio = ((try? FileManager.default.contentsOfDirectory(at: retry.directory, includingPropertiesForKeys: nil)) ?? []).contains { $0.pathExtension == "wav" }
+    }
+    func refreshHistory() {
+        do { history = try store?.entries() ?? [] }
+        catch { message = "Could not read saved history." }
+    }
     func copyEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.finalText, forType: .string) }
     func deleteEntry(_ entry: HistoryEntry) { do { try store?.delete(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
     func clearHistory() {
         let alert = NSAlert(); alert.messageText = "Delete all saved transcripts?"; alert.informativeText = "This cannot be undone."
         alert.addButton(withTitle: "Delete All"); alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { for entry in history { try? store?.delete(entry) }; refreshHistory() }
+        if alert.runModal() == .alertFirstButtonReturn {
+            do { for entry in history { try store?.delete(entry) } }
+            catch { message = "Could not delete all transcripts. Remaining entries are shown in History." }
+            refreshHistory()
+        }
+    }
+    func dismissStatus() {
+        guard !isBusy else { return }
+        if sessionAvailable {
+            setPhase("Ready", "Hold your configured shortcut to dictate, or tap to start and tap again to finish.")
+        } else {
+            phase = "Error"; message = "Private storage is unavailable. Murmur cannot start."
+            updateMenu?()
+        }
+        bubble.hide()
     }
     func showSettings() { openSettings?() }
-    func revealRecoveryAudio() { if let recoveryAudio { NSWorkspace.shared.activateFileViewerSelecting([recoveryAudio]) } }
+    /// Selects this error's retained audio when known; otherwise opens the retry folder holding older retained audio.
+    func revealRecoveryAudio() {
+        if let recoveryAudio, FileManager.default.fileExists(atPath: recoveryAudio.path) { NSWorkspace.shared.activateFileViewerSelecting([recoveryAudio]) }
+        else if hasRecoveryAudio, let retry { NSWorkspace.shared.open(retry.directory) }
+    }
     func shutdown() {
         generation = UUID(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
         if sessionAvailable { session.shutdown() }
@@ -330,5 +384,20 @@ import Darwin
         }
         if let runnerOutput { try? FileManager.default.removeItem(at: runnerOutput) }
         bubble.hide()
+        if let previewDirectory { try? FileManager.default.removeItem(at: previewDirectory) }
     }
+}
+
+// Probe inputs belong to the caller; only the private copy follows retry cleanup.
+func copyProbeAudio(_ audio: URL, into retry: RetryAudio) throws -> URL {
+    let ownedAudio = try retry.create()
+    do {
+        let input = try FileHandle(forReadingFrom: audio)
+        defer { try? input.close() }
+        let output = try FileHandle(forWritingTo: ownedAudio)
+        defer { try? output.close() }
+        while let data = try input.read(upToCount: 1024 * 1024), !data.isEmpty { try output.write(contentsOf: data) }
+        try output.synchronize()
+        return ownedAudio
+    } catch { try? retry.delete(ownedAudio); throw error }
 }

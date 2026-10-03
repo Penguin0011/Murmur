@@ -13,6 +13,7 @@ final class Capture {
     let queue = DispatchQueue(label: "dictation.capture.write")
     var file: AVAudioFile?
     var writeError: Error?
+    var level: Double = 0
     var frames: AVAudioFramePosition = 0
     var firstBuffer: TimeInterval?
     var started: TimeInterval = 0
@@ -40,6 +41,11 @@ final class Capture {
             }
             let received = ProcessInfo.processInfo.systemUptime
             queue.async { [self] in
+                if let samples = copy.floatChannelData, copy.frameLength > 0 {
+                    var energy = 0.0
+                    for index in 0..<Int(copy.frameLength) { energy += Double(samples[0][index]) * Double(samples[0][index]) }
+                    level = min(1, sqrt(energy / Double(copy.frameLength)) * 8)
+                }
                 if firstBuffer == nil { firstBuffer = received - started }
                 do { try file?.write(from: copy); frames += AVAudioFramePosition(copy.frameLength) }
                 catch { writeError = error }
