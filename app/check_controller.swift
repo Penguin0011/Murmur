@@ -71,6 +71,12 @@ import AppKit
         controller.dismissStatus()
         precondition(controller.phase == "Processing" && controller.message == "busy")
         precondition(controller.history.first?.id == entry.id && manager.fileExists(atPath: recovery.path))
+        // Any folder change (Use Default, a finished download) is applied and saved, not only Choose Folder.
+        controller.phase = "Ready"
+        controller.modelDirectory = "/tmp/murmur-check-folder-\(UUID().uuidString)"
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        precondition(UserDefaults.standard.string(forKey: "modelDirectory") == controller.modelDirectory, "a model folder change is saved without an Apply button")
+        UserDefaults.standard.removeObject(forKey: "modelDirectory")
         // "No speech" clears itself after 2 s; a status that replaced it in the meantime stays.
         controller.phase = "Ready"
         controller.setPhase("Error", "No speech was detected. Check your microphone and try again.")

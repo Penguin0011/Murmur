@@ -22,6 +22,20 @@ final class Capture {
     var firstBuffer: TimeInterval?
     var started: TimeInterval = 0
     var stopped = false
+    /// Uptime after which buffers are dropped (queue-owned). Set from the shortcut thread at a hold's
+    /// release, so a late main thread cannot extend the recording past release plus tail.
+    private var cutoff = TimeInterval.infinity
+    private static let currentLock = NSLock()
+    nonisolated(unsafe) private static var _current: Capture?
+    /// The capture that is recording now, for the shortcut thread.
+    static var current: Capture? { currentLock.withLock { _current } }
+
+    func cut(after uptime: TimeInterval) {
+        queue.async { [self] in
+            cutoff = min(cutoff, uptime)
+            timingLog.notice("release-cut after=\(uptime, format: .fixed(precision: 3))")
+        }
+    }
 
     func start(url: URL) throws {
         let input = engine.inputNode
@@ -45,6 +59,7 @@ final class Capture {
             }
             let received = ProcessInfo.processInfo.systemUptime
             queue.async { [self] in
+                guard received <= cutoff else { return }
                 if let samples = copy.floatChannelData, copy.frameLength > 0 {
                     var energy = 0.0
                     for index in 0..<Int(copy.frameLength) { energy += Double(samples[0][index]) * Double(samples[0][index]) }
@@ -62,12 +77,14 @@ final class Capture {
         do { try engine.start() }
         catch { engine.inputNode.removeTap(onBus: 0); queue.sync { file = nil }; throw error }
         let running = ProcessInfo.processInfo.systemUptime
+        Self.currentLock.withLock { Self._current = self }
         timingLog.notice("engine-start called=\(self.started, format: .fixed(precision: 3)) took=\(running - self.started, format: .fixed(precision: 3)) rate=\(format.sampleRate, format: .fixed(precision: 0))")
     }
 
     func stop() {
         guard !stopped else { return }
         stopped = true
+        Self.currentLock.withLock { if Self._current === self { Self._current = nil } }
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         queue.sync { file = nil }

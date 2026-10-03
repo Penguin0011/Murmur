@@ -110,7 +110,7 @@ final class PreStart: @unchecked Sendable {
     @Published var intelligentLeadingSpace: Bool
     @Published var automaticInsertion: Bool
     @Published var retention: String
-    // Cleanup and learning settings, saved by Apply Settings like the others.
+    // Cleanup and learning settings, applied as soon as they change like the others.
     @Published var cleanupFillers: Bool
     @Published var cleanupCorrections: Bool
     @Published var cleanupLists: Bool
@@ -125,7 +125,7 @@ final class PreStart: @unchecked Sendable {
     var modelLicense: ModelLicenseInfo? { downloader?.license }
     var modelSummary: String { downloader.map { ModelFacts.summary(downloadSize: $0.downloadSize) } ?? "" }
     var usesCustomModelFolder: Bool { downloader.map { URL(fileURLWithPath: modelDirectory).standardizedFileURL.path != $0.target.path } ?? false }
-    // History-off mode and the size cap (R9, §6). History-off and update checks apply on Apply Settings.
+    // History-off mode and the size cap (R9, §6). History-off and update checks apply as soon as they change.
     @Published var historyMode: HistoryMode
     @Published var historyCapWarning: String?
     @Published var sessionOnlyIDs: Set<String> = []
@@ -136,7 +136,7 @@ final class PreStart: @unchecked Sendable {
     @Published var availableRelease: ReleaseInfo?
     @Published var checkingForUpdates = false
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0" }
-    // Processing routes (R4) apply on Apply Settings, after any disclosure is confirmed.
+    // Processing routes (R4) apply as soon as they change, after any disclosure is confirmed.
     // API keys (R5) save immediately to the Keychain; only their presence is published.
     @Published var transcriptionRoute: TranscriptionRoute
     @Published var cloudTranscriber: CloudTranscriber
@@ -190,6 +190,8 @@ final class PreStart: @unchecked Sendable {
     private var source: CFRunLoopSource?
     private var tapThread: TapThread?
     private let prestart = PreStart()
+    /// Recording continues this long after release so the last word survives.
+    nonisolated static let releaseTail: TimeInterval = 0.4
     private let warm = WarmRunner()
     private var noNap: NSObjectProtocol?
     private var monitor: Timer?
@@ -203,6 +205,8 @@ final class PreStart: @unchecked Sendable {
     private var listeningStarted = Date()
     private var phaseBeforeEarly: (String, String)?
     private var statusShown = UUID()
+    private var applyScheduled = false
+    private var folderWatch: AnyCancellable?
     private var preview = false
     private var previewDirectory: URL?
     private lazy var session: CaptureSession = {
@@ -276,6 +280,9 @@ final class PreStart: @unchecked Sendable {
         } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
         modelStatus = downloader?.status() ?? .notDownloaded
         refreshKeys()
+        // Choose Folder, Use Default and a finished download all change the folder, even with
+        // Settings closed; apply each so the folder survives a relaunch.
+        folderWatch = $modelDirectory.dropFirst().removeDuplicates().sink { [weak self] _ in self?.settingsChanged() }
     }
     func start() {
         // Writing to a warm helper that died must fail with EPIPE, not kill Murmur.
@@ -362,6 +369,23 @@ final class PreStart: @unchecked Sendable {
         panel.allowsMultipleSelection = false; panel.message = "Choose the pinned Parakeet Unified model folder."
         if panel.runModal() == .OK, let url = panel.url { modelDirectory = url.path }
     }
+    /// Settings apply as soon as they change; there is no Apply button. Changes made in the same
+    /// moment (Faithful Transcription flips three toggles) apply once. Confirmations still appear,
+    /// and Cancel puts the control back.
+    func settingsChanged() {
+        guard !applyScheduled else { return }
+        applyScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.applyScheduled = false
+            self.applySettings()
+        }
+    }
+    /// Refreshes the permission rows and starts the shortcut if Input Monitoring was just allowed.
+    func refreshPermissionsAndShortcut() {
+        refreshPermissions()
+        if !preview, listener == nil, !isBusy, CGPreflightListenEventAccess() { configureShortcut() }
+    }
     func applySettings() {
         guard !isBusy else { message = "Finish the current dictation before changing settings."; return }
         let expired: [HistoryEntry]
@@ -420,7 +444,7 @@ final class PreStart: @unchecked Sendable {
     private func configureShortcut() {
         removeShortcut()
         guard sessionAvailable else { return }
-        guard CGPreflightListenEventAccess() else { message = "Allow Input Monitoring, then click Apply Settings to enable the shortcut."; return }
+        guard CGPreflightListenEventAccess() else { message = "Allow Input Monitoring, then click Refresh Permissions to enable the shortcut."; return }
         let binding: ShortcutBinding = shortcut == "fn" ? .fn : shortcut == "ctrl-option-space" ? .controlOptionSpace : .rightOption
         let token = shortcutGeneration
         let next = ShortcutListener(binding: binding, processingSeconds: 0, onAction: { [weak self] action, done in
@@ -443,6 +467,8 @@ final class PreStart: @unchecked Sendable {
             if self.session.state == .processing, let (phase, message) = self.phaseBeforeEarly { self.setPhase(phase, message) }
         }
         listener = next; source = nextSource
+        // A stalled main thread must not keep recording after a hold's release.
+        next.onHoldRelease = { released in Capture.current?.cut(after: released + AppController.releaseTail) }
         if let retry {
             next.onPressFromIdle = { [prestart] in prestart.begin(store: retry) }
             next.onPressWithoutStart = { [prestart] in prestart.discard(store: retry) }
@@ -450,7 +476,7 @@ final class PreStart: @unchecked Sendable {
         let thread = TapThread(source: nextSource); thread.startAndWait(); tapThread = thread
         CGEvent.tapEnable(tap: tap, enable: true)
         // ponytail: fixed tail; measured: long dictations lost the last word at 0 s, kept it at 0.6 s.
-        session.releaseTail = 0.4
+        session.releaseTail = Self.releaseTail
         session.takePrestarted = { [weak self] in
             guard let self, let (capture, url) = self.prestart.take() else { return nil }
             self.capture = capture; return url
@@ -689,6 +715,10 @@ final class PreStart: @unchecked Sendable {
         // A held result keeps only the raw transcript and is never inserted.
         guard case .insert(let processed) = outcome else {
             let reason = processing?.lastProviderError.map { " " + $0.userMessage } ?? ""
+            // Content-free: the guard's category, never the text.
+            if case .heldForRecovery(_, let why) = outcome {
+                timingLog.notice("cleanup-held reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError != nil, privacy: .public)")
+            }
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
             do { try store.save(entry); setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History.") }
             catch { setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History; its status could not be saved.") }
@@ -776,7 +806,7 @@ final class PreStart: @unchecked Sendable {
     func copyEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.finalText, forType: .string) }
     /// The explicit raw-text action for held cleanup (and any entry whose final text differs).
     func copyRawEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.rawText, forType: .string) }
-    /// Turns all three cleanup options off. Like other settings, it takes effect on Apply Settings.
+    /// Turns all three cleanup options off. Like other settings, it takes effect at once.
     func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false }
     func refreshDictionary() { dictionaryEntries = processing?.dictionary.entries ?? [] }
     @discardableResult
