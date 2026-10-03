@@ -68,6 +68,34 @@ struct HistoryStore {
     func purge(retention: String) throws { for entry in try expired(retention: retention) { try delete(entry) } }
 }
 
+/// Hashing the 1.8 GB model took about 0.9 s before every dictation. Verify once, then reuse the
+/// result while every pinned file keeps the same size, modification time and inode.
+// ponytail: a same-user writer that restores size, mtime and inode evades this; that writer could
+// also replace the app itself. Re-hash per dictation if that threat model changes.
+final class ModelVerificationCache: @unchecked Sendable {
+    static let shared = ModelVerificationCache()
+    private let lock = NSLock()
+    private var verified: (directory: String, fingerprint: [String])?
+    func verify(_ directory: URL, manifest: URL) throws {
+        let fingerprint = try Self.fingerprint(directory, manifest: manifest)
+        lock.lock(); let hit = verified?.directory == directory.path && verified?.fingerprint == fingerprint; lock.unlock()
+        if hit { return }
+        try verifyAppModels(directory, manifest: manifest)
+        lock.lock(); verified = (directory.path, fingerprint); lock.unlock()
+    }
+    static func fingerprint(_ directory: URL, manifest: URL) throws -> [String] {
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
+        guard let models = object?["models"] as? [String: Any],
+              let model = models["FluidInference/parakeet-unified-en-0.6b-coreml"] as? [String: Any],
+              let batch = model["batch_files"] as? [String] else { throw CaptureError("Invalid model manifest") }
+        return try batch.map { name in
+            var info = stat()
+            guard stat(directory.appendingPathComponent(name).path, &info) == 0 else { throw CaptureError("Missing model file") }
+            return "\(name):\(info.st_size):\(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec):\(info.st_ino)"
+        }
+    }
+}
+
 func verifyAppModels(_ directory: URL, manifest: URL) throws {
     let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
     guard let models = object?["models"] as? [String: Any],

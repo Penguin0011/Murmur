@@ -220,6 +220,11 @@ final class PreStart: @unchecked Sendable {
     }
     func start() {
         // App Nap would delay the shortcut; idle system sleep stays allowed.
+        // Verify the model now so the first dictation does not hash 1.8 GB.
+        if !preview, let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") {
+            let directory = URL(fileURLWithPath: modelDirectory)
+            DispatchQueue.global(qos: .utility).async { try? ModelVerificationCache.shared.verify(directory, manifest: manifest) }
+        }
         noNap = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Respond to the dictation shortcut without delay")
         refreshPermissions()
         if !preview { configureShortcut() }
@@ -244,11 +249,15 @@ final class PreStart: @unchecked Sendable {
                     timingLog.notice("capture-interrupted engine-running=\(running, privacy: .public) write-error=\(writeFailed, privacy: .public)")
                     self.recordingFailed = true; self.stopRecording()
                 }
-                if self.isBusy, let initial = self.destination {
-                    guard let current = try? captureFocus(), current.pid == initial.pid, CFEqual(current.element, initial.element),
-                          !current.secure, current.value == initial.value,
-                          current.selection?.location == initial.selection?.location,
-                          current.selection?.length == initial.selection?.length else { self.focusStable = false; return }
+                if self.isBusy, self.focusStable, let initial = self.destination {
+                    let current = try? captureFocus()
+                    let reason = current == nil ? "no-focus" : current!.pid != initial.pid ? "app" : !CFEqual(current!.element, initial.element) ? "element"
+                        : current!.secure ? "secure" : current!.value != initial.value ? "value"
+                        : current!.selection?.location != initial.selection?.location || current!.selection?.length != initial.selection?.length ? "selection" : nil
+                    if let reason {
+                        timingLog.notice("focus-unstable reason=\(reason, privacy: .public) app=\(initial.bundleID, privacy: .public)")
+                        self.focusStable = false; return
+                    }
                 }
             }
         }
@@ -482,8 +491,10 @@ final class PreStart: @unchecked Sendable {
         let token = generation; let models = URL(fileURLWithPath: activeModelDirectory)
         guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let store = records else { setPhase("Error", "The model runtime is unavailable. Audio is saved for retry."); done(); return }
         let timestamp = listeningStarted
+        let began = ProcessInfo.processInfo.systemUptime
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            do { try verifyAppModels(models, manifest: manifest) }
+            defer { timingLog.notice("model-verify took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3))") }
+            do { try ModelVerificationCache.shared.verify(models, manifest: manifest) }
             catch { DispatchQueue.main.async { guard let self, self.generation == token else { return }; self.setPhase("Error", "Model verification failed. Choose the pinned model folder. Audio is saved for retry."); done() }; return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
@@ -502,8 +513,10 @@ final class PreStart: @unchecked Sendable {
         do { try task.run(); runner = task; runnerOutput = temp } catch { try? output.close(); try? FileManager.default.removeItem(at: temp); setPhase("Error", "Transcription could not start. Audio is saved for retry."); done(); return }
         let timeout = DispatchWorkItem { if task.isRunning { task.terminate(); DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if task.isRunning { kill(task.processIdentifier, SIGKILL) } } } }
         DispatchQueue.global().asyncAfter(deadline: .now() + 300, execute: timeout)
+        let launched = ProcessInfo.processInfo.systemUptime
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             task.waitUntilExit(); timeout.cancel()
+            timingLog.notice("runner took=\(ProcessInfo.processInfo.systemUptime - launched, format: .fixed(precision: 3)) status=\(task.terminationStatus)")
             defer { try? output.close(); try? FileManager.default.removeItem(at: temp) }
             do {
                 guard task.terminationStatus == 0 else { throw CaptureError("Transcription failed") }
@@ -586,6 +599,13 @@ final class PreStart: @unchecked Sendable {
             catch { setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History; its status could not be saved.") }
             destination = nil; historySaved(); done(); return
         }
+        // Only filler words were heard: keep the raw transcript, insert nothing, show no error.
+        if processed.isEmpty {
+            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "saved-not-inserted")
+            try? store.save(entry)
+            setPhase("Ready", "Only filler words were heard, so nothing was inserted.")
+            destination = nil; historySaved(); done(); return
+        }
         if processed != text {
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus)
             do { try store.save(entry) } catch { setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); destination = nil; historySaved(); done(); return }
@@ -596,7 +616,12 @@ final class PreStart: @unchecked Sendable {
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
             do {
                 try store.save(entry)
+                // The text appearing is the signal; insertion's verification waits block the main
+                // thread, so take the indicator down first instead of freezing it.
+                bubble.hide()
+                let inserting = ProcessInfo.processInfo.systemUptime
                 let insertion = insertText(entry.finalText, into: destination, policy: .singleAttempt)
+                timingLog.notice("insert app=\(destination.bundleID, privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
                 switch insertion.status {
@@ -605,7 +630,10 @@ final class PreStart: @unchecked Sendable {
                 case .failed: setPhase("Saved", "\(saved) The text could not be inserted into this field, so nothing was typed.")
                 }
             } catch { setPhase("Saved", "\(saved) Insertion status could not be saved.") }
-        } else { setPhase("Saved", "\(saved) The destination changed or automatic insertion is off.") }
+        } else {
+            timingLog.notice("insert skipped auto=\(self.insertThisSession, privacy: .public) focus-stable=\(self.focusStable, privacy: .public) destination=\(self.destination?.bundleID ?? "none", privacy: .public)")
+            setPhase("Saved", "\(saved) The destination changed or automatic insertion is off.")
+        }
         destination = nil; historySaved(); done()
     }
     // Explicit developer check of the production pipeline, using a synthetic file

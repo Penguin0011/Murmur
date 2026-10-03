@@ -136,6 +136,15 @@ func textWithLeadingSpace(_ text: String, value: String?, selection: CFRange?, e
     return " " + text
 }
 
+/// Electron and Chromium text boxes often accept an AX selected-text write without applying it,
+/// so single-attempt insertion pastes into any app that embeds one of those engines.
+func embedsChromium(pid: pid_t) -> Bool {
+    guard let frameworks = NSRunningApplication(processIdentifier: pid)?.bundleURL?.appendingPathComponent("Contents/Frameworks") else { return false }
+    return ["Electron Framework.framework", "Chromium Embedded Framework.framework"].contains {
+        FileManager.default.fileExists(atPath: frameworks.appendingPathComponent($0).path)
+    }
+}
+
 func insertText(_ text: String, into destination: FocusSnapshot, policy: InsertionPolicy = .experimentalFallback) -> InsertionResult {
     func result(_ status: InsertionResult.Status, _ detail: String, _ snapshot: FocusSnapshot? = nil) -> InsertionResult {
         InsertionResult(status: status, detail: detail, snapshot: snapshot)
@@ -154,7 +163,7 @@ func insertText(_ text: String, into destination: FocusSnapshot, policy: Inserti
         return result(.failed, "Invalid UTF16 selection; no insertion attempted")
     }
     // Without an expected value, a successful write remains uncertain and must never be retried.
-    let method = insertionMethod(bundleID: current.bundleID, policy: policy)
+    let method = policy == .singleAttempt && embedsChromium(pid: current.pid) ? .paste : insertionMethod(bundleID: current.bundleID, policy: policy)
     var pasteMethod = "clipboard paste"
     if method == .accessibility {
         let write = AXUIElementSetAttributeValue(current.element, kAXSelectedTextAttribute as CFString, text as CFString)

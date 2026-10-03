@@ -563,7 +563,8 @@ private struct VoiceBubbles: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.15, paused: phase != "Processing" || reduceMotion)) { context in
+        // Every display frame: a 0.15 s floor stepped the pulse visibly after release.
+        TimelineView(.animation(minimumInterval: nil, paused: phase != "Processing" || reduceMotion)) { context in
             HStack(spacing: 5) {
                 ForEach(0..<5) { index in
                     let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 4 - Double(index)) + 1) / 2

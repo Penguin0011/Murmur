@@ -46,6 +46,16 @@ import CryptoKit
         try verifyAppModels(modelRoot, manifest: manifest)
         try Data(repeating: 0, count: bytes.count).write(to: weight)
         do { try verifyAppModels(modelRoot, manifest: manifest); fatalError("Corrupt weights accepted") } catch {}
+        // The cache skips re-hashing only while size, mtime and inode are unchanged.
+        let cache = ModelVerificationCache()
+        do { try cache.verify(modelRoot, manifest: manifest); fatalError("Cache accepted corrupt weights") } catch {}
+        try bytes.write(to: weight); try cache.verify(modelRoot, manifest: manifest)
+        let hashed = try ModelVerificationCache.fingerprint(modelRoot, manifest: manifest)
+        try cache.verify(modelRoot, manifest: manifest)   // hit
+        try Data(repeating: 0, count: bytes.count).write(to: weight)
+        let rewritten = try ModelVerificationCache.fingerprint(modelRoot, manifest: manifest)
+        precondition(rewritten != hashed, "rewrite must change the fingerprint")
+        do { try cache.verify(modelRoot, manifest: manifest); fatalError("Cache accepted rewritten weights") } catch {}
         print("Native history and verifier checks passed (atomic roundtrip, permissions, calendar expiry, invalid policy, mismatched/corrupt history, deletion, absent/corrupt weights).")
     }
 }

@@ -14,6 +14,9 @@ struct CorpusEntry: Decodable {
     var tags: [String]
 }
 
+struct EmptyCleaner: Cleaner {
+    func clean(_ raw: String, options: CleanupOptions) throws -> String { "" }
+}
 struct ThrowingCleaner: Cleaner {
     struct Failure: Error {}
     func clean(_ raw: String, options: CleanupOptions) throws -> String { throw Failure() }
@@ -234,6 +237,8 @@ struct EchoAsyncCleaner: AsyncCleaner {
                               ("Meet at the office. I mean, at home.", "Meet at home.")] {
             expect(CleanupPipeline.process(raw: split, options: .standard, cleaner: RuleCleaner()) == .cleaned(want), "split cue: \(split)")
         }
+        expect(CleanupPipeline.process(raw: "Um.", options: .standard, cleaner: RuleCleaner()) == .cleaned(""), "filler-only transcript cleans to nothing")
+        expect(CleanupPipeline.process(raw: "Hello.", options: .standard, cleaner: EmptyCleaner()) == .heldForRecovery(raw: "Hello.", reason: .emptyOutput), "a cleaner emptying real words still holds")
         for keep in ["I'm late. Sorry, traffic was bad.", "We shipped it. No problems so far.", "Call me tomorrow. Actually, tonight."] {
             expect(CleanupPipeline.process(raw: keep, options: .standard, cleaner: RuleCleaner()) == .cleaned(keep), "split cue left alone: \(keep)")
         }

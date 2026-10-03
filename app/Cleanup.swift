@@ -653,6 +653,10 @@ enum CleanupPipeline {
     static func judge(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String]) -> CleanupOutcome {
         let output = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         if output == raw.trimmingCharacters(in: .whitespacesAndNewlines) { return .cleaned(output) }
+        // Only filler words ("Um."): nothing to insert, which is not a cleanup failure.
+        if output.isEmpty, options.fillers,
+           (try? RuleCleaner().clean(raw, options: CleanupOptions(fillers: true, corrections: false, lists: false)))?
+               .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { return .cleaned("") }
         switch CleanupGuard.check(raw: raw, cleaned: output, options: options, allowedTerms: allowedTerms) {
         case .pass: return .cleaned(output)
         case .fail(let reason): return .heldForRecovery(raw: raw, reason: reason)
