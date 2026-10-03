@@ -1,3 +1,35 @@
+# Open issues — October 2, 2026
+
+Not yet addressed, as of `2f31308` on `aakash/bubble-pill-indicator`. [Certain]
+
+**Murmur app**
+1. A refused insertion (`failed`) shows the same "Delivery could not be verified" message as an uncertain one (`unverified`).
+2. Saved and Error bubbles stay on screen until the next action; there is no timeout or dismiss control.
+3. The bubble and three-pill indicator have never been seen in pixels. Screen Recording is not granted to Claude, and the computer-use tool cannot be granted the development build. Contrast of white pills on light glass is unverified.
+4. The pills follow a timer, not the microphone level (capture exposes no level yet).
+5. Settings changes take effect only after Apply Settings, unlike most Mac apps.
+6. No onboarding or first-run explanation of the defaults, no dictionary editor or learning controls, and no model download (the model folder is chosen manually).
+7. Cleanup, cloud routes and correction learning are not wired into the app.
+
+**Shortcut and capture**
+8. Every shortcut now uses an active event tap: Accessibility is required for all bindings, and a stalled main thread would delay keystrokes system-wide.
+9. Whether an active tap fails cleanly without Accessibility on macOS 26.6 is unverified.
+10. Escape swallowing is covered by deterministic checks only. Repeats of an Escape held from before recording still pass through.
+11. The Fn binding and physical key timing are untested live. First-word preservation is unproven with real speech; all live runs used synthetic speech played through the speakers.
+
+**Insertion and observation**
+12. The paste fallback's fixed 300 ms settle can double-insert if an app applies an AX write later; it should use change notifications.
+13. A browser password field not marked secure would receive a paste (accepted risk).
+14. Consecutive dictations need automatic spacing; otherwise words glue and observation is lost.
+15. Learning is unsupported in tested browser fields (Arc), default Google Docs (no AX target), and VS Code (stub text area).
+16. Untested live: permission revocation mid-session, clipboard-manager races, and learning across sessions (no persisted ledger).
+
+**Product, release and housekeeping**
+17. The PRD cleanup-failure conflict (section 3 preserves raw text; section 4 inserts raw text) is unresolved.
+18. Builds are self-signed (`clouddev Development`) only. Developer ID signing and notarization are blocked on an Apple Developer Program account.
+19. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, and the GitHub repository `dictation` still use the old name. Renaming the bundle ID resets macOS permissions and needs a data migration.
+20. The test transcripts from live runs remain in Murmur's History.
+
 # Bubble indicator and Murmur rename — October 2, 2026
 
 Branch `aakash/bubble-pill-indicator`, from `aakash-module-one` at `900ad61`. The app is now named **Murmur** in everything users see: window, menus, microphone prompt and `runtime/Murmur.app/Contents/MacOS/Murmur`. The bundle ID `cc.clouddev.dictation.development` and the Application Support/Caches `Dictation` folders are unchanged, so permissions, settings, history and the model cache carry over. The Listening and Processing bubbles show three white pills: a wave while listening, a sequential pulse while processing. They are static with Reduce Motion and use the primary color on the Reduce Transparency/Increase Contrast fallback. The pills are timed, not driven by audio level. [Certain]
