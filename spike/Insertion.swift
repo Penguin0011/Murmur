@@ -126,10 +126,11 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
         let written = verifyInsertion(current, expected: expected, method: "AX selected-text write")
         guard written.status == .unverified else { return written }
         // Some Chromium/Electron fields accept the write and drop it. Paste only if the field still reads exactly as before.
+        // Browser fields of unknown type are included; secure fields were rejected above, and paste stays unverified there.
         // ponytail: fixed 300 ms settle; a write applied later than this would double-insert. Use change notifications in the app.
         Thread.sleep(forTimeInterval: 0.3)
         guard let settled = try? captureFocus(), sameDestination(current, settled),
-              silentWriteAllowsPaste(before: current.value, after: settled.value, browserTypeUnknown: current.browserTypeUnknown) else {
+              silentWriteAllowsPaste(before: current.value, after: settled.value) else {
             return written
         }
         pasteMethod = "clipboard paste after unchanged AX write"
@@ -218,8 +219,8 @@ func insertionReadbackVerified(expected: String?, actual: String?, sameField: Bo
 }
 
 /// A write reported successful may fall back to paste only when read-back proves nothing changed.
-func silentWriteAllowsPaste(before: String?, after: String?, browserTypeUnknown: Bool) -> Bool {
-    !browserTypeUnknown && before != nil && after == before
+func silentWriteAllowsPaste(before: String?, after: String?) -> Bool {
+    before != nil && after == before
 }
 
 func clipboardOwnershipVerified(expectedCount: Int, beforeCount: Int, afterCount: Int, expectedToken: String, actualToken: String?) -> Bool {
@@ -241,10 +242,9 @@ func runInsertionChecks() {
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 4, expectedToken: "ours", actualToken: nil))
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 5, afterCount: 5, expectedToken: "ours", actualToken: "ours"))
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 5, expectedToken: "ours", actualToken: "ours"))
-    assert(silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: ", browserTypeUnknown: false))
-    assert(!silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: Acme", browserTypeUnknown: false))
-    assert(!silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: ", browserTypeUnknown: true))
-    assert(!silentWriteAllowsPaste(before: nil, after: nil, browserTypeUnknown: false))
+    assert(silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: "))
+    assert(!silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: Acme"))
+    assert(!silentWriteAllowsPaste(before: nil, after: nil))
     assert(insertionReadbackVerified(expected: "text", actual: "text", sameField: true, browserTypeUnknown: false))
     assert(!insertionReadbackVerified(expected: "text", actual: "text", sameField: true, browserTypeUnknown: true))
     assert(!insertionReadbackVerified(expected: "text", actual: "text", sameField: false, browserTypeUnknown: false))
