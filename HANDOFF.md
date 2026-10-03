@@ -1,6 +1,6 @@
 # Session checkpoint — October 3, 2026
 
-Branch `aakash/stoic-pascal-2p0zyt`. Since the merge commit `027c1bf`, these landed (through `fecee29`): [Certain]
+Branch `aakash/stoic-pascal-2p0zyt`. Since the merge commit `027c1bf`, these landed first (through `fecee29`): [Certain]
 
 | Area | Commits | What it adds |
 |---|---|---|
@@ -18,7 +18,18 @@ Providers: Fireworks deprecated audio inference on 2026-06-10. PRD section 5 now
 
 Release files added on this branch: `README.md`, `CONTRIBUTING.md`, `THIRD_PARTY_NOTICES.md`. FluidAudio at the pinned revision is Apache-2.0; the Parakeet weights are under the NVIDIA Open Model License and are downloaded, not bundled; the Core ML conversion's card says CC-BY-4.0, which does not resolve the upstream license. [Certain] No LICENSE file was added (see blocker below). [Certain]
 
-In progress in parallel, not done: wiring these modules into Controller/UI and `app/build.sh`, and the in-app model downloader. [Certain]
+Later the same day (through `e0b39b4`): [Certain]
+
+| Area | Merge | What it adds |
+|---|---|---|
+| App wiring: cleanup and dictionary | `b9fdbf9`, fix `8a582e7` | `app/Processing.swift` coordinator (dictionary first, then cleanup; guard failures held with Copy Raw). Settings: three cleanup toggles, Faithful Transcription, learning toggle, dictionary editor. `failed` and `unverified` insertions now show different messages. A corrupt dictionary disables only processing, not dictation. |
+| Model downloader | `c68f308` | `app/ModelDownload.swift`: pinned Hugging Face download (19 files, 1,801,783,964 bytes), streaming SHA-256/blob-SHA-1 verification, cancel, resume, remove, staged atomic install. URL scheme verified with real small-file downloads; the full weights were never downloaded. |
+| Gemini STT and local cleanup server | `df62098` | Gemini audio transcription through `generateContent` (LLM transcriber: structured JSON, temperature 0, silence skip, answer-suspected flag). OpenAI-compatible local cleanup server (Ollama, LM Studio, llama-server, vLLM), with host-based disclosure (only loopback counts as on-device) and redirects refused. PRD section 5 was revised to match; it's still a proposal. |
+| App wiring: downloads, retention, updates | `e0b39b4` | Model row in Settings (license shown before download), history cap, history-off mode (memory-only recovery until quit), Delete All Data (includes Keychain), GitHub update check (launch, hourly at most, manual menu item; opens the release page only). `build.sh` now builds with `-O`. |
+
+Every Controller/UI/main change is **uncompiled on the Mac**. Workers type-checked Controller and UI against stub AppKit/SwiftUI modules on Linux, which catches names and bindings but not real SDK signatures. Expect the first `app/build.sh` run to need fixes. [Certain]
+
+Still not wired: automatic observation feeding learning (`TODO(observation)`; spike `Observation.swift` is not in the app), cloud provider and Keychain settings UI, onboarding, VoiceOver announcements, launch at login, input-device selection. Open user decisions: OpenRouter vs Gemini as STT default, whether to pursue `gemini-3.5-transcribe` (Interactions API is Beta and stores requests by default), the proposed promotion rule. [Certain]
 
 **Mac-side next steps**
 1. Pull this branch, run `app/build.sh` and every check in `app/README.md` (including `check_ui.sh`) on the macOS 26 host. Fix anything that fails under Swift 6.3.3 and `-swift-version 5`. [Certain]
