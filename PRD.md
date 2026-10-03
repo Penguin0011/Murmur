@@ -100,6 +100,8 @@ Cloud providers (user-named candidates): **Fireworks API**, **Gemini API**, and 
 
 **User decision — October 3, 2026:** pursue Gemini 3.5 Transcribe for cloud speech-to-text, and accept that Google stores Interactions API requests. The app must disclose before first use that audio is sent to and stored by Google. [Certain] The rest of this paragraph is still proposed.
 
+**Verified October 3, 2026 (from the docs; no live key test):** the endpoint is `POST https://generativelanguage.googleapis.com/v1beta/interactions` with model `gemini-3.5-transcribe` and `store` true by default. Google keeps stored interactions for 55 days on the paid tier and 1 day on the free tier, and they can be deleted by ID with `DELETE /v1beta/interactions/{id}`. Implemented as `GeminiTranscribeProvider`. [Certain] Sources: [app/PROVIDERS.md](app/PROVIDERS.md).
+
 **Proposed decision, pending user approval — October 3, 2026 (revised).** Everything in this paragraph is a proposal. No route has had a live test with a real key or a real local server. [Certain] Sources: [app/PROVIDERS.md](app/PROVIDERS.md).
 
 - **Fireworks STT is dead.** Its audio inference was deprecated on 2026-06-10. [Certain]
