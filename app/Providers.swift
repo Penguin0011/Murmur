@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -651,9 +654,11 @@ struct OpenRouterTranscriptionProvider: TranscriptionProvider {
 
 struct GeminiCleanupProvider: CleanupProvider {
     static let defaultBaseURL = URL(string: "https://generativelanguage.googleapis.com/v1beta")!
-    /// Gemma 4 through the Gemini API: generous free-tier limits for a light task. The MoE variant
-    /// (about 4B active parameters) answers faster than gemma-4-31b-it.
-    static let defaultModel = "gemma-4-26b-a4b-it"
+    /// Fastest on this task (about 0.8 s round trip), but a smaller free-tier daily quota.
+    static let defaultModel = "gemini-3.5-flash-lite"
+    /// Used once the primary model is rate limited: same API, key, host and data, with far higher
+    /// free-tier limits. The MoE variant (about 4B active parameters) is the faster Gemma 4.
+    static let fallbackModel = "gemma-4-26b-a4b-it"
     /// Documented total request size for inline data.
     static let requestLimitBytes = 20_000_000
 
@@ -664,6 +669,9 @@ struct GeminiCleanupProvider: CleanupProvider {
     var timeout: TimeInterval = 30
     var maxOutputTokens: Int? = 4096
     var transport: HTTPTransport = URLSessionTransport()
+    /// nil disables failover (one request, as for other providers).
+    var fallback: String? = GeminiCleanupProvider.fallbackModel
+    var limits: GeminiModelLimits = .shared
 
     init(apiKey: APIKey) { self.apiKey = apiKey }
 
@@ -709,7 +717,19 @@ struct GeminiCleanupProvider: CleanupProvider {
         return request
     }
 
+    /// The primary model first; when Google rate-limits it, the same dictation goes once to the
+    /// fallback model, and the primary is skipped until its limit resets (next Pacific midnight for
+    /// a daily quota, otherwise Google's retry delay or a minute). Other errors never fail over.
     func cleanup(_ messages: CleanupMessages) async throws -> String {
+        guard let fallback, fallback != model else { return try await cleanup(messages, using: model) }
+        if limits.isLimited(model) { return try await cleanup(messages, using: fallback) }
+        do { return try await cleanup(messages, using: model) }
+        catch ProviderError.quota(.gemini) { limits.markLimited(model, until: GeminiModelLimits.nextPacificMidnight()); GeminiModelLimits.log("\(model) daily quota reached; using \(fallback) until midnight Pacific") }
+        catch ProviderError.rateLimited(.gemini, let retryAfter) { limits.markLimited(model, until: Date().addingTimeInterval(retryAfter ?? 60)); GeminiModelLimits.log("\(model) rate limited; using \(fallback) for \(Int(retryAfter ?? 60)) s") }
+        return try await cleanup(messages, using: fallback)
+    }
+
+    private func cleanup(_ messages: CleanupMessages, using model: String) async throws -> String {
         let request = try Self.makeRequest(messages: messages, apiKey: apiKey, model: model, baseURL: baseURL, maxOutputTokens: maxOutputTokens)
         guard (request.httpBody?.count ?? 0) <= Self.requestLimitBytes else { throw ProviderError.payloadTooLarge(id, limitBytes: Self.requestLimitBytes) }
         return try Self.parse(try await ProviderHTTP(provider: id, transport: transport, deadline: timeout).execute(request))
@@ -718,6 +738,31 @@ struct GeminiCleanupProvider: CleanupProvider {
     func validate() async throws {
         let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15).execute(Self.makeValidationRequest(apiKey: apiKey, baseURL: baseURL))
         try validationResult(provider: id, result)
+    }
+}
+
+/// Which Gemini API models are rate limited, and until when. Shared so the limit holds across the
+/// provider values each dictation builds.
+final class GeminiModelLimits: @unchecked Sendable {
+    static let shared = GeminiModelLimits()
+    private let lock = NSLock()
+    private var until: [String: Date] = [:]
+    func isLimited(_ model: String, now: Date = Date()) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return (until[model] ?? .distantPast) > now
+    }
+    func markLimited(_ model: String, until date: Date) { lock.lock(); until[model] = date; lock.unlock() }
+    /// Content-free: model ids and durations only.
+    static func log(_ text: String) {
+        #if canImport(os)
+        Logger(subsystem: "cc.clouddev.dictation", category: "timing").notice("cleanup-failover \(text, privacy: .public)")
+        #endif
+    }
+    /// Gemini API daily quotas reset at midnight Pacific time.
+    static func nextPacificMidnight(after now: Date = Date()) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+        return calendar.nextDate(after: now, matching: DateComponents(hour: 0, minute: 0, second: 0), matchingPolicy: .nextTime) ?? now.addingTimeInterval(86_400)
     }
 }
 

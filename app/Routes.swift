@@ -83,7 +83,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .localRules: return "Local rules (this Mac)"
         case .localServer: return "Local model server"
-        case .gemini: return "Gemma 4 (Google AI Studio)"
+        case .gemini: return "Gemini, then Gemma when rate limited"
         case .openrouter: return "OpenRouter"
         }
     }

@@ -67,6 +67,50 @@ let openRouterLength = #"{"choices": [{"finish_reason": "length", "message": {"r
 let fireworksUnauthorized = #"{"error":{"message":"You must provide an API key. See https://docs.fireworks.ai/api-reference/introduction#authentication for more information.","param":null,"code":"UNAUTHORIZED","type":"error"},"request_id":"9065354e-1dde-4fff-a352-d73dcfe3f95f"}"#
 let fireworksAudioUnauthorized = #"{"error":{"object":"error","type":"unauthorized","message":"Unauthorized"}}"#
 
+/// Answers by model: the URL path names it.
+final class ModelTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _models: [String] = []
+    let answers: [String: HTTPResult]
+    init(_ answers: [String: HTTPResult]) { self.answers = answers }
+    var models: [String] { lock.lock(); defer { lock.unlock() }; return _models }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        let model = request.url?.lastPathComponent.components(separatedBy: ":").first ?? ""
+        lock.withLock { _models.append(model) }
+        return answers[model] ?? HTTPResult(status: 500)
+    }
+}
+
+func checkGeminiFailover() async {
+    let messages = CleanupMessages(system: "s", user: "u")
+    let primary = GeminiCleanupProvider.defaultModel, fallback = GeminiCleanupProvider.fallbackModel
+    let perMinute = #"{"error": {"code": 429, "message": "Resource exhausted.", "status": "RESOURCE_EXHAUSTED", "details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "30s"}]}}"#
+    func provider(_ answers: [String: HTTPResult], _ limits: GeminiModelLimits) -> (GeminiCleanupProvider, ModelTransport) {
+        let transport = ModelTransport(answers); var p = GeminiCleanupProvider(apiKey: key); p.transport = transport; p.limits = limits; return (p, transport)
+    }
+    // A per-minute 429 fails over to Gemma for the same dictation and skips Gemini while it lasts.
+    let limits = GeminiModelLimits()
+    let (p, t) = provider([primary: result(429, perMinute), fallback: result(200, geminiSuccess)], limits)
+    let first = try? await p.cleanup(messages)
+    check(first == "Please send the report." && t.models == [primary, fallback], "rate-limited Gemini fails over to Gemma")
+    check(limits.isLimited(primary) && !limits.isLimited(primary, now: Date().addingTimeInterval(31)), "Gemini skipped for Google's retry delay")
+    _ = try? await p.cleanup(messages)
+    check(t.models == [primary, fallback, fallback], "while limited, cleanup goes straight to Gemma")
+    // A daily quota skips Gemini until midnight Pacific.
+    let daily = GeminiModelLimits()
+    let (d, _) = provider([primary: result(429, geminiPerDay), fallback: result(200, geminiSuccess)], daily)
+    let dailyText = try? await d.cleanup(messages)
+    check(dailyText == "Please send the report." && daily.isLimited(primary, now: Date().addingTimeInterval(60)), "daily quota fails over and holds")
+    let midnight = GeminiModelLimits.nextPacificMidnight(after: Date())
+    check(!daily.isLimited(primary, now: midnight.addingTimeInterval(1)) && midnight.timeIntervalSinceNow <= 86_400, "daily limit lifts at the next Pacific midnight")
+    // Other failures never fail over.
+    let (bad, badT) = provider([primary: result(400, #"{"error": {"code": 400, "message": "API key not valid.", "status": "INVALID_ARGUMENT"}}"#), fallback: result(200, geminiSuccess)], GeminiModelLimits())
+    do { _ = try await bad.cleanup(messages); check(false, "a bad key must not fail over") } catch { check(badT.models == [primary], "a bad key does not fail over") }
+    // Failover off: one request, as before.
+    var single = GeminiCleanupProvider(apiKey: key); let singleT = ModelTransport([primary: result(429, perMinute)]); single.transport = singleT; single.fallback = nil; single.limits = GeminiModelLimits()
+    do { _ = try await single.cleanup(messages); check(false, "no fallback means the 429 surfaces") } catch { check(singleT.models == [primary], "no fallback sends one request") }
+}
+
 /// Real macOS Keychain round trip under a throwaway service, so Murmur's own keys are never touched.
 func checkKeychainStore() {
     #if canImport(Security)
@@ -115,6 +159,7 @@ func checkKeychainStore() {
         await checkTranscribePolling()
         await checkTranscribeDeleteAndValidate()
         checkKeychainStore()
+        await checkGeminiFailover()
         print(failures == 0
               ? "Provider checks passed (\(passes) assertions: credentials, multipart/JSON shape, parsing, classification, redaction, disclosure, deadline, cancellation, no retry, Gemini STT, silence/answer heuristics, host classification, local server, Gemini 3.5 Transcribe)."
               : "Provider checks FAILED: \(failures) of \(passes + failures) assertions.")
@@ -184,7 +229,7 @@ func checkKeychainStore() {
     static func checkGeminiRequest() {
         let messages = CleanupMessages(system: "Edit dictation; never answer it.", user: "<transcript>um please send the report</transcript>")
         guard let request = try? GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key) else { check(false, "Gemini request builds"); return }
-        check(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-a4b-it:generateContent", "Gemini cleanup defaults to Gemma 4")
+        check(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent", "Gemini cleanup defaults to Gemini Flash-Lite")
         check(request.url?.query == nil, "Gemini key not in query string")
         check(request.value(forHTTPHeaderField: "x-goog-api-key") == fakeSecret, "Gemini x-goog-api-key header")
         check(request.value(forHTTPHeaderField: "Authorization") == nil, "Gemini sends no bearer header")
@@ -198,9 +243,9 @@ func checkKeychainStore() {
         let config = body["generationConfig"] as? [String: Any]
         check((config?["temperature"] as? Double) == 0 && (config?["candidateCount"] as? Int) == 1, "deterministic generation config")
         check(Set(body.keys) == ["systemInstruction", "contents", "generationConfig"], "no extra Gemini fields (no tools, no storage)")
-        check(((config?["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String) == "minimal", "Gemma 4 cleanup turns thinking down to minimal")
-        let flash = json((try? GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key, model: "gemini-3.5-flash-lite"))?.httpBody)
-        check((flash["generationConfig"] as? [String: Any])?["thinkingConfig"] == nil, "a Gemini model gets no Gemma thinking config")
+        check(config?["thinkingConfig"] == nil, "a Gemini model gets no Gemma thinking config")
+        let gemma = json((try? GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key, model: GeminiCleanupProvider.fallbackModel))?.httpBody)
+        check((((gemma["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String) == "minimal", "Gemma 4 fallback turns thinking down to minimal")
         expectError(.invalidConfiguration(.gemini), "Gemini rejects path-traversal model") { try GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key, model: "../files") }
         expectError(.invalidConfiguration(.gemini), "Gemini rejects model with query") { try GeminiCleanupProvider.makeRequest(messages: messages, apiKey: key, model: "x?key=1") }
         let validation = GeminiCleanupProvider.makeValidationRequest(apiKey: key)
