@@ -63,6 +63,7 @@ import Darwin
     private let downloader: ModelDownloader?
     private var modelDownloadInFlight = false
     private var lastAutomaticUpdateAttempt: Date?
+    // TODO(R12): UpdateConfiguration still defaults to Penguin0011/dictation; confirm the release repository before shipping.
     private lazy var updateChecker: UpdateChecker? = (try? UpdateConfiguration(currentVersion: currentVersion)).map { UpdateChecker(configuration: $0) }
     private var retry: RetryAudio?
     private var processing: ProcessingCoordinator?

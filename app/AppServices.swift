@@ -6,6 +6,8 @@ import Foundation
 
 // MARK: - Model row (PRD R2)
 
+// TODO(R2): show measured on-device performance in the row and offer model selection once a
+// second model is pinned; only Parakeet Unified is pinned today.
 enum ModelFacts {
     static let displayName = "Parakeet Unified English 0.6B"
     static let language = "English"

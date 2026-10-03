@@ -30,9 +30,9 @@ struct ProcessingSettings: Equatable, Sendable {
     var options: CleanupOptions = .standard
     var route: CleanupRoute = .local
     var learningEnabled = true
-    /// Persisted only; history-off is not wired into the controller yet.
+    /// Applied by AppController on Apply Settings through HistoryRouter.
     var historyMode: HistoryMode = .on
-    /// Persisted only; the update checker is not wired into the controller yet.
+    /// Read by AppController for the automatic update check.
     var updateChecksEnabled = true
 
     enum Key {
