@@ -112,6 +112,7 @@ import Darwin
     private var appliedRetention: String
     private var activeModelDirectory = ""
     private var listeningStarted = Date()
+    private var phaseBeforeEarly: (String, String)?
     private var preview = false
     private var previewDirectory: URL?
     private lazy var session: CaptureSession = {
@@ -315,10 +316,24 @@ import Darwin
         })
         guard let tap = next.createTap(), let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = "The shortcut could not start. Check Input Monitoring and Accessibility."; return }
         next.onEscapeWhileProcessing = { [weak self] in self?.cancelCloudRequest() }
+        // A press while the previous dictation processes records right away; its events replay
+        // into the machine when that dictation finishes, which adopts this capture.
+        next.onQueuedPress = { [weak self] in
+            guard let self, self.sessionAvailable else { return false }
+            let shown = (self.phase, self.message)
+            guard self.session.startEarly() else { return false }
+            self.phaseBeforeEarly = shown; return true
+        }
+        next.onQueuedCancel = { [weak self] in
+            guard let self else { return }
+            self.session.cancelEarly()
+            if self.session.state == .processing, let (phase, message) = self.phaseBeforeEarly { self.setPhase(phase, message) }
+        }
         listener = next; source = nextSource
         CFRunLoopAddSource(CFRunLoopGetMain(), nextSource, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
         // ponytail: fixed tail; measured: long dictations lost the last word at 0 s, kept it at 0.6 s.
         session.releaseTail = 0.4
+        session.resumeCapture = { [weak self] in self?.setPhase("Listening", "Listening… Release to finish, or press Escape to cancel.") }
         session.finishRecording = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }

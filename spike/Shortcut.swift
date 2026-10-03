@@ -92,6 +92,13 @@ final class ShortcutListener {
     /// Called on the main thread for a fresh Escape press while a session is processing; the app
     /// uses it to cancel a cloud request. Escape is not swallowed then.
     var onEscapeWhileProcessing: (() -> Void)?
+    /// Shortcut presses/releases that arrive while a session is processing. They are replayed into
+    /// the machine when processing finishes, so a back-to-back dictation is not dropped.
+    /// `onQueuedPress` starts capture at the first one (false drops the press, as before wiring);
+    /// Escape or a lost event stream clears the queue and calls `onQueuedCancel`.
+    private(set) var queued: [(down: Bool, at: TimeInterval)] = []
+    var onQueuedPress: (() -> Bool)?
+    var onQueuedCancel: (() -> Void)?
     init(binding: ShortcutBinding, processingSeconds: Double, onAction: ((ShortcutMachine.Action, @escaping () -> Void) -> Void)?) {
         self.binding = binding
         self.processingSeconds = processingSeconds
@@ -102,7 +109,7 @@ final class ShortcutListener {
         print("shortcut action=\(action.rawValue) state=\(machine.state.rawValue)")
         fflush(stdout)
         if let onAction {
-            onAction(action) { [self] in machine.processingFinished() }
+            onAction(action) { [self] in machine.processingFinished(); replayQueued() }
         } else if action == .finish {
             // ponytail: simulated processing only; wire real completion in the recording milestone.
             DispatchQueue.main.asyncAfter(deadline: .now() + processingSeconds) { [self] in
@@ -110,6 +117,18 @@ final class ShortcutListener {
                 print("shortcut state=\(machine.state.rawValue)")
             }
         }
+    }
+    func replayQueued() {
+        guard machine.state == .idle, !queued.isEmpty else { return }
+        let events = queued; queued.removeAll()
+        for (n, e) in events.enumerated() {
+            if n > 0 && machine.state == .idle { break } // The replayed start was refused.
+            emit(e.down ? machine.press(at: e.at) : machine.release(at: e.at))
+        }
+    }
+    func cancelQueued() {
+        guard !queued.isEmpty else { return }
+        queued.removeAll(); onQueuedCancel?()
     }
     private var swallowingEscape = false
     /// Whether the tap drops this event: the chord's Space always, Escape only while recording.
@@ -124,7 +143,7 @@ final class ShortcutListener {
         guard type == .keyDown || type == .keyUp,
               event.getIntegerValueField(.keyboardEventKeycode) == 53 else { return false }
         if type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
-            swallowingEscape = machine.state == .listening
+            swallowingEscape = machine.state == .listening || !queued.isEmpty
         }
         defer { if type == .keyUp { swallowingEscape = false } }
         return swallowingEscape
@@ -150,6 +169,7 @@ final class ShortcutListener {
     }
     func receive(type: CGEventType, event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            cancelQueued()
             emit(machine.eventStreamLost())
             print("event tap disabled; capture canceled, re-enabling tap")
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
@@ -157,11 +177,19 @@ final class ShortcutListener {
         }
         let key = event.getIntegerValueField(.keyboardEventKeycode)
         if type == .keyDown && key == 53 {
+            if !queued.isEmpty { cancelQueued(); return } // Cancels only the queued recording.
             if machine.state == .processing && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { onEscapeWhileProcessing?() }
             emit(machine.cancel()); return
         }
         guard key == binding.keyCode else { return }
         let time = Double(event.timestamp) / 1_000_000_000
+        if machine.state == .processing, let onQueuedPress {
+            let down = (type == .keyDown || type == .flagsChanged) && binding.isDown(event)
+            if down, event.getIntegerValueField(.keyboardEventAutorepeat) == 0, !queued.isEmpty || onQueuedPress() {
+                queued.append((true, time)); return
+            }
+            if !down, !queued.isEmpty { queued.append((false, time)); return }
+        }
         if type == .keyUp || (type == .flagsChanged && !binding.isDown(event)) {
             let action = machine.release(at: time)
             if action == .finish { print("shortcut gesture=hold-release") }

@@ -44,6 +44,43 @@ func sessionCheck() throws {
     RunLoop.main.run(until: Date().addingTimeInterval(0.2))
     assert(tailStops == 1 && tailProcessed && tail.state == .idle)
 
+    // Back-to-back: a press while #1 processes records at once and is adopted when #1 finishes.
+    func fnEvent(_ down: Bool, _ t: Double) -> CGEvent {
+        let e = CGEvent(keyboardEventSource: nil, virtualKey: 63, keyDown: down)!
+        e.type = .flagsChanged; e.flags = down ? .maskSecondaryFn : []; e.timestamp = UInt64(t * 1_000_000_000); return e
+    }
+    let escape = CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true)!
+    var captures: [URL] = [], stopped = 0, processed: [URL] = []
+    var finishProcessing: [() -> Void] = []
+    let b2b = CaptureSession(store: store, start: { captures.append($0) }, stop: { stopped += 1; return true },
+                             process: { url, done in processed.append(url); finishProcessing.append(done) })
+    b2b.releaseTail = 0.05
+    let b2bListener = ShortcutListener(binding: .fn, processingSeconds: 0) { action, done in b2b.receive(action, completed: done) }
+    b2bListener.onQueuedPress = { b2b.startEarly() }
+    b2bListener.onQueuedCancel = { b2b.cancelEarly() }
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 10)); b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 11))
+    // #2 pressed inside #1's release tail: the tail is cut so the recordings never overlap.
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 11.03))
+    assert(captures.count == 2 && stopped == 1 && processed == [captures[0]] && b2b.early == captures[1])
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 13))
+    assert(processed.count == 1 && b2bListener.queued.count == 2)
+    finishProcessing.removeFirst()()                       // #1 delivered: #2 adopts and finishes.
+    assert(b2b.early == nil && b2b.audio == captures[1] && b2b.state == .processing)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    assert(stopped == 2 && processed == [captures[0], captures[1]] && b2bListener.queued.isEmpty)
+    finishProcessing.removeFirst()(); assert(b2b.state == .idle && b2bListener.machine.state == .idle)
+    // Escape while #2 is queued deletes only #2; #1 still completes and nothing replays.
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 20)); b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 21))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 22))
+    let queuedURL = b2b.early!
+    assert(b2bListener.consumes(.keyDown, escape))
+    b2bListener.receive(type: .keyDown, event: escape)
+    assert(b2b.early == nil && !FileManager.default.fileExists(atPath: queuedURL.path) && b2bListener.queued.isEmpty)
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 23)); finishProcessing.removeFirst()()
+    assert(b2b.state == .idle && b2bListener.machine.state == .idle && processed.count == 3)
+    try? FileManager.default.removeItem(at: processed[2])
+
     var attempts = 0
     let retry = CaptureSession(store: store, start: { _ in
         attempts += 1
