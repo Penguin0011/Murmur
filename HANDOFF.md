@@ -1,34 +1,92 @@
-# Open issues — October 2, 2026
+# Session checkpoint — October 3, 2026
 
-Not yet addressed, as of `2f31308` on `aakash/bubble-pill-indicator`. [Certain]
+Branch `aakash/stoic-pascal-2p0zyt`. Since the merge commit `027c1bf`, these landed first (through `fecee29`): [Certain]
+
+| Area | Commits | What it adds |
+|---|---|---|
+| Cleanup | `9b1ad25`, `47af2ab`, `4c52312`, `867743c`, merged in `08fd0e0` | `app/Cleanup.swift`: independent cleanup options, the PRD bound-check guard, the LLM prompt, a deterministic `RuleCleaner` baseline and a pipeline that holds failures for recovery. A 425-utterance labeled corpus (`app/cleanup-corpus.json`, built by `app/tools/build_cleanup_corpus.py`) and `app/check_cleanup.swift`. |
+| Dictionary, learning, retention | `d2470c3`, `17c359b`, `325f72a`, `0ee1c6a`, `82b0f92`, merged in `8d2bf02` | `app/Dictionary.swift` (custom dictionary, whole-word apply), `app/Learning.swift` (correction ledger and the proposed promotion rule), `app/Retention.swift` (50 MB cap, history-off mode, data wipe), and `app/check_dictionary.swift`. |
+| Providers, Keychain, updates | `952c999`, `2e51682`, `c7b928e`, `5f5c0f8`, `06d215b`, merged in `6b09a2d` | `app/PROVIDERS.md` (verified provider facts), `app/Credentials.swift` (Keychain store, service "Murmur"), `app/Providers.swift` (OpenRouter STT, Gemini and OpenRouter cleanup, deprecated Fireworks STT, error classification), `app/Updates.swift` (GitHub Releases checker), with checks. |
+| Shared type | `fecee29` | One `CleanupMessages` type used by both cleanup and providers. |
+| Docs | `7270591` | Marks the PRD cleanup-failure conflict resolved. |
+
+All of these are Foundation-only modules. Their checks passed on Linux with Swift 6.1.2. They are **not wired into the app and have not been compiled on the Mac** (Swift 6.3.3, `-swift-version 5`); the Keychain store compiles only on macOS, so it has never been compiled. [Certain]
+
+Measured cleanup baseline (Linux, 425 utterances): 96.7% exact match, 1/425 unintended name/number/negation edits, 0/237 guard false rejects, 2348/2348 adversarial outputs rejected. The same agent wrote corpus, labels and baseline, so real quality is lower. `RuleCleaner` is a baseline, not the local cleanup model choice. Details are in `app/README.md` and PRD "Milestone 1 implementation decisions". [Certain]
+
+Providers: Fireworks deprecated audio inference on 2026-06-10. PRD section 5 now proposes OpenRouter `/api/v1/audio/transcriptions` for STT and Gemini/OpenRouter for cleanup, pending user approval. No call has been made with a real API key. [Certain]
+
+Release files added on this branch: `README.md`, `CONTRIBUTING.md`, `THIRD_PARTY_NOTICES.md`. FluidAudio at the pinned revision is Apache-2.0; the Parakeet weights are under the NVIDIA Open Model License and are downloaded, not bundled; the Core ML conversion's card says CC-BY-4.0, which does not resolve the upstream license. [Certain] No LICENSE file was added (see blocker below). [Certain]
+
+Later the same day (through `e0b39b4`): [Certain]
+
+| Area | Merge | What it adds |
+|---|---|---|
+| App wiring: cleanup and dictionary | `b9fdbf9`, fix `8a582e7` | `app/Processing.swift` coordinator (dictionary first, then cleanup; guard failures held with Copy Raw). Settings: three cleanup toggles, Faithful Transcription, learning toggle, dictionary editor. `failed` and `unverified` insertions now show different messages. A corrupt dictionary disables only processing, not dictation. |
+| Model downloader | `c68f308` | `app/ModelDownload.swift`: pinned Hugging Face download (19 files, 1,801,783,964 bytes), streaming SHA-256/blob-SHA-1 verification, cancel, resume, remove, staged atomic install. URL scheme verified with real small-file downloads; the full weights were never downloaded. |
+| Gemini STT and local cleanup server | `df62098` | Gemini audio transcription through `generateContent` (LLM transcriber: structured JSON, temperature 0, silence skip, answer-suspected flag). OpenAI-compatible local cleanup server (Ollama, LM Studio, llama-server, vLLM), with host-based disclosure (only loopback counts as on-device) and redirects refused. PRD section 5 was revised to match; it's still a proposal. |
+| App wiring: downloads, retention, updates | `e0b39b4` | Model row in Settings (license shown before download), history cap, history-off mode (memory-only recovery until quit), Delete All Data (includes Keychain), GitHub update check (launch, hourly at most, manual menu item; opens the release page only). `build.sh` now builds with `-O`. |
+| Gemini 3.5 Transcribe | `de72390` | `GeminiTranscribeProvider`: Interactions API (`POST /v1beta/interactions`), verbatim mode, `en-US`, custom vocabulary, `store: true`; Google keeps stored interactions 55 days (paid) or 1 day (free), deletable by ID (IDs not persisted yet). |
+| Routes, keys, disclosure, lexicon | `5e89d18` | `app/Routes.swift`: Local/Cloud transcription (Gemini 3.5 Transcribe default cloud choice, OpenRouter Whisper, Gemini audio LLM) and cleanup (rules, local server, Gemini, OpenRouter) with no fallback; disclosure alert before first use of any off-Mac route and on change; Keychain key rows with Validate; Escape cancels a cloud request; NSSpellChecker backs the learning lexicon. |
+
+Every Controller/UI/main change is **uncompiled on the Mac**. Workers type-checked Controller and UI against stub AppKit/SwiftUI modules on Linux, which catches names and bindings but not real SDK signatures. Expect the first `app/build.sh` run to need fixes. [Certain]
+
+Still not wired: automatic observation feeding learning (`TODO(observation)`; spike `Observation.swift` is not in the app), onboarding, VoiceOver announcements, launch at login, input-device selection. Decided since: pursue `gemini-3.5-transcribe` with stored requests; promotion rule approved. [Certain]
+
+**Mac-side next steps**
+1. Pull this branch, run `app/build.sh` and every check in `app/README.md` (including `check_ui.sh`) on the macOS 26 host. Fix anything that fails under Swift 6.3.3 and `-swift-version 5`. [Certain]
+2. Run a live key test per provider: OpenRouter STT, OpenRouter chat, Gemini `generateContent`, and the Fireworks turbo host only if it is to be offered. Record status codes and error shapes; do not offer a route in settings until its test passes. [Certain]
+3. Back the learning lexicon with NSSpellChecker (`isCommonWord`) before shipping learning. Without it, real-word swaps such as casual→causal pass the filter and can promote. [Certain]
+4. Get user approval for the proposed provider split and the proposed promotion rule. [Certain]
+
+**User decisions, October 3, 2026:** MIT `LICENSE` added with holder "Aakash"; the promotion rule is approved (NSSpellChecker lexicon still required before learning ships); pursue Gemini 3.5 Transcribe and accept Google storing requests (must be disclosed); Apple Developer enrollment deferred, so Developer ID signing and notarization remain blocked. [Certain]
+
+---
+
+# Open issues — October 3, 2026 (after merging `aakash-module-one` into main; updated at the session checkpoint above)
+
+Merged state: module-one's standalone glass-dot indicator and error-only popup replace main's three-pill bubble; main's Murmur naming, active event tap (`ShortcutListener.createTap()`, Control–Option–Space Space and Escape-while-recording swallowed), permission refresh on activation, "No speech was detected" message, Audio gating and stable signing identity are kept. The merge was resolved on Linux without a Swift toolchain, so **the merged app has not been compiled or run**; run `app/build.sh` and the checks in `app/README.md` first. [Certain]
+
+**Fixed by module-one**
+- ~~Saved and Error bubbles stay on screen with no dismiss control~~: Saved and Inserted show no popup; the Error popup has a dismiss button, and idle errors can be dismissed in settings.
+- ~~The pills follow a timer, not the microphone level~~: the glass dots follow `Capture.level` while listening (processing is still a timed pulse). Live microphone responsiveness is untested.
+- ~~The indicator has never been seen in pixels~~: the glass dots and error popup were inspected in the native UI fixture (light, dark, opaque fallback). The real panel over a destination app is still unseen.
+- Consecutive dictations gluing words: partly addressed by the default-off "Intelligently add a leading space" toggle; live insertion is unverified.
 
 **Murmur app**
-1. A refused insertion (`failed`) shows the same "Delivery could not be verified" message as an uncertain one (`unverified`).
-2. Saved and Error bubbles stay on screen until the next action; there is no timeout or dismiss control.
-3. The bubble and three-pill indicator have never been seen in pixels. Screen Recording is not granted to Claude, and the computer-use tool cannot be granted the development build. Contrast of white pills on light glass is unverified.
-4. The pills follow a timer, not the microphone level (capture exposes no level yet).
-5. Settings changes take effect only after Apply Settings, unlike most Mac apps.
-6. No onboarding or first-run explanation of the defaults, no dictionary editor or learning controls, and no model download (the model folder is chosen manually).
-7. Cleanup, cloud routes and correction learning are not wired into the app.
+1. A refused insertion (`failed`) and an uncertain one (`unverified`) share the "Delivery could not be verified" message; with no Saved popup it is now visible only in settings and History.
+2. The bubble's Audio button shows when this error's audio is known (selects that file) or when any retained audio exists (opens the retry folder). Confirm this union is the intended behavior.
+3. Settings changes take effect only after Apply Settings.
+4. No onboarding, dictionary editor or learning controls. Cleanup, cloud providers, Keychain credentials, dictionary, learning, retention cap and update checks now exist as checked Foundation-only modules, but are not wired in; wiring is in progress. The model downloader is in progress; until then the model folder is chosen manually.
+5. Corrupt history blocks startup; there is no user-visible repair path.
 
 **Shortcut and capture**
-8. Every shortcut now uses an active event tap: Accessibility is required for all bindings, and a stalled main thread would delay keystrokes system-wide.
-9. Whether an active tap fails cleanly without Accessibility on macOS 26.6 is unverified.
-10. Escape swallowing is covered by deterministic checks only. Repeats of an Escape held from before recording still pass through.
-11. The Fn binding and physical key timing are untested live. First-word preservation is unproven with real speech; all live runs used synthetic speech played through the speakers.
+6. Every shortcut uses an active event tap: Accessibility is required for all bindings, and a stalled main thread delays keystrokes system-wide. Clean failure without Accessibility on macOS 26.6 is unverified.
+7. Escape swallowing is covered by deterministic checks only; repeats of an Escape held from before recording still pass through.
+8. The Fn binding, physical key timing and first-word preservation with real speech are untested live.
 
 **Insertion and observation**
-12. The paste fallback's fixed 300 ms settle can double-insert if an app applies an AX write later; it should use change notifications.
-13. A browser password field not marked secure would receive a paste (accepted risk).
-14. Consecutive dictations need automatic spacing; otherwise words glue and observation is lost.
-15. Learning is unsupported in tested browser fields (Arc), default Google Docs (no AX target), and VS Code (stub text area).
-16. Untested live: permission revocation mid-session, clipboard-manager races, and learning across sessions (no persisted ledger).
+9. The paste fallback's fixed 300 ms settle can double-insert if an app applies an AX write later.
+10. A browser password field not marked secure would receive a paste (accepted risk).
+11. Learning is unsupported in Arc fields, default Google Docs and VS Code; permission revocation mid-session, clipboard-manager races and cross-session learning are untested.
 
 **Product, release and housekeeping**
-17. The PRD cleanup-failure conflict (section 3 preserves raw text; section 4 inserts raw text) is unresolved.
-18. Builds are self-signed (`clouddev Development`) only. Developer ID signing and notarization are blocked on an Apple Developer Program account.
-19. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, and the GitHub repository `dictation` still use the old name. Renaming the bundle ID resets macOS permissions and needs a data migration.
-20. The test transcripts from live runs remain in Murmur's History.
+12. ~~The PRD cleanup-failure conflict (section 3 vs section 4) is unresolved.~~ Resolved in PRD "Milestone 1 implementation decisions": cleanup errors and guard failures both save the raw transcript, show recovery, and require an explicit raw-text action before insertion.
+13. Builds are self-signed (`clouddev Development`); Developer ID signing and notarization need an Apple Developer Program account.
+14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders, notification names and the repository still use the old name.
+15. Test transcripts from live runs remain in Murmur's History.
+16. ~~No LICENSE file~~: added (MIT, Aakash). `README.md`, `CONTRIBUTING.md` and `THIRD_PARTY_NOTICES.md` now exist.
+17. The new modules have never been compiled on the Mac; the Keychain store has never been compiled at all.
+
+**Processing and providers**
+18. No provider has been called with a real API key. Fireworks STT is deprecated upstream; the OpenRouter STT and Gemini/OpenRouter cleanup split is a proposal pending user approval.
+19. The local cleanup model is unselected. `RuleCleaner` is a baseline; its corpus has no real ASR transcripts, and the guard will hold more real LLM output than baseline output.
+20. Learning's lexicon check needs NSSpellChecker on macOS before learning ships; the semantic promotion rule is approved.
+21. The Parakeet conversion's CC-BY-4.0 label conflicts with the upstream NVIDIA Open Model License; the app must show the model license before download.
+
+---
+
+# History from main (`aakash/bubble-pill-indicator`)
 
 # Bubble indicator and Murmur rename — October 2, 2026
 
@@ -52,6 +110,70 @@ Follow-up on the same day: four agent fixes were merged (`8c449d9` permission re
 Live rerun on the merged, signed build: the probe inserted; the probe with focus moved was Saved; the injected Control–Option–Space hold with speech through the microphone went Listening → Processing → Inserted with no stray space; hold-then-Escape canceled; and a silent hold showed "No speech was detected. Check your microphone and try again." with History and Audio. All active shortcuts now require Accessibility as well as Input Monitoring. [Certain]
 
 Remaining app issues: a refused insertion (`failed`) shows the same "Delivery could not be verified" message as an uncertain one. A Saved/Error bubble stays on screen until the next action. Escape swallowing is covered by deterministic checks, not observed in a destination app. The bubble and pills have not been seen in pixels, because Screen Recording is not granted to Claude. [Certain]
+
+---
+
+# History from `aakash-module-one`
+
+# Standalone glass dots — in progress, October 2, 2026
+
+User requested removal of the live indicator capsule: standalone voice-reactive Liquid Glass dots on a transparent background. Plan: remove matte background, border, and padding; use circular native glass surfaces and preserve reduced-transparency/increased-contrast fallback. Implemented standalone circular native glass dots, transparent unpadded 80×24-point live panel, and no outer panel shadow. Production/fixture builds passed; native dark preview showed only dots with accessible Listening label. Implementation committed as 17eca1c; signed installed bundle verified and replaced, backup at /Users/aakash/Applications/Murmur-backups/20261002-224829/Murmur.app. Installed Murmur reopened Ready with settings and permissions retained. Visual fixture confirmed standalone dots; production build and signature checks passed. Live microphone responsiveness not newly tested. Checkpoint ready for GitHub push. [Certain]
+
+---
+
+# Matte glass indicators — in progress, October 2, 2026
+
+User requested a smaller clickable error popup and neutral glass voice pills over a contrasting matte surface. Plan: narrow the error panel and reduce its padding/type; replace blue circles with reactive capsules using native glass and an opaque accessibility fallback. Preserve popup click-through, dismissal, and recovery audio. [Certain]
+
+Checkpoint: source changes implemented: 240-point error panel, 12-point summary, 8-point padding; reactive neutral 7-point capsules with native glass over an opaque matte background and Reduce Transparency/increased-contrast fallback. Production and fixture builds passed. Native dark-mode error and listening previews passed: smaller clickable error, neutral contrasting pills without blue. Light appearance also passed native visual inspection. Evidence: runtime/glass-review/matte-glass-dark.png and matte-glass-light.png. Implementation committed as 597ecfe; installed Murmur replaced with the signed verified build. Backup: /Users/aakash/Applications/Murmur-backups/20261002-223935/Murmur.app. Reopened installed Murmur: Ready, existing Fn shortcut/leading-space preference/model and permissions retained. Light/dark synthetic visual checks passed; no new live recording or insertion claim. Final checkpoint committed with implementation for GitHub push. [Certain]
+
+---
+
+# Clickable errors — October 2, 2026
+
+Removed Details from the compact error panel. Clicking its surface opens the app and selects Dictation to show the full error; Dismiss and Audio remain independent controls. The popup is exposed as an accessible button with an error label and open-app hint. [Certain]
+
+---
+
+# Compact indicators — October 2, 2026
+
+User superseded the optional minimal display: compact voice indicators are now the default (96 points), with no Saved or Inserted popup. Only errors show short messages and Details/conditional Audio actions. Full status remains in settings and History. The prior minimal-display preference is ignored; leading-space settings remain available. [Certain]
+
+---
+
+# Intelligent leading-space checkpoint — October 2, 2026
+
+Added a default-off, locally persisted leading-space toggle. The setting is captured at recording start; spacing uses the original destination context before the existing single-attempt safety check. Raw history remains unchanged, and final history records insertion text. Deterministic checks cover whitespace, punctuation, selection, word interiors, unavailable/invalid context, and UTF-16 emoji boundaries. Live target-app insertion remains unverified. [Certain]
+
+---
+
+# Minimal transcription display — October 2, 2026
+
+Added a locally saved, default-off setting that shows only compact voice-reactive circles during Listening, a processing pulse, and brief completion. Errors, saved output, and uncertain delivery retain recovery details. Native minimal Listening/Processing panel inspection confirmed no visible status text and accessible phase labels with Listening shortcut help. The toggle switched both ways, and minimal-mode errors retained Copy Text, History, Settings, and Dismiss. Production build and controller mode/recovery checks passed. Live microphone responsiveness remains unverified in this checkpoint. [Certain]
+
+---
+
+# Liquid Glass checkpoint — October 2, 2026
+
+User approved autonomous native Liquid Glass direction across settings, History, and the status bubble. Implemented native glass surfaces and controls, fixed action footers, semantic text contrast, and opaque accessibility fallbacks. Production build and synthetic UI fixture compile passed. [Certain]
+
+Captured light, dark, and forced opaque compact appearances. Independent scoped contrast review resolved its findings; the final light search placeholder measured approximately 5.8:1. Native search filtering/clearing passed. The real floating panel Dismiss click hid the panel, and the fixture asserted recovery history remained. Evidence is local and ignored under runtime/glass-review/. [Certain]
+
+Remaining validation: actual destination focus preservation, physical shortcut/microphone behavior, live speech, insertion, and clipboard races. The opaque fixture exercises the fallback branch without changing system accessibility preferences. See app/README.md for repeatable fixture commands and DESIGN.md for native design values. [Certain]
+
+---
+
+# Native app recovery and UI checkpoint — October 2, 2026
+
+This supersedes the older no-app-skeleton continuation below. Branch `aakash-module-one` now contains the native app in `app/`; build/run/check instructions and current evidence are in `app/README.md`. [Certain]
+
+Three delegated reviewers covered recording lifecycle, history/settings, and insertion safety, followed by a UI review. Fixed idle error dismissal, stale shortcut callbacks, monitor pauses during menu tracking, probe input deletion, unsafe probe arguments, invalid retention, and mismatched/corrupt history handling. Settings now show state/model/individual permissions with a fixed Apply footer; History has search and delivery status; the bubble has dismissal and context-sensitive audio recovery. [Certain]
+
+The app builds; launch/history/controller/session/processor/spike checks pass. Native synthetic UI inspection verified idle Error to Ready, retained recovery entries, settings and History layouts, filtered selection and no-results search. No live recording/insertion or physical-key claims are added. See `app/README.md` for the exact boundary. [Certain]
+
+Next steps: validate physical-key first-word capture and error/restart behavior with the actual app, verify the floating bubble click path without stealing destination focus, then repeat live per-app insertion and clipboard-race cases. Genuine labeled speech benchmarks and cleanup/model-management work remain open. Corrupt history currently blocks startup; a user-visible repair path remains future work. [Certain]
+
+---
 
 # Connected local path checkpoint — October 2, 2026
 

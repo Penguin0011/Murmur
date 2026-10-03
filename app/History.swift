@@ -41,7 +41,14 @@ struct HistoryStore {
     func entries() throws -> [HistoryEntry] {
         try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey])
             .filter { $0.pathExtension == "json" && ((try? $0.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true) }
-            .compactMap { try? JSONDecoder().decode(HistoryEntry.self, from: Data(contentsOf: $0)) }
+            .map { file in
+                let entry = try JSONDecoder().decode(HistoryEntry.self, from: Data(contentsOf: file))
+                guard UUID(uuidString: entry.id) != nil,
+                      file.lastPathComponent == entry.id + ".json" else {
+                    throw CaptureError("History identifier does not match its file")
+                }
+                return entry
+            }
             .sorted { $0.recordedAt > $1.recordedAt }
     }
     func delete(_ entry: HistoryEntry) throws {
@@ -54,10 +61,39 @@ struct HistoryStore {
         if retention == "six-months" {
             guard let date = calendar.date(byAdding: .month, value: -6, to: now) else { throw CaptureError("Invalid retention date") }
             cutoff = date
-        } else { cutoff = now.addingTimeInterval(-30 * 86400) }
+        } else if retention == "30-days" { cutoff = now.addingTimeInterval(-30 * 86400) }
+        else { throw CaptureError("Invalid history retention policy") }
         return try entries().filter { $0.recordedAt <= cutoff }
     }
     func purge(retention: String) throws { for entry in try expired(retention: retention) { try delete(entry) } }
+}
+
+/// Hashing the 1.8 GB model took about 0.9 s before every dictation. Verify once, then reuse the
+/// result while every pinned file keeps the same size, modification time and inode.
+// ponytail: a same-user writer that restores size, mtime and inode evades this; that writer could
+// also replace the app itself. Re-hash per dictation if that threat model changes.
+final class ModelVerificationCache: @unchecked Sendable {
+    static let shared = ModelVerificationCache()
+    private let lock = NSLock()
+    private var verified: (directory: String, fingerprint: [String])?
+    func verify(_ directory: URL, manifest: URL) throws {
+        let fingerprint = try Self.fingerprint(directory, manifest: manifest)
+        lock.lock(); let hit = verified?.directory == directory.path && verified?.fingerprint == fingerprint; lock.unlock()
+        if hit { return }
+        try verifyAppModels(directory, manifest: manifest)
+        lock.lock(); verified = (directory.path, fingerprint); lock.unlock()
+    }
+    static func fingerprint(_ directory: URL, manifest: URL) throws -> [String] {
+        let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
+        guard let models = object?["models"] as? [String: Any],
+              let model = models["FluidInference/parakeet-unified-en-0.6b-coreml"] as? [String: Any],
+              let batch = model["batch_files"] as? [String] else { throw CaptureError("Invalid model manifest") }
+        return try batch.map { name in
+            var info = stat()
+            guard stat(directory.appendingPathComponent(name).path, &info) == 0 else { throw CaptureError("Missing model file") }
+            return "\(name):\(info.st_size):\(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec):\(info.st_ino)"
+        }
+    }
 }
 
 func verifyAppModels(_ directory: URL, manifest: URL) throws {

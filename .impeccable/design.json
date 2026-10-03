@@ -1,14 +1,143 @@
 {
-  "platform": "macos",
-  "mode": "operate",
-  "direction": "Native utility with restrained glass status bubble",
-  "tokens": {
-    "typography": {"family": "system", "body": "body", "heading": "headline", "metadata": "caption"},
-    "color": {"foreground": "primary", "muted": "secondary", "surface": "windowBackgroundColor", "accent": "system"},
-    "spacing": [4, 8, 12, 18, 20],
-    "bubbleRadius": 24,
-    "bubbleMaterial": "regular glass; opaque accessibility fallback",
-    "motion": "none"
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-03T04:28:44.785144+00:00",
+  "title": "Design System: Dictation",
+  "extensions": {
+    "nativeMacOS": {
+      "platform": "macos",
+      "minimumVersion": "26",
+      "mode": "operate",
+      "source": "app/UI.swift",
+      "semanticColors": {
+        "foreground": "SwiftUI.primary",
+        "muted": "Color.primary.opacity(0.72) for authored supporting text, metadata, and search prompt",
+        "accent": "Color.accentColor",
+        "attention": "Color.orange for Settings error-state icon",
+        "surface": "NSColor.windowBackgroundColor",
+        "prominentAction": "NSColor.controlAccentColor background; Color.white label",
+        "selectedHistoryText": "Color.primary",
+        "modelAttentionText": "Color.primary"
+      },
+      "typography": {
+        "windowTitle": "largeTitle.weight(.semibold)",
+        "historyTitle": "title2.weight(.semibold)",
+        "label": "headline",
+        "content": "callout",
+        "metadata": "caption",
+        "prominentGlassAction": "system(size: 14, weight: .bold); white foreground applied inside actual Text/Label"
+      },
+      "materials": {
+        "utility": "glassEffect(.regular, in: RoundedRectangle)",
+        "button": "glass / glassProminent",
+        "bubbleButtons": "bordered, small control size",
+        "fallback": "windowBackgroundColor; bordered / borderedProminent",
+        "fallbackCondition": "utilityOpaquePreview || accessibilityReduceTransparency || colorSchemeContrast == .increased",
+        "previewOverride": "utilityOpaquePreview supplied only by synthetic fixture; does not modify system accessibility preferences"
+      },
+      "layout": {
+        "searchWidthPoints": 220,
+        "historyListWidthPoints": {
+          "min": 210,
+          "ideal": 240,
+          "max": 300
+        },
+        "historyDetailMinimumPoints": 300,
+        "glassContainerSpacingPoints": 12,
+        "bubbleWidth": "80pt transparent live; min(240, max(180, screen.visibleFrame.width - 32)) error",
+        "bubbleBottomOffsetPoints": 24,
+        "windowContentMinimumPoints": [
+          700,
+          560
+        ],
+        "windowChrome": "NSWindow transparent titlebar, hidden title; app/main.swift",
+        "windowInitialRequestedContentRectPoints": [
+          820,
+          660
+        ],
+        "capturedWindowIncludingChromePoints": {
+          "regular": [
+            820,
+            744
+          ],
+          "compact": [
+            700,
+            644
+          ]
+        },
+        "fixtureRegularContentLayoutRectPoints": [
+          820,
+          692
+        ]
+      },
+      "components": [
+        {
+          "name": "UtilityGlass",
+          "source": "app/UI.swift",
+          "swiftUI": "content.modifier(UtilityGlass())"
+        },
+        {
+          "name": "Primary action",
+          "source": "app/UI.swift",
+          "swiftUI": "Button(action: controller.applySettings) { Text(\"Apply Settings\").foregroundStyle(.white) }.modifier(UtilityButton(prominent: true))"
+        },
+        {
+          "name": "Secondary action",
+          "source": "app/UI.swift",
+          "swiftUI": "Button(\"Refresh\", action: controller.refreshHistory).modifier(UtilityButton())"
+        },
+        {
+          "name": "Navigation",
+          "source": "app/UI.swift",
+          "swiftUI": "TabView(selection: $selectedTab)"
+        },
+        {
+          "name": "Transcript search",
+          "source": "app/UI.swift",
+          "swiftUI": "TextField(\"\", text: $searchText).textFieldStyle(.plain) with accessible label and noninteractive Color.primary.opacity(0.72) placeholder overlay"
+        }
+      ],
+      "verification": "Integrated source compilation passed. Lead captured runtime/glass-review/dark-bubble.png and clicked native Dismiss; fixture assertion confirmed synthetic recovery history was preserved. AX inspection timed out after the panel successfully hid. Light, dark, and forced opaque compact captures reviewed; scoped contrast findings resolved, search placeholder approximately 5.8:1 in light capture; no real destination focus, physical recording, or live insertion verification claimed."
+    },
+    "shadows": [
+      {
+        "name": "floating-panel",
+        "value": "NSPanel.hasShadow = true",
+        "purpose": "Native shadow on the nonactivating bubble."
+      }
+    ],
+    "motion": [
+      {
+        "name": "status",
+        "value": "No authored animation",
+        "purpose": "Immediate state replacement; platform controls own native feedback."
+      }
+    ]
   },
-  "surfaces": {"settings": "native grouped form and tabs", "history": "master/detail list", "bubble": "nonactivating NSPanel"}
+  "components": [],
+  "narrative": {
+    "northStar": "Native glass, calm content",
+    "overview": "Native macOS Liquid Glass lifts status and actions above calm, readable content. Settings retain native forms and navigation; History keeps a selectable list and readable transcript detail. [Certain]",
+    "keyCharacteristics": [
+      "System typography and semantic colors. [Certain]",
+      "Glass for status, search, and actions; opaque reading surfaces. [Certain]",
+      "Nonactivating recording bubble with explicit recovery. [Certain]"
+    ],
+    "rules": [
+      {
+        "name": "The One Glass Layer Rule",
+        "body": "Keep the bubble's own controls bordered; never place glass buttons inside its glass surface.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use native glassEffect and system button styles.",
+      "Do keep transcripts and grouped settings readable on calm surfaces.",
+      "Do provide opaque fallbacks and explicit labels for icon actions."
+    ],
+    "donts": [
+      "Don't imitate glass with custom blur, gradients, or extra shadows.",
+      "Don't stack glass cards or put glass controls inside a glass bubble.",
+      "Don't replace system type or semantic colors with hard-coded approximations."
+    ]
+  }
 }

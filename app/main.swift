@@ -2,7 +2,13 @@ import AppKit
 import SwiftUI
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
-    let controller = AppController(preview: CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--test-audio"))
+    let options: LaunchOptions
+    let controller: AppController
+    init(options: LaunchOptions) {
+        self.options = options
+        controller = AppController(preview: options.preview || options.testAudio != nil, isolatedStorage: options.preview)
+        super.init()
+    }
     var window: NSWindow?
     var statusItem: NSStatusItem?
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -14,20 +20,19 @@ import SwiftUI
         controller.openSettings = { [weak self] in self?.showWindow() }
         controller.updateMenu = { [weak self] in self?.refreshMenu() }
         controller.start(); refreshMenu()
-        if let audioIndex = CommandLine.arguments.firstIndex(of: "--test-audio"), audioIndex + 1 < CommandLine.arguments.count,
-           let expectedIndex = CommandLine.arguments.firstIndex(of: "--expected-app"), expectedIndex + 1 < CommandLine.arguments.count {
-            controller.checkSavedAudio(URL(fileURLWithPath: CommandLine.arguments[audioIndex + 1]), expectedApp: CommandLine.arguments[expectedIndex + 1]) { NSApp.terminate(nil) }
+        if let audio = options.testAudio, let expectedApp = options.expectedApp {
+            controller.checkSavedAudio(URL(fileURLWithPath: audio), expectedApp: expectedApp) { NSApp.terminate(nil) }
         } else { showWindow() }
-        if let i = CommandLine.arguments.firstIndex(of: "--quit-after"), i + 1 < CommandLine.arguments.count,
-           let seconds = Double(CommandLine.arguments[i + 1]), seconds.isFinite, (0.1...60).contains(seconds) {
+        if let seconds = options.quitAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
         }
     }
     func showWindow() {
         if window == nil {
-            let next = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 610), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            next.title = "Murmur"; next.contentView = NSHostingView(rootView: SettingsView(controller: controller))
-            next.minSize = NSSize(width: 650, height: 500); next.center(); next.isReleasedWhenClosed = false
+            let next = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 660), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            next.title = "Murmur"; next.titleVisibility = .hidden; next.titlebarAppearsTransparent = true
+            next.contentView = NSHostingView(rootView: SettingsView(controller: controller))
+            next.contentMinSize = NSSize(width: 700, height: 560); next.center(); next.isReleasedWhenClosed = false
             window = next
         }
         NSApp.activate(ignoringOtherApps: true); window?.makeKeyAndOrderFront(nil); controller.refreshPermissions(); controller.refreshHistory()
@@ -39,14 +44,20 @@ import SwiftUI
         let state = NSMenuItem(title: controller.phase, action: nil, keyEquivalent: ""); state.isEnabled = false; menu.addItem(state)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings and History…", action: #selector(openSettings), keyEquivalent: "").target = self
+        menu.addItem(withTitle: UpdateText.menuTitle(controller.availableRelease), action: #selector(checkForUpdates), keyEquivalent: "").target = self
         if controller.phase == "Listening" {
             menu.addItem(withTitle: "Finish Dictation", action: #selector(finish), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Cancel Recording", action: #selector(cancel), keyEquivalent: "").target = self
+        } else if controller.canCancelRequest {
+            // A cloud request in flight; canceling it inserts nothing.
+            menu.addItem(withTitle: "Cancel Request", action: #selector(cancel), keyEquivalent: "").target = self
         }
         menu.addItem(.separator()); menu.addItem(withTitle: "Quit Murmur", action: #selector(quit), keyEquivalent: "q").target = self
         statusItem?.menu = menu
     }
     @objc func openSettings() { showWindow() }
+    /// Results appear quietly in Settings; a known release is shown there with its page link.
+    @objc func checkForUpdates() { if controller.availableRelease == nil { controller.checkForUpdates() }; showWindow() }
     @objc func finish() { controller.stopRecording() }
     @objc func cancel() { controller.cancelRecording() }
     @objc func quit() { NSApp.terminate(nil) }
@@ -54,8 +65,11 @@ import SwiftUI
     func applicationWillTerminate(_ notification: Notification) { controller.shutdown() }
 }
 MainActor.assumeIsolated {
+    let options: LaunchOptions
+    do { options = try LaunchOptions(arguments: Array(CommandLine.arguments.dropFirst())) }
+    catch { fputs("Invalid launch options. Use --preview [--quit-after SECONDS], or --test-audio FILE --expected-app BUNDLE_ID.\n", stderr); exit(2) }
     let application = NSApplication.shared
-    let delegate = AppDelegate()
+    let delegate = AppDelegate(options: options)
     application.delegate = delegate
     withExtendedLifetime(delegate) { application.run() }
 }

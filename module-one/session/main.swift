@@ -34,6 +34,83 @@ func sessionCheck() throws {
     empty.receive(.start) {}; let emptyURL = empty.audio!
     empty.receive(.finish) {}; assert(!FileManager.default.fileExists(atPath: emptyURL.path) && empty.state == .idle)
 
+    // A release tail keeps capturing after release; stop and processing follow on the main queue.
+    var tailStops = 0, tailProcessed = false
+    let tail = CaptureSession(store: store, start: { _ in }, stop: { tailStops += 1; return true }, process: { _, done in tailProcessed = true; done() })
+    tail.releaseTail = 0.05
+    tail.receive(.start) {}; tail.receive(.finish) {}
+    assert(tailStops == 0 && tail.state == .processing)
+    tail.receive(.start) {}; assert(tail.state == .processing)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    assert(tailStops == 1 && tailProcessed && tail.state == .idle)
+
+    // Back-to-back: a press while #1 processes records at once and is adopted when #1 finishes.
+    func fnEvent(_ down: Bool, _ t: Double) -> CGEvent {
+        let e = CGEvent(keyboardEventSource: nil, virtualKey: 63, keyDown: down)!
+        e.type = .flagsChanged; e.flags = down ? .maskSecondaryFn : []; e.timestamp = UInt64(t * 1_000_000_000); return e
+    }
+    let escape = CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true)!
+    var captures: [URL] = [], stopped = 0, processed: [URL] = []
+    var finishProcessing: [() -> Void] = []
+    let b2b = CaptureSession(store: store, start: { captures.append($0) }, stop: { stopped += 1; return true },
+                             process: { url, done in processed.append(url); finishProcessing.append(done) })
+    b2b.releaseTail = 0.05
+    let b2bListener = ShortcutListener(binding: .fn, processingSeconds: 0) { action, done in b2b.receive(action, completed: done) }
+    b2bListener.onQueuedPress = { b2b.startEarly() }
+    b2bListener.onQueuedCancel = { b2b.cancelEarly() }
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 10)); b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 11))
+    // #2 pressed inside #1's release tail: the tail is cut so the recordings never overlap.
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 11.03))
+    assert(captures.count == 2 && stopped == 1 && processed == [captures[0]] && b2b.early == captures[1])
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 13))
+    assert(processed.count == 1 && b2bListener.queued.count == 2)
+    finishProcessing.removeFirst()()                       // #1 delivered: #2 adopts and finishes.
+    assert(b2b.early == nil && b2b.audio == captures[1] && b2b.state == .processing)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    assert(stopped == 2 && processed == [captures[0], captures[1]] && b2bListener.queued.isEmpty)
+    finishProcessing.removeFirst()(); assert(b2b.state == .idle && b2bListener.machine.state == .idle)
+    // Escape while #2 is queued deletes only #2; #1 still completes and nothing replays.
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 20)); b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 21))
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 22))
+    let queuedURL = b2b.early!
+    assert(b2bListener.consumes(.keyDown, escape))
+    b2bListener.receive(type: .keyDown, event: escape)
+    assert(b2b.early == nil && !FileManager.default.fileExists(atPath: queuedURL.path) && b2bListener.queued.isEmpty)
+    b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 23)); finishProcessing.removeFirst()()
+    assert(b2b.state == .idle && b2bListener.machine.state == .idle && processed.count == 3)
+    try? FileManager.default.removeItem(at: processed[2])
+
+    // After an automatic stop (time cap, interruption) a press means "stop", not a new dictation.
+    let capped2 = CaptureSession(store: store, start: { _ in }, stop: { true }, process: { _, _ in })
+    let cappedListener = ShortcutListener(binding: .fn, processingSeconds: 0) { action, done in capped2.receive(action, completed: done) }
+    var cappedQueued = 0
+    cappedListener.onQueuedPress = { cappedQueued += 1; return capped2.startEarly() }
+    cappedListener.receive(type: .flagsChanged, event: fnEvent(true, 40)); cappedListener.receive(type: .flagsChanged, event: fnEvent(false, 40.1))
+    cappedListener.emit(cappedListener.machine.finish())      // the 120 s cap, not the user
+    cappedListener.receive(type: .flagsChanged, event: fnEvent(true, 45)); cappedListener.receive(type: .flagsChanged, event: fnEvent(false, 45.1))
+    assert(cappedQueued == 0 && capped2.early == nil && cappedListener.queued.isEmpty && cappedListener.machine.state == .processing)
+    try? FileManager.default.removeItem(at: capped2.audio!)
+
+    // Prestart: the tap thread starts capture on a press from idle; .start adopts it instead of
+    // starting a second capture, and a press that starts nothing reports itself for cleanup.
+    var preStarted: URL?, preStarts = 0, unused = 0, ordinaryStarts = 0
+    let pre = CaptureSession(store: store, start: { _ in ordinaryStarts += 1 }, stop: { true }, process: { _, done in done() })
+    pre.takePrestarted = { defer { preStarted = nil }; return preStarted }
+    let preListener = ShortcutListener(binding: .fn, processingSeconds: 0) { action, done in pre.receive(action, completed: done) }
+    preListener.onPressFromIdle = { preStarts += 1; preStarted = try? store.create() }
+    preListener.onPressWithoutStart = { unused += 1 }
+    let down30 = fnEvent(true, 30)
+    preListener.notePress(.flagsChanged, down30); let adopted = preStarted
+    preListener.receive(type: .flagsChanged, event: down30)
+    assert(preStarts == 1 && ordinaryStarts == 0 && pre.audio == adopted && pre.state == .listening && unused == 0)
+    preListener.receive(type: .flagsChanged, event: fnEvent(false, 30.1))   // tap: keeps listening
+    let stopPress = fnEvent(true, 31)
+    preListener.notePress(.flagsChanged, stopPress); assert(preStarts == 1) // not idle: no prestart
+    preListener.receive(type: .flagsChanged, event: stopPress); assert(unused == 1 && pre.state == .idle)
+    preListener.receive(type: .flagsChanged, event: fnEvent(false, 31.1))
+    try? FileManager.default.removeItem(at: adopted!)
+
     var attempts = 0
     let retry = CaptureSession(store: store, start: { _ in
         attempts += 1
