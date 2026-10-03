@@ -195,7 +195,14 @@ struct SettingsView: View {
                 Spacer()
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(Color.primary.opacity(0.72)).accessibilityHidden(true)
-                    TextField("Search transcripts", text: $searchText, prompt: Text("Search transcripts").foregroundStyle(Color.primary.opacity(0.72))).textFieldStyle(.plain)
+                    TextField("", text: $searchText).textFieldStyle(.plain)
+                        .accessibilityLabel("Search transcripts")
+                        .overlay(alignment: .leading) {
+                            if searchText.isEmpty {
+                                Text("Search transcripts").foregroundStyle(Color.primary.opacity(0.72))
+                                    .allowsHitTesting(false).accessibilityHidden(true)
+                            }
+                        }
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
                             .buttonStyle(.plain).foregroundStyle(Color.primary.opacity(0.72)).accessibilityLabel("Clear search")
