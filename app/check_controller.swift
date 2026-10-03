@@ -29,6 +29,12 @@ import AppKit
         print("Controller probe ownership checks passed (multi-buffer copy, private mode, original preserved, failed-copy cleanup).")
     }
     @MainActor static func checkDismissal() throws {
+        for phase in ["Listening", "Processing", "Inserted"] {
+            precondition(usesMinimalTranscriptionDisplay(true, phase: phase, message: "normal"))
+            precondition(!usesMinimalTranscriptionDisplay(false, phase: phase, message: "normal"))
+        }
+        for phase in ["Error", "Saved", "Ready"] { precondition(!usesMinimalTranscriptionDisplay(true, phase: phase, message: "normal")) }
+        precondition(!usesMinimalTranscriptionDisplay(true, phase: "Inserted", message: "unverified"))
         _ = NSApplication.shared
         let manager = FileManager.default
         let temp = manager.temporaryDirectory

@@ -144,6 +144,9 @@ struct SettingsView: View {
                         Text("Six months").tag("six-months")
                         Text("Forever").tag("forever")
                     }
+                    Toggle("Minimal transcription display", isOn: $controller.minimalTranscriptionDisplay)
+                    Text("Show voice-reactive bubbles instead of status details. Errors and recovery actions remain visible.")
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     Toggle("Show menu bar icon", isOn: $controller.showMenuBar)
                     Text("When hidden, reopen Dictation from Finder or Spotlight.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
@@ -313,6 +316,33 @@ struct SettingsView: View {
     }
 }
 
+func usesMinimalTranscriptionDisplay(_ enabled: Bool, phase: String, message: String) -> Bool {
+    enabled && ["Listening", "Processing", "Inserted"].contains(phase) && !message.localizedCaseInsensitiveContains("unverified")
+}
+
+private struct VoiceBubbles: View {
+    @ObservedObject var controller: AppController
+    let phase: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.15, paused: phase != "Processing" || reduceMotion)) { context in
+            HStack(spacing: 7) {
+                ForEach(0..<5) { index in
+                    let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 4 - Double(index)) + 1) / 2
+                    let level = phase == "Listening" ? controller.voiceLevel : phase == "Processing" ? (reduceMotion ? 0.35 : pulse * 0.45) : 0.15
+                    Circle().fill(Color.accentColor)
+                        .frame(width: 10 + level * Double(index == 2 ? 20 : 14), height: 10 + level * Double(index == 2 ? 20 : 14))
+                }
+            }
+            .frame(width: 136, height: 36)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: controller.voiceLevel)
+        }
+        .padding(12).modifier(UtilityGlass(radius: 24))
+        .accessibilityElement(children: .ignore).accessibilityLabel(phase)
+        .help(phase == "Listening" ? "Release or tap the shortcut to finish. Escape cancels." : phase)
+    }
+}
+
 private struct BubbleView: View {
     @ObservedObject var controller: AppController
     let phase: String
@@ -401,8 +431,10 @@ final class BubblePresenter {
 
     func show(phase: String, message: String, screen: NSScreen? = nil) {
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-        let width = min(560, max(280, frame.width - 32))
-        let host = NSHostingView(rootView: BubbleView(controller: controller, phase: phase, message: message).frame(width: width))
+        let minimal = usesMinimalTranscriptionDisplay(controller.minimalTranscriptionDisplay, phase: phase, message: message)
+        let width = minimal ? 160 : min(560, max(280, frame.width - 32))
+        let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase)) : AnyView(BubbleView(controller: controller, phase: phase, message: message))
+        let host = NSHostingView(rootView: content.frame(width: width))
         panel.contentView = host
         let height = max(host.fittingSize.height, 70)
         panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.minY + 24, width: width, height: height), display: true)

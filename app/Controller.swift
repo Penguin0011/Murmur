@@ -13,6 +13,8 @@ import Darwin
     @Published var recoveryEntryID: String?
     @Published var modelDirectory: String
     @Published var shortcut: String
+    @Published var minimalTranscriptionDisplay: Bool
+    @Published var voiceLevel = 0.0
     @Published var showMenuBar: Bool
     @Published var permissionsSummary = ""
     @Published var hasRecoveryAudio = false
@@ -74,6 +76,7 @@ import Darwin
         let defaults = UserDefaults.standard
         modelDirectory = defaults.string(forKey: "modelDirectory") ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/Dictation/module-one/unified-d32e972").path
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
+        minimalTranscriptionDisplay = defaults.bool(forKey: "minimalTranscriptionDisplay")
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         retention = defaults.string(forKey: "retention") ?? "30-days"
@@ -100,6 +103,7 @@ import Darwin
         monitor = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.voiceLevel = self.capture?.queue.sync { self.capture?.level ?? 0 } ?? 0
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
                    !capture.engine.isRunning || capture.queue.sync(execute: { capture.writeError != nil }) { self.recordingFailed = true; self.stopRecording() }
                 if self.isBusy, let initial = self.destination {
@@ -154,6 +158,7 @@ import Darwin
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion")
         defaults.set(retention, forKey: "retention")
+        defaults.set(minimalTranscriptionDisplay, forKey: "minimalTranscriptionDisplay")
         do { try store?.purge(retention: appliedRetention); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }; updateMenu?()
     }
