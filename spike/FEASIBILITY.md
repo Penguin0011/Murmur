@@ -35,6 +35,12 @@ Standalone capture now builds and passes synthetic WAV roundtrip, restrictive fi
 
 Model work lives in `module-one/models/`; capture work lives in `module-one/capture/`. The independent review in `module-one/SAFETY_REVIEW.md` identifies delayed AX-write duplicate delivery, non-atomic clipboard/focus races, incomplete secure-field coverage, and unresolved semantic correction promotion as production acceptance gaps. [Certain]
 
+## Connected capture and local inference continuation
+
+Shortcut actions now drive microphone capture with actual processing completion, using the standalone session CLI. The pinned FluidAudio release runner compiles, locally downloaded model files pass immutable checksum verification, and local synthetic speech inference works. A connected synthetic acoustic test passed microphone recording → local transcription → durable private history → retry-audio deletion; no insertion was attempted. Detailed commands, measurements, and test boundaries are in `module-one/session/README.md` and `module-one/models/README.md`. [Certain]
+
+This supersedes earlier statements that capture and inference are entirely unimplemented. Physical first-word preservation, real dictation quality, safe production insertion, semantic learning, and the app UI remain open. M1 performance is deferred by user decision. [Certain]
+
 ## Device and tools
 
 October 2, 2026: MacBook Air Mac15,12, Apple M3, 16 GB RAM, macOS 26.6.2 (25G83), Swift 6.3.3. Accessibility and Input Monitoring preflight returned true for the execution context. The M1/8 GB baseline is unavailable in this run. [Certain]

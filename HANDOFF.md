@@ -1,3 +1,11 @@
+# Connected local path checkpoint — October 2, 2026
+
+Implemented shortcut → capture → local processor → durable text history. Release model runner build and pinned model checksum verification passed on the available M3. Synthetic injected-key microphone hold/cancel and synthetic speaker-to-microphone processing passed; all test audio was deleted. No insertion, physical-key first-word guarantee, or real speech quality claim is made. [Certain]
+
+Build/run commands and precise results are in `module-one/session/README.md`. Model cache: `~/Library/Caches/Dictation/module-one/unified-d32e972`; speech/recovery/cache artifacts are excluded from Git. Recovery history uses the standalone app-support directory. Privacy, retention settings/UI, memory-only capture, and production insertion remain product work. [Certain]
+
+Independent review found queued-action ordering, continuous retry-audio expiry, and processor signal/spawn gaps. The processor signal gap is fixed and regression-checked; shortcut ordering and periodic expiry are being corrected before final validation. [Certain]
+
 # Superseding hardware scope — October 2, 2026
 
 M1/8 GB performance is no longer a development or release gate, per the user. Use the available M3/16 GB host for functional/inference validation, publish only measured results, and leave users model selection for their hardware. Earlier M1-gate references below are historical and superseded. Next implementation step remains wiring shortcut events into capture, then validating the local transcription path. [Certain]
