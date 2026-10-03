@@ -1,6 +1,12 @@
 # Milestone 0 feasibility report
 
-Decision: **partial native feasibility established; full spike gate pending**. No product go/no-go conclusion follows from one app alone. [Certain]
+Decision, updated October 2, 2026: **GO for milestone 1 validation work; NO-GO for production readiness or release**. Recorded live evidence establishes Right Option tap/hold and attributable observation in TextEdit and the Codex composer; it permits continued engineering, not a claim of complete acceptance. [Certain]
+
+The weakest unresolved gate is the unmeasured complete local pipeline on M1/8 GB. Microphone first-word capture, permission revocation, clipboard-manager races, delayed AX-write duplicate delivery, and semantic eligibility for learned replacements also remain unproved. [Certain]
+
+The five categories have recorded outcomes below. Native and chat have partial acceptance with passing live observation cases; the tested browser field and default VS Code configuration do not support learning; default Safari + Google Docs has no usable AX destination. These limits do not defeat the approved at-least-one-category observation floor, but they require published support limits. [Certain]
+
+Current-run verification: the integrated Swift build, deterministic checks, and ten CLI rejection cases passed on this host. Read-only focus inspection exposed a Codex AXTextArea; it did not repeat the historical insertion/observation tests. Earlier live results below are retained as recorded evidence, not presented as freshly rerun tests. [Certain]
 
 Integrated build and `--check` passed on this host. Checks cover tap/hold, repeat/cancel/processing behavior, event-stream loss, UTF16 insertion bounds including emoji surrogate boundaries, read-back mismatch/focus/browser exclusions, observation attribution, undo, expiry, and conflicting two-session evidence. [Certain]
 
@@ -52,7 +58,7 @@ Repeated down events do not create sessions. A release belonging to the tap that
 | Chat composer | ChatGPT/Codex desktop 26.928.40906 (`com.openai.codex`), new unsent chat | Verified via paste fallback after unchanged AX write | Pass for live-testable cases | Replacement, Undo, append, focus departure, consecutive dictations; AX write alone silently drops text |
 | Code editor | VS Code 1.140.0, throwaway `code-probe.txt`, default settings (no screen reader mode) | Delivered once via paste fallback (screen-confirmed); harness-unverified | Not possible: AX value is an empty stub | AX write silently dropped; editor buffer not exposed to AX |
 
-Remaining rows are pending, not classified unsupported. Target versions must be recorded when executed. [Certain]
+The matrix records tested configurations only. Browser and code learning are unsupported under the tested default configurations; native/chat permission-revocation acceptance remains pending. Untested app variants remain unverified. [Certain]
 
 ## Native synthetic test evidence
 
@@ -212,4 +218,4 @@ Use synthetic text only. In each category, test verified insertion, an attributa
 - Known secure fields must be rejected. Browser fields of unknown type must remain unverified and excluded from learning even when text read-back matches. [Certain]
 - Anchored range attribution does not prove semantic equivalence. A short replacement can change meaning, so candidates alone cannot justify automatic vocabulary promotion. [Certain]
 - Persisted recovery, audio capture, production learning eligibility, model inference, UI, signing, and packaging are outside this standalone spike. [Certain]
-- The spike gate remains pending until real keyboard evidence and app-level insertion/observation evidence exist; at least one observation category must pass under the PRD launch floor. [Certain]
+- The recorded Right Option and native/chat observation evidence satisfies the narrow feasibility floor for starting milestone 1. The remaining safety checks and M1/8 GB model/audio validation remain acceptance gates; this report does not authorize a production-ready claim. [Certain]
