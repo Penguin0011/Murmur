@@ -169,7 +169,11 @@ private struct BubbleView: View {
     }
     var body: some View {
         let content = HStack(spacing: 12) {
-            Image(systemName: symbol).font(.title3).accessibilityHidden(true)
+            if phase == "Listening" || phase == "Processing" {
+                PillIndicator(processing: phase == "Processing", color: reduceTransparency || contrast == .increased ? .primary : .white)
+            } else {
+                Image(systemName: symbol).font(.title3).accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 Text(phase).font(.headline)
                 if !message.isEmpty { Text(message).font(.callout).lineLimit(3).fixedSize(horizontal: false, vertical: true) }
@@ -196,6 +200,30 @@ private struct BubbleView: View {
         } else {
             content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24))
         }
+    }
+}
+
+/// Three white pills (primary color on the opaque fallback): a bouncing wave while listening, a slower sequential pulse while processing, static with Reduce Motion.
+private struct PillIndicator: View {
+    let processing: Bool
+    let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        // ponytail: timed motion, not driven by microphone level; feed capture RMS here if a live meter is wanted.
+        TimelineView(.animation(paused: reduceMotion)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 3) {
+                ForEach(0..<3) { i in
+                    let wave = (sin(t * (processing ? 4 : 9) - Double(i) * (processing ? 1.4 : 0.9)) + 1) / 2
+                    Capsule().fill(color)
+                        .frame(width: 5, height: reduceMotion ? 14 : 6 + 14 * wave)
+                        .opacity(processing && !reduceMotion ? 0.45 + 0.55 * wave : 1)
+                }
+            }
+            .frame(width: 24, height: 22)
+        }
+        .accessibilityHidden(true)
     }
 }
 
