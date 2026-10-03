@@ -17,7 +17,7 @@ import Darwin
     @Published var permissionsSummary = ""
     @Published var automaticInsertion: Bool
     @Published var retention: String
-    var isBusy: Bool { sessionAvailable && session.state != .idle }
+    var isBusy: Bool { phase == "Listening" || phase == "Processing" || (sessionAvailable && session.state != .idle) }
     var openSettings: (() -> Void)?
     var updateMenu: (() -> Void)?
     lazy var bubble = BubblePresenter(controller: self)
@@ -50,6 +50,7 @@ import Darwin
         }, stop: { [weak self] in
             guard let self else { return false }
             self.capture?.stop()
+            self.recordingFailed = self.recordingFailed || self.capture?.writeError != nil
             let hasAudio = (self.capture?.frames ?? 0) > 0
             self.capture = nil
             return hasAudio
@@ -166,13 +167,13 @@ import Darwin
         guard sessionAvailable else { done(); return }
         if action == .start {
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
-            guard FileManager.default.fileExists(atPath: modelDirectory), Bundle.main.url(forAuxiliaryExecutable: "ModelBench") != nil else { session.resetShortcut?(); setPhase("Error", "Choose a downloaded model folder in Settings."); done(); return }
+            guard modelFilesAvailable(), Bundle.main.url(forAuxiliaryExecutable: "ModelBench") != nil else { session.resetShortcut?(); setPhase("Error", "Choose a downloaded model folder in Settings."); done(); return }
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }
             focusStable = true; insertThisSession = automaticInsertion; activeModelDirectory = modelDirectory
             listeningStarted = Date(); generation = UUID(); recoveryEntryID = nil; recordingFailed = false
-            destinationScreen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
+            destinationScreen = screenForDestination(destination)
         }
         session.receive(action, completed: done)
         if action == .cancel { destination = nil; setPhase("Ready", "Recording canceled."); bubble.hide() }
@@ -180,6 +181,36 @@ import Darwin
         else if action == .finish && session.state == .idle && phase == "Listening" {
             destination = nil; setPhase("Error", "No audio was captured. Check your microphone and try again.")
         }
+    }
+    private func modelFilesAvailable() -> Bool {
+        guard let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"),
+              let data = try? Data(contentsOf: manifest),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = object["models"] as? [String: Any],
+              let model = models["FluidInference/parakeet-unified-en-0.6b-coreml"] as? [String: Any],
+              let files = model["files"] as? [[String: Any]], let names = model["batch_files"] as? [String] else { return false }
+        return names.allSatisfy { name in
+            guard let size = files.first(where: { $0["rfilename"] as? String == name })?["size"] as? Int,
+                  let attrs = try? FileManager.default.attributesOfItem(atPath: URL(fileURLWithPath: modelDirectory).appendingPathComponent(name).path) else { return false }
+            return (attrs[.size] as? NSNumber)?.intValue == size
+        }
+    }
+    private func screenForDestination(_ destination: FocusSnapshot?) -> NSScreen? {
+        if let destination {
+            var rawPosition: CFTypeRef?, rawSize: CFTypeRef?
+            if AXUIElementCopyAttributeValue(destination.element, kAXPositionAttribute as CFString, &rawPosition) == .success,
+               AXUIElementCopyAttributeValue(destination.element, kAXSizeAttribute as CFString, &rawSize) == .success,
+               let rawPosition, let rawSize,
+               CFGetTypeID(rawPosition) == AXValueGetTypeID(), CFGetTypeID(rawSize) == AXValueGetTypeID() {
+                var point = CGPoint.zero; var size = CGSize.zero
+                if AXValueGetValue(unsafeBitCast(rawPosition, to: AXValue.self), .cgPoint, &point),
+                   AXValueGetValue(unsafeBitCast(rawSize, to: AXValue.self), .cgSize, &size) {
+                    let center = NSPoint(x: point.x + size.width / 2, y: (NSScreen.screens.first?.frame.maxY ?? 0) - point.y - size.height / 2)
+                    if let screen = NSScreen.screens.first(where: { NSMouseInRect(center, $0.frame, false) }) { return screen }
+                }
+            }
+        }
+        return NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
     }
     func stopRecording() { guard let listener else { return }; listener.emit(listener.machine.finish()) }
     func cancelRecording() { guard let listener else { return }; listener.emit(listener.machine.cancel()) }
@@ -251,6 +282,21 @@ import Darwin
             } catch {
                 DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.runnerOutput = nil; self.setPhase("Error", "Transcription failed. Audio is saved for retry for up to 24 hours."); done() }
             }
+        }
+    }
+    // Explicit developer check of the production pipeline, using a synthetic file
+    // and an exact disposable destination. Never enabled during ordinary launch.
+    func checkSavedAudio(_ audio: URL, expectedApp: String, completion: @escaping () -> Void) {
+        guard sessionAvailable, modelFilesAvailable(), let focused = try? captureFocus(),
+              focused.bundleID == expectedApp, focused.pid != getpid(), !focused.secure else {
+            fputs("app-check=refused destination-or-model-unavailable\n", stderr); completion(); return
+        }
+        destination = focused; focusStable = true; insertThisSession = true
+        activeModelDirectory = modelDirectory; listeningStarted = Date(); generation = UUID()
+        destinationScreen = screenForDestination(focused); recoveryEntryID = nil
+        transcribe(audio) { [weak self] in
+            print("app-check=complete state=\(self?.phase ?? "unknown")")
+            fflush(stdout); completion()
         }
     }
     func refreshHistory() { history = (try? store?.entries()) ?? [] }

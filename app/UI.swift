@@ -106,7 +106,7 @@ struct SettingsView: View {
                                         .foregroundStyle(.secondary)
                                     Spacer()
                                 }
-                                Text(entry.insertionStatus).font(.callout).foregroundStyle(.secondary)
+                                Text(statusLabel(entry.insertionStatus)).font(.callout).foregroundStyle(.secondary)
                                 transcript("Final text", entry.finalText)
                                 if entry.rawText != entry.finalText { transcript("Raw transcription", entry.rawText) }
                                 HStack {
@@ -131,6 +131,15 @@ struct SettingsView: View {
             }.padding(.top, 12)
         }
 
+    }
+
+    private func statusLabel(_ status: String) -> String {
+        switch status {
+        case "verified": return "Inserted and verified"
+        case "unverified", "insertion-pending": return "Delivery uncertain · text saved"
+        case "failed": return "Could not insert · text saved"
+        default: return "Saved · not inserted"
+        }
     }
 
     private func transcript(_ title: String, _ text: String) -> some View {

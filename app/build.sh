@@ -17,6 +17,7 @@ cp "$project_root/app/Info.plist" "$app_path/Contents/Info.plist"
 cp "$runner_path" "$app_path/Contents/MacOS/ModelBench"
 cp "$project_root/module-one/models/artifact-pins.json" "$app_path/Contents/Resources/artifact-pins.json"
 if [[ -d "$project_root/module-one/models/Runner/.build/release/FluidAudio_FluidAudio.bundle" ]]; then
+  rm -rf "$app_path/Contents/Resources/FluidAudio_FluidAudio.bundle"
   cp -R "$project_root/module-one/models/Runner/.build/release/FluidAudio_FluidAudio.bundle" "$app_path/Contents/Resources/"
 fi
 codesign --force --sign - "$app_path/Contents/MacOS/ModelBench"
