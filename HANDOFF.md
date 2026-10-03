@@ -26,7 +26,7 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 11. Learning is unsupported in Arc fields, default Google Docs and VS Code; permission revocation mid-session, clipboard-manager races and cross-session learning are untested.
 
 **Product, release and housekeeping**
-12. The PRD cleanup-failure conflict (section 3 vs section 4) is unresolved.
+12. ~~The PRD cleanup-failure conflict (section 3 vs section 4) is unresolved.~~ Resolved in PRD "Milestone 1 implementation decisions": cleanup errors and guard failures both save the raw transcript, show recovery, and require an explicit raw-text action before insertion.
 13. Builds are self-signed (`clouddev Development`); Developer ID signing and notarization need an Apple Developer Program account.
 14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders, notification names and the repository still use the old name.
 15. Test transcripts from live runs remain in Murmur's History.
