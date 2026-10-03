@@ -5,8 +5,9 @@ import Foundation
 // Explicit local directory: no mutable-main download or implicit network access.
 @main struct ModelBench {
     static func main() async throws {
-        guard CommandLine.arguments.count == 3 else {
-            throw NSError(domain: "Usage: ModelBench MODEL_DIRECTORY AUDIO_FILE", code: 1)
+        let single = CommandLine.arguments.count == 4 && CommandLine.arguments[3] == "--single"
+        guard CommandLine.arguments.count == 3 || single else {
+            throw NSError(domain: "Usage: ModelBench MODEL_DIRECTORY AUDIO_FILE [--single]", code: 1)
         }
         let manager = UnifiedAsrManager()
         let start = Date()
@@ -18,16 +19,18 @@ import Foundation
             throw NSError(domain: "Invalid or oversized audio", code: 2)
         }
         try file.read(into: buffer)
+        let samples = try AudioConverter().resampleBuffer(buffer)
         let prepared = Date()
-        let text = try await manager.transcribe(buffer)
+        let text = try await manager.transcribe(samples)
         let coldDone = Date()
-        let warmText = try await manager.transcribe(buffer)
-        let warmDone = Date()
-        let output: [String: Any] = ["text": text,
+        var output: [String: Any] = ["text": text,
             "load_seconds": loaded.timeIntervalSince(start),
             "audio_prepare_seconds": prepared.timeIntervalSince(loaded),
-            "cold_transcribe_seconds": coldDone.timeIntervalSince(prepared),
-            "warm_transcribe_seconds": warmDone.timeIntervalSince(coldDone), "warm_text": warmText]
+            "cold_transcribe_seconds": coldDone.timeIntervalSince(prepared)]
+        if !single {
+            output["warm_text"] = try await manager.transcribe(samples)
+            output["warm_transcribe_seconds"] = Date().timeIntervalSince(coldDone)
+        }
         print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self))
     }
 }
