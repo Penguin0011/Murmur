@@ -20,6 +20,9 @@ if [[ -d "$project_root/module-one/models/Runner/.build/release/FluidAudio_Fluid
   rm -rf "$app_path/Contents/Resources/FluidAudio_FluidAudio.bundle"
   cp -R "$project_root/module-one/models/Runner/.build/release/FluidAudio_FluidAudio.bundle" "$app_path/Contents/Resources/"
 fi
-codesign --force --sign - "$app_path/Contents/MacOS/ModelBench"
-codesign --force --sign - "$app_path"
+# A stable identity keeps macOS privacy permissions across rebuilds; ad-hoc signing loses them every build.
+identity="${MURMUR_SIGN_IDENTITY:-clouddev Development}"
+security find-identity -p codesigning | grep -q "\"$identity\"" || identity=-
+codesign --force --sign "$identity" "$app_path/Contents/MacOS/ModelBench"
+codesign --force --sign "$identity" "$app_path"
 echo "$app_path"
