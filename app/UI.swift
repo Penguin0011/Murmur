@@ -274,6 +274,7 @@ struct SettingsView: View {
                             .frame(minWidth: 300, maxWidth: .infinity)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             GlassEffectContainer(spacing: 12) {
                 HStack {
@@ -285,6 +286,7 @@ struct SettingsView: View {
             }
         }
         .padding(.top, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var filteredHistory: [HistoryEntry] {
