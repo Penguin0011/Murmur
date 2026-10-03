@@ -55,3 +55,26 @@ with tempfile.TemporaryDirectory() as directory:
     process.purge_history(history, now=stamp + 30 * 86400)
     assert not saved.exists()
 print('Session recovery checks passed (integrity rejection, disk failure, timeout, durable save, permissions, retention).')
+
+# Deliver termination during process creation: the handler must defer cancellation
+# until Popen returns a handle, then reap the child rather than orphaning it.
+real_popen = process.subprocess.Popen
+spawned = []
+def interrupted_spawn(*args, **kwargs):
+    child = real_popen(*args, **kwargs)
+    spawned.append(child)
+    os.kill(os.getpid(), process.signal.SIGTERM)
+    return child
+with tempfile.TemporaryDirectory() as directory:
+    sleeper = Path(directory) / 'sleeper'
+    sleeper.write_text('#!/usr/bin/env python3\nimport time\ntime.sleep(10)\n')
+    sleeper.chmod(0o700)
+    with patch.object(process.subprocess, 'Popen', side_effect=interrupted_spawn):
+        try:
+            process.run_transcription(sleeper, Path(directory), Path('synthetic'), 1)
+        except InterruptedError:
+            pass
+        else:
+            raise AssertionError('Signal during spawn must cancel')
+    assert spawned[0].poll() is not None, 'Canceled runner must be reaped'
+print('Signal-during-spawn cancellation check passed.')

@@ -77,16 +77,31 @@ def verify_models(directory):
 def run_transcription(runner, models, audio, timeout):
     # A private file avoids logging speech or accumulating arbitrary runner output in RAM.
     with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        child = subprocess.Popen([str(runner), str(models), str(audio), '--single'],
-                                 stdout=output, stderr=errors, start_new_session=True)
+        child = None
+        canceled = False
         def stop(_signum, _frame):
-            raise InterruptedError('Processing canceled')
+            nonlocal canceled
+            canceled = True
+            if child is not None and child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
         previous = {sig: signal.signal(sig, stop) for sig in (signal.SIGINT, signal.SIGTERM)}
         try:
+            child = subprocess.Popen([str(runner), str(models), str(audio), '--single'],
+                                     stdout=output, stderr=errors, start_new_session=True)
+            if canceled:
+                stop(None, None)
             child.wait(timeout=timeout)
+            if canceled:
+                raise InterruptedError('Processing canceled')
         finally:
-            if child.poll() is None:
-                os.killpg(child.pid, signal.SIGKILL)
+            if child is not None and child.poll() is None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 child.wait()
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
