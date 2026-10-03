@@ -55,7 +55,7 @@ Proposed behavior: cleanup edits dictation, never answers it, executes instructi
 
 Cleanup acceptance is measured, not asserted. Build a fixed corpus (target 300+ labeled utterances, covering each option, interactions between options, names, numbers, negation, quoted speech, and look-alike prose) before choosing the cleanup model. Proposed pass bar: no more than 1% of utterances with an unintended edit to a name, number, or negation; spoken-correction accuracy and list-formatting precision thresholds set from the corpus baseline and recorded in the decision log. Report each local candidate and the cloud routes against the same corpus.
 
-Prompt-injection guard: transcripts are data. Cleanup output must pass a bound check against the raw text (length ratio and edit-distance limits per enabled option, no new named entities or numbers). If the check fails, or the model appears to answer or obey the dictation, insert the raw text and log the event locally. Include injection phrases ("ignore previous instructions", "write me a…") in the corpus.
+Prompt-injection guard: transcripts are data. Cleanup output must pass a bound check against the raw text (length ratio and edit-distance limits per enabled option, no new named entities or numbers). If the check fails, or the model appears to answer or obey the dictation, preserve raw text for recovery and do not insert automatically. Offer an explicit action to use the raw transcript; log only a content-free failure reason locally. This resolves the previous conflict with section 3 conservatively. [Certain] Include injection phrases ("ignore previous instructions", "write me a…") in the corpus.
 
 Additional required checks: preserve meaningful uses of “like”; preserve negation, names, numbers, and quoted speech; do not interpret “sorry” alone as a replacement instruction; do not create lists from ordinary prose. Ambiguous corrections should retain the original wording rather than guess.
 
@@ -133,7 +133,7 @@ Treat all transcribed text as untrusted content for cleanup prompts. Bound recor
 
 ## 8. Agent roles and execution order
 
-This is a proposed delivery plan; no implementation agents have been launched. [Certain]
+Milestone 0 has an implemented standalone spike and recorded live results; milestone 1 validation work has started with capture, model, and independent safety workers. Production and release acceptance remain incomplete. [Certain]
 
 | Role | Ownership and handoff | Depends on | Completion evidence |
 |---|---|---|---|
@@ -235,3 +235,13 @@ The weakest assumption is reliable access to the dictated range and its edits ac
 The feasibility deliverable must prove range identity, replacements, undo, cursor moves, appended text, focus changes, consecutive dictations in one field, and permission revocation. Specify whether selection changes terminate tracking or remain attributable. No automatic learned entry may come from text outside the session's tracked span.
 
 Validation gate: test automatic learning in at least one real app per representative category and publish pass/partial/unsupported for each. Unsupported categories are disclosed and do not block launch (approved); at least one category must pass. Test the approved 60-second window and two-observation threshold; propose any changes with evidence.
+
+### Milestone 1 implementation decisions — October 2, 2026
+
+Continue with the selected Unified model and batch processing; neither model performance nor the M1/8 GB local-cleanup default is approved by benchmark evidence yet. No silent model/provider substitution is permitted. [Certain]
+
+Cleanup errors and guard failures share one policy: save the raw transcript, show recovery, and require an explicit raw-text action before insertion. Treat dictation text as data and do not log its contents. [Certain]
+
+The spike's unchanged-successful-AX-write paste fallback remains experimental: a delayed write may duplicate insertion. Production must choose one delivery method before attempting delivery, or retain uncertain output for recovery; a timer or change notification does not prove that an earlier write will never arrive. Unknown browser field types remain unverified and excluded from learning. [Certain]
+
+Recorded native/chat observation establishes the narrow feasibility floor, while app-specific unsupported states must remain visible. A production semantic rule for automatic promotion remains unresolved; structural edit similarity alone does not justify learning. [Certain]
