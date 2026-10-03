@@ -58,7 +58,7 @@ struct SettingsView: View {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Dictation").font(.largeTitle.weight(.semibold))
-                    Text("Your voice, on your Mac.").font(.callout).foregroundStyle(.secondary)
+                    Text("Your voice, on your Mac.").font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 }
                 Spacer()
                 Label("Local transcription", systemImage: "desktopcomputer")
@@ -96,7 +96,7 @@ struct SettingsView: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(controller.phase).font(.headline)
-                    Text(controller.message).font(.callout).foregroundStyle(.secondary)
+                    Text(controller.message).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 8)
@@ -116,15 +116,15 @@ struct SettingsView: View {
                         Text("Control–Option–Space").tag("ctrl-option-space")
                     }
                     Text("Tap to start and finish. Hold to record until release. Escape cancels.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     HStack(spacing: 16) {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Local transcription model")
                             Label(controller.modelAvailable ? "Model files found" : "Choose a model folder", systemImage: controller.modelAvailable ? "checkmark.circle" : "exclamationmark.circle")
-                                .font(.callout).foregroundStyle(controller.modelAvailable ? Color.secondary : Color.orange)
+                                .font(.callout).foregroundStyle(controller.modelAvailable ? Color.primary.opacity(0.72) : Color.primary)
                             if !controller.modelDirectory.isEmpty {
                                 Text(URL(fileURLWithPath: controller.modelDirectory).lastPathComponent)
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).textSelection(.enabled)
+                                    .font(.caption).foregroundStyle(Color.primary.opacity(0.72)).lineLimit(1).textSelection(.enabled)
                                     .help(controller.modelDirectory)
                             }
                         }
@@ -132,13 +132,13 @@ struct SettingsView: View {
                         Button("Choose Folder…", action: controller.chooseModelDirectory)
                     }
                     Text("Parakeet runs locally. This build requires a downloaded model; model downloads, cloud transcription, and text cleanup are not available yet.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Recording") }
 
                 Section {
                     Toggle("Insert into the original text field", isOn: $controller.automaticInsertion)
                     Text("Saved before insertion. If the destination changes or delivery is uncertain, copy the text from History. Dictation never sends a message.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     Picker("Keep transcripts", selection: $controller.retention) {
                         Text("30 days").tag("30-days")
                         Text("Six months").tag("six-months")
@@ -146,7 +146,7 @@ struct SettingsView: View {
                     }
                     Toggle("Show menu bar icon", isOn: $controller.showMenuBar)
                     Text("When hidden, reopen Dictation from Finder or Spotlight.")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 } header: { Text("Output and history") }
 
                 Section {
@@ -165,7 +165,7 @@ struct SettingsView: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 3) {
                         Text(controller.isBusy ? "Finish dictating to change settings." : "Apply to save your changes.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(Color.primary.opacity(0.72))
                     }
                     Button(action: controller.applySettings) { Text("Apply Settings").foregroundStyle(.white) }
                         .modifier(UtilityButton(prominent: true)).disabled(controller.isBusy)
@@ -179,7 +179,7 @@ struct SettingsView: View {
         HStack(spacing: 12) {
             Label(title, systemImage: allowed ? "checkmark.circle" : "exclamationmark.circle")
             Spacer()
-            Text(allowed ? "Allowed" : "Needed").font(.callout).foregroundStyle(.secondary)
+            Text(allowed ? "Allowed" : "Needed").font(.callout).foregroundStyle(Color.primary.opacity(0.72))
             if !allowed { Button(actionTitle, action: action) }
         }
     }
@@ -190,15 +190,15 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("History").font(.title2.weight(.semibold))
                     Text("Saved locally · \(controller.history.count) transcripts")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                 }
                 Spacer()
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-                    TextField("Search transcripts", text: $searchText).textFieldStyle(.plain)
+                    Image(systemName: "magnifyingglass").foregroundStyle(Color.primary.opacity(0.72)).accessibilityHidden(true)
+                    TextField("Search transcripts", text: $searchText, prompt: Text("Search transcripts").foregroundStyle(Color.primary.opacity(0.72))).textFieldStyle(.plain)
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+                            .buttonStyle(.plain).foregroundStyle(Color.primary.opacity(0.72)).accessibilityLabel("Clear search")
                     }
                 }
                 .padding(.horizontal, 12).padding(.vertical, 9).frame(width: 220)
@@ -221,9 +221,9 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(entry.finalText.isEmpty ? entry.rawText : entry.finalText).lineLimit(2)
                             Label(statusLabel(entry.insertionStatus), systemImage: statusSymbol(entry.insertionStatus))
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                .font(.caption).foregroundStyle(selectedID == entry.id ? Color.primary : Color.primary.opacity(0.72)).lineLimit(2)
                             Text(entry.recordedAt, format: .dateTime.month().day().hour().minute())
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(selectedID == entry.id ? Color.primary : Color.primary.opacity(0.72))
                         }.padding(.vertical, 7).tag(entry.id)
                     }
                     .listStyle(.sidebar).scrollContentBackground(.hidden)
@@ -234,7 +234,7 @@ struct SettingsView: View {
                                 VStack(alignment: .leading, spacing: 20) {
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(entry.recordedAt, format: .dateTime.month().day().year().hour().minute())
-                                            .font(.callout).foregroundStyle(.secondary)
+                                            .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                                         Label(statusLabel(entry.insertionStatus), systemImage: statusSymbol(entry.insertionStatus))
                                             .font(.callout.weight(.medium))
                                     }
@@ -252,7 +252,7 @@ struct SettingsView: View {
                                 }
                             }.padding(.horizontal, 20).padding(.top, 10)
                             Text("Copying never retries insertion or sends a message.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(Color.primary.opacity(0.72))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
                         }.frame(minWidth: 300)
