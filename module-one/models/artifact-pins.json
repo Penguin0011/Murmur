@@ -1,0 +1,1265 @@
+{
+  "fluid_audio_revision": "0b1f46289fe27d95b5e66ad8be46e64f5ee02ae7",
+  "models": {
+    "FluidInference/parakeet-unified-en-0.6b-coreml": {
+      "revision": "d32e972dd4315f1dc3f6be28fb2aab0ab3e80358",
+      "files": [
+        {
+          "rfilename": ".gitattributes",
+          "size": 1519,
+          "git_blob_sha1": "a6344aac8c09253b3b630fb776ae94478aa0275b"
+        },
+        {
+          "rfilename": "README.md",
+          "size": 5309,
+          "git_blob_sha1": "6bf4f1223295e881f0491cdf761ce96f4f7b5281"
+        },
+        {
+          "rfilename": "config.json",
+          "size": 1355,
+          "git_blob_sha1": "323ab1b81b5f5f82a20907b35a3fc21c4b3db383"
+        },
+        {
+          "rfilename": "metadata.json",
+          "size": 1046,
+          "git_blob_sha1": "76a7ccc1685dff1d5150df857675d069821d86d2"
+        },
+        {
+          "rfilename": "parakeet_unified_decoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "9ae70f6559989f88b856b326e59315798f9f0d08207a19fcc2dd3287a30088a5",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "f0ec99bf2005f4f50bd7453d8e9e3ae2b9ab8152"
+        },
+        {
+          "rfilename": "parakeet_unified_decoder.mlmodelc/coremldata.bin",
+          "size": 560,
+          "lfs": {
+            "sha256": "ce99c4488840fc463d59f8d4d6d2a9e8ceae8138ead51e3c265dde4d2ba4a0e9",
+            "size": 560,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "735c3cd007c7449c5645373bf9a46fb3bda00db3"
+        },
+        {
+          "rfilename": "parakeet_unified_decoder.mlmodelc/model.mil",
+          "size": 13102,
+          "git_blob_sha1": "e0e2075f5b52998a99403372b62d139bdd61596c"
+        },
+        {
+          "rfilename": "parakeet_unified_decoder.mlmodelc/weights/weight.bin",
+          "size": 14429952,
+          "lfs": {
+            "sha256": "96f990461a5986d5e7309ad1a0f36084fbf0f4b28aec35948f8b8d0dcbf8599e",
+            "size": 14429952,
+            "pointerSize": 133
+          },
+          "git_blob_sha1": "a357ff1efa1cfdce988660b9c2cb67e75f934555"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "6946883b65e8e1b916e0ecc2a1b3f8235a0f3e24225bdddfa7e7a93e351c9f5b",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "74c4d9aaab0afd7e4fbd0058374965b794fd377c"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder.mlmodelc/coremldata.bin",
+          "size": 492,
+          "lfs": {
+            "sha256": "1faee2bb2acd69e14170b65a3010ad3459759d88ab901c6706f0b7aca072be73",
+            "size": 492,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "91ffb47b9c3ee7875e1ec25f3b7d6d99368b5595"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder.mlmodelc/model.mil",
+          "size": 1000346,
+          "git_blob_sha1": "d581ecb379158cc8e5d59a8937aecc3a7900641a"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder.mlmodelc/weights/weight.bin",
+          "size": 1186700608,
+          "lfs": {
+            "sha256": "9bf180010e51e0585c5467ff6018b4d5c18294a6cfc1d664d679421e06f0b1bb",
+            "size": 1186700608,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "12f50e0d30eec8c24b76f18a0e94516cbfef391e"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_int8.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "57e116a9d5765e39c0cdf754137ab744ddae34d9c6d68a5fdcad6600ae3a7b6b",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "0996c38026e31851be4fe0372e64d4ce07a02d68"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_int8.mlmodelc/coremldata.bin",
+          "size": 492,
+          "lfs": {
+            "sha256": "54f533d30343d5e62b324a0691e4c262a6768b07b6e88e7aa14c617a2baba8a3",
+            "size": 492,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "441038473966bb34bf0d704abac87660d9ac6e05"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_int8.mlmodelc/model.mil",
+          "size": 1110902,
+          "git_blob_sha1": "fa7970c8d6f59d1c4fdfbcd8558cd6c05c7b2535"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_int8.mlmodelc/weights/weight.bin",
+          "size": 595051904,
+          "lfs": {
+            "sha256": "f984b81590a4deae041ae20fbab8981c2d2a5b528b2ac81fae81c432633535c6",
+            "size": 595051904,
+            "pointerSize": 134
+          },
+          "git_blob_sha1": "46fa6b54be1c5a11bd437976f92f6540242ebcbb"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_13_13.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "38a9a9373fe9d2ad0f8124dfa5e6422acc27ae5fafff6437b13c9a4c159507f3",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "f4fd78786ba1f7f5d46db9731592b9f620c93d2d"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_13_13.mlmodelc/coremldata.bin",
+          "size": 515,
+          "lfs": {
+            "sha256": "fbc0411db7468751bec69aca0c76a6bde7d80b9ce74fb9321f843eeab76a76f8",
+            "size": 515,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "7530e354660468513c58a2d6bba8cf4dc8f79967"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_13_13.mlmodelc/model.mil",
+          "size": 839255,
+          "git_blob_sha1": "29809258fefef0454080a4c3fc020ce449898629"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_13_13.mlmodelc/weights/weight.bin",
+          "size": 1177754944,
+          "lfs": {
+            "sha256": "126e8ac0d90e4dbb87f7a1ed0c699eef6d826b64fc1aab969874b2eec0e3690e",
+            "size": 1177754944,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "9e80ba1b27d4e0562173ef186d02d9f7ef6ed2a5"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "ffbbab2cbdc941dd88fc41c41d3f7ac61cc31475a17a1cb06ed7f3b0b25c611b",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "c1702cd0f64a8a0d965e4f8d99ac954771d19f69"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/coremldata.bin",
+          "size": 515,
+          "lfs": {
+            "sha256": "e1ffdae252dcc276ff2964ee2259a63d9c519b8413302609300d692f6a79b824",
+            "size": 515,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "f48075da8461a9c5ea4f7e282a2b5e70c15d591c"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/model.mil",
+          "size": 949815,
+          "git_blob_sha1": "12b2baa25888a5f46463d8004a2c9313422d1f13"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/weights/weight.bin",
+          "size": 590571264,
+          "lfs": {
+            "sha256": "259e5818cf4acee1155409a048ec408eecd8cfc27ade04ba18bca243398cc9b6",
+            "size": 590571264,
+            "pointerSize": 134
+          },
+          "git_blob_sha1": "67ad726cf990fe81779064cac568ec76a341326f"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_2_2.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "b973afe10fb10bae9a613d46e09613e61c85ca76de4e037893d8ec948993081b",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "1782eec2f1eb4e5fb0f7e6e26c66e10bd0cb95b4"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_2_2.mlmodelc/coremldata.bin",
+          "size": 513,
+          "lfs": {
+            "sha256": "0635e56d97aac9f7a534778053b9fbe2934747493b37f6c055144d1b5541357e",
+            "size": 513,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "7171682ffd6802d9d73c5416c0fca54f1e721bf0"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_2_2.mlmodelc/model.mil",
+          "size": 814133,
+          "git_blob_sha1": "658e1e1cfa6a7044f77340f2803b63b6bbdb42a7"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_2_2.mlmodelc/weights/weight.bin",
+          "size": 1175592256,
+          "lfs": {
+            "sha256": "fc90257888bb978b0b8d0c949a93dceb4b840f5341ecfa5d0a99cbf00bcaf567",
+            "size": 1175592256,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "9f343cb544b4ccf056d231728372365d6050ea67"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_2_2_int8.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "381de2c3c951682d57c68434c1b514b0a927649959e244207418f1853b0bffa0",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "bb97d11b8fa1f607d151654484b6f065853a388f"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_2_2_int8.mlmodelc/coremldata.bin",
+          "size": 513,
+          "lfs": {
+            "sha256": "53d87fd3585ac4dc6a777f8f3471cd83af7e3f45c02084bbbcba8ec37e92a996",
+            "size": 513,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "f5cbb75d1386d1cef46e004f3825cfb0dc622c2d"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_2_2_int8.mlmodelc/model.mil",
+          "size": 924694,
+          "git_blob_sha1": "1f3fbadad85db29ea0748dec2081b443103cab06"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_2_2_int8.mlmodelc/weights/weight.bin",
+          "size": 589486784,
+          "lfs": {
+            "sha256": "19335544401c6bd94344b2b3ae633d0478ea5f02b8173c97868c719051ae7397",
+            "size": 589486784,
+            "pointerSize": 134
+          },
+          "git_blob_sha1": "ae4444df4e2f4a566f77e2e82a40c2f55b0edbc7"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_1.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "08dc0d56159b6f9b3dfed9060f0faca3cc3c124c6e389d8a4f26bddedc57a945",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "7daf1dd1aa46916f7ef483131b158c2ec555e08b"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_1.mlmodelc/coremldata.bin",
+          "size": 513,
+          "lfs": {
+            "sha256": "c65d5e04accdc0ac9cfb2ed879ff64b8d6412846464bb61cee5ad974524b5847",
+            "size": 513,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "00f62dbc974ef33ef45f34c2a1511ee189ca4694"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_1.mlmodelc/model.mil",
+          "size": 818336,
+          "git_blob_sha1": "f9b67e862137bb88b88d24a7c0ee48c75af0fc39"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_1.mlmodelc/weights/weight.bin",
+          "size": 1175985472,
+          "lfs": {
+            "sha256": "a78cd82669d7fb49878044431cb34315ec1453ff72898e60c03b98a1b0f41ec1",
+            "size": 1175985472,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "036ee96f663b191ad01113f41be350faaaa25aae"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_1_int8.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "532a29eef8fb961a6670b82912bcfba6c5969de5f2a444192df917ba6f68ba24",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "e2d6fc94a414e4c0a3761edf338c0f021065273a"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_1_int8.mlmodelc/coremldata.bin",
+          "size": 513,
+          "lfs": {
+            "sha256": "aebf6dec20848b9d6412e8a6643925479159314fcbee15ea0363350ce9fe732b",
+            "size": 513,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "e9cece2cb5b878535ccf565c72cfe0a768d341a5"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_1_int8.mlmodelc/model.mil",
+          "size": 928896,
+          "git_blob_sha1": "92588dc067adc13444469be6cd9b822fadecb7aa"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_1_int8.mlmodelc/weights/weight.bin",
+          "size": 589683392,
+          "lfs": {
+            "sha256": "4d2056957de09ac202ffd17127e32acfe7e8c381978bf727400de64f88c7c4ff",
+            "size": 589683392,
+            "pointerSize": 134
+          },
+          "git_blob_sha1": "0243d0768ee4ed13ca23b5b0ef25c505ebe5e47e"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_7.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "6c661671e7e1c2f5284ea3bb9e3f540fde40d16ced2c094c3626808c21f961f5",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "ee901658c5540e32f95c8601c484eb18fa1e5114"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_7.mlmodelc/coremldata.bin",
+          "size": 513,
+          "lfs": {
+            "sha256": "5f174a7cf6b1a9dd77fb479194f8a286e99d4375b67a86ffc66a42fb36e4d0dc",
+            "size": 513,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "357b41a758028bb898e02453be1a0e369b385e15"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_7.mlmodelc/model.mil",
+          "size": 824769,
+          "git_blob_sha1": "0e671e2da2bfa5ded03397d315640881df89aeba"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_7.mlmodelc/weights/weight.bin",
+          "size": 1176575296,
+          "lfs": {
+            "sha256": "268fc547ede79264a8698456ce404cd3cb947ae309d3ecaaf14f2596ca5c32f8",
+            "size": 1176575296,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "c59dee0fe4a8c9edf00b4b9dc06cf035bb4306f5"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_7_int8.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "2e1831ca50902be65664ab7dd1182f0d096eaef387e424b135f8cf896ffcec2e",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "867f4e583cc0bf26da91d2bc5ac8fa227e7c2883"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_7_int8.mlmodelc/coremldata.bin",
+          "size": 513,
+          "lfs": {
+            "sha256": "5f174a7cf6b1a9dd77fb479194f8a286e99d4375b67a86ffc66a42fb36e4d0dc",
+            "size": 513,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "357b41a758028bb898e02453be1a0e369b385e15"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_7_int8.mlmodelc/model.mil",
+          "size": 935329,
+          "git_blob_sha1": "7b8adb27282ad81d6338a470799d8517b6173ddb"
+        },
+        {
+          "rfilename": "parakeet_unified_encoder_streaming_70_7_7_int8.mlmodelc/weights/weight.bin",
+          "size": 589979840,
+          "lfs": {
+            "sha256": "f145c8da6226eb2ad1c312d1a44c7757c97b0b941c73725b36b28ff17d12285b",
+            "size": 589979840,
+            "pointerSize": 134
+          },
+          "git_blob_sha1": "08030519eee749430f569ceac3a55a82f92b3b0d"
+        },
+        {
+          "rfilename": "parakeet_unified_joint.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "6c862031ff8a508035a49ab4eb23e0cf50a6f461d6beb1c31491bf11f846c630",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "56df8b7b833fac2910c86f61d70356bbb7737ac7"
+        },
+        {
+          "rfilename": "parakeet_unified_joint.mlmodelc/coremldata.bin",
+          "size": 458,
+          "lfs": {
+            "sha256": "ad4d567d33f22f2bdb27dc099b9ad698d878b5ba41219d9158d7a1d67a6ea226",
+            "size": 458,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "7bff8fb798118b911dcd8ed68a47ab3347481519"
+        },
+        {
+          "rfilename": "parakeet_unified_joint.mlmodelc/model.mil",
+          "size": 5081,
+          "git_blob_sha1": "53f728dbb10a4d4ace9b701ba4bac5310e1ef0e4"
+        },
+        {
+          "rfilename": "parakeet_unified_joint.mlmodelc/weights/weight.bin",
+          "size": 3446978,
+          "lfs": {
+            "sha256": "06831afa6d1beb0c0b10350ebf7886bc37638e951d14e738d7e06fbd2a05012f",
+            "size": 3446978,
+            "pointerSize": 132
+          },
+          "git_blob_sha1": "7e882b66edbd33ca840e672da19f2dacb754333b"
+        },
+        {
+          "rfilename": "parakeet_unified_joint_decision_single_step.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "163877ad14af97ec4107cd854fd1c6d336ee5d40ad25a657cc764fb763f452f5",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "54edce23661a6f6b4d2a7e3251e81f1e6c416b79"
+        },
+        {
+          "rfilename": "parakeet_unified_joint_decision_single_step.mlmodelc/coremldata.bin",
+          "size": 556,
+          "lfs": {
+            "sha256": "68a081570a48b52ec9379e153bd56748a5408a50be16767601563f231eaeff03",
+            "size": 556,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "c3f305c9e62967fb97e7bb24ae20b7a070303819"
+        },
+        {
+          "rfilename": "parakeet_unified_joint_decision_single_step.mlmodelc/model.mil",
+          "size": 9611,
+          "git_blob_sha1": "b47b82af6f8563bb9678d284b063aa59d3afc37a"
+        },
+        {
+          "rfilename": "parakeet_unified_joint_decision_single_step.mlmodelc/weights/weight.bin",
+          "size": 3446978,
+          "lfs": {
+            "sha256": "06831afa6d1beb0c0b10350ebf7886bc37638e951d14e738d7e06fbd2a05012f",
+            "size": 3446978,
+            "pointerSize": 132
+          },
+          "git_blob_sha1": "7e882b66edbd33ca840e672da19f2dacb754333b"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "3bc2b0e1d0c93d1cd18e7bcc082e45eba5a9e8ebe466e5c4983884551e079195",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "28107727fd628a8b42d1bd09ca8ab02ece3f6b3e"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder.mlmodelc/coremldata.bin",
+          "size": 504,
+          "lfs": {
+            "sha256": "c54b7fa08e3e5ce4e1e00c7bc53a41dc421792e0b83c360328d330641d05ede9",
+            "size": 504,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "24c1087617322be1f014da3c5753d44f75441fa0"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder.mlmodelc/model.mil",
+          "size": 2847279,
+          "git_blob_sha1": "30a5069319bbf2a8a461f43182bc8c57da9f6ccc"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder.mlmodelc/weights/weight.bin",
+          "size": 1187677248,
+          "lfs": {
+            "sha256": "59749d65f00fb20b998062f993fcb4a1a8d910661eda6361f537fa900a49d5ba",
+            "size": 1187677248,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "ea5bf875c1b1209f33497ab05f00cdd5d6a9d375"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder_streaming_70_13_13.mlmodelc/.DS_Store",
+          "size": 6148,
+          "git_blob_sha1": "482621c1ae2a6b37e2eb22d9378b833ca7d5c980"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder_streaming_70_13_13.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "fd09d74dd43065834a7757e6a97d3e3337b55a449a7da27df819f1232f0494e7",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "940082d421715d1e50ad39382bf7caa2d7bd481c"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder_streaming_70_13_13.mlmodelc/coremldata.bin",
+          "size": 520,
+          "lfs": {
+            "sha256": "3b085e48920425ea1ea32fae8e1da679b7bd8afdb0421b3a1af6f434c3d249cf",
+            "size": 520,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "739914de519001d513830c2368beb9a3a601f299"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder_streaming_70_13_13.mlmodelc/model.mil",
+          "size": 1749206,
+          "git_blob_sha1": "b604d29f5264b445db9f6b9ad43cd1352780bb92"
+        },
+        {
+          "rfilename": "parakeet_unified_mel_encoder_streaming_70_13_13.mlmodelc/weights/weight.bin",
+          "size": 1178544192,
+          "lfs": {
+            "sha256": "864b4744c101063cdd8b7bb9063102d8d935e0ad154bb128dd757fbf67adc416",
+            "size": 1178544192,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "3ff71dcefa3d0165245a2b114c5dfb3a7dc06fed"
+        },
+        {
+          "rfilename": "parakeet_unified_preprocessor.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "be8e41eca751dabf693e0b319652c12637636b26e99be5881ece7a013d4abaca",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "e8c4a28452d7ae871bfcb401184c861480fede04"
+        },
+        {
+          "rfilename": "parakeet_unified_preprocessor.mlmodelc/coremldata.bin",
+          "size": 495,
+          "lfs": {
+            "sha256": "0bc9cffe8fafdf1b9d51fe460660a120252fefcf355c46876ea61901107ee11a",
+            "size": 495,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "9b4b5a8195375651996a260e84285a41e3c13b38"
+        },
+        {
+          "rfilename": "parakeet_unified_preprocessor.mlmodelc/model.mil",
+          "size": 29955,
+          "git_blob_sha1": "bb3835cab0fab9a91cb93072ddb8c35faea49ba5"
+        },
+        {
+          "rfilename": "parakeet_unified_preprocessor.mlmodelc/weights/weight.bin",
+          "size": 592384,
+          "lfs": {
+            "sha256": "d374edc6e5cdb6e0429cfee7cc43b3a899150c3c3ebc24edcfb460046a3a9bf1",
+            "size": 592384,
+            "pointerSize": 131
+          },
+          "git_blob_sha1": "cdca60c761d70c8a0b22843baed54ad2dc5e4606"
+        },
+        {
+          "rfilename": "vocab.json",
+          "size": 15088,
+          "git_blob_sha1": "8c9e3fd138ead699899870c780e786e8c6104a76"
+        }
+      ],
+      "repository_bytes": 11249362739,
+      "batch_files": [
+        "config.json",
+        "metadata.json",
+        "parakeet_unified_decoder.mlmodelc/analytics/coremldata.bin",
+        "parakeet_unified_decoder.mlmodelc/coremldata.bin",
+        "parakeet_unified_decoder.mlmodelc/model.mil",
+        "parakeet_unified_decoder.mlmodelc/weights/weight.bin",
+        "parakeet_unified_encoder.mlmodelc/analytics/coremldata.bin",
+        "parakeet_unified_encoder.mlmodelc/coremldata.bin",
+        "parakeet_unified_encoder.mlmodelc/model.mil",
+        "parakeet_unified_encoder.mlmodelc/weights/weight.bin",
+        "parakeet_unified_encoder_int8.mlmodelc/analytics/coremldata.bin",
+        "parakeet_unified_encoder_int8.mlmodelc/coremldata.bin",
+        "parakeet_unified_encoder_int8.mlmodelc/model.mil",
+        "parakeet_unified_encoder_int8.mlmodelc/weights/weight.bin",
+        "parakeet_unified_joint_decision_single_step.mlmodelc/analytics/coremldata.bin",
+        "parakeet_unified_joint_decision_single_step.mlmodelc/coremldata.bin",
+        "parakeet_unified_joint_decision_single_step.mlmodelc/model.mil",
+        "parakeet_unified_joint_decision_single_step.mlmodelc/weights/weight.bin",
+        "vocab.json"
+      ],
+      "batch_with_fp16_fallback_bytes": 1801783964
+    },
+    "FluidInference/parakeet-tdt-0.6b-v2-coreml": {
+      "revision": "ee09c569f73759e6d44c9bd16766f477b2b36d39",
+      "files": [
+        {
+          "rfilename": ".gitattributes",
+          "size": 1519,
+          "git_blob_sha1": "a6344aac8c09253b3b630fb776ae94478aa0275b"
+        },
+        {
+          "rfilename": "Decoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "46de1a6fe2e49d19a2125bc91acf020df7f2aea84ba821532aade8427a440b05",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "7e6fa4eb79131e62089f252a08b860e723f5114f"
+        },
+        {
+          "rfilename": "Decoder.mlmodelc/coremldata.bin",
+          "size": 554,
+          "lfs": {
+            "sha256": "d200ca07694a347f6d02a3886a062ae839831e094e443222f2e48a14945966a8",
+            "size": 554,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "79b160cb7e3eb3213fb22cde5fbf6ac7f324c91b"
+        },
+        {
+          "rfilename": "Decoder.mlmodelc/metadata.json",
+          "size": 3427,
+          "git_blob_sha1": "e3a08d21a5d1577db2bedd1749ea0ddae5d21b73"
+        },
+        {
+          "rfilename": "Decoder.mlmodelc/model.mil",
+          "size": 13106,
+          "git_blob_sha1": "167cc9db34dd7828e0e61eab40d6a09f8a234d30"
+        },
+        {
+          "rfilename": "Decoder.mlmodelc/weights/weight.bin",
+          "size": 14429952,
+          "lfs": {
+            "sha256": "27d26890221d82322c1092fd99d7b40578e435d5cf4b83c887c42603caf97aba",
+            "size": 14429952,
+            "pointerSize": 133
+          },
+          "git_blob_sha1": "a895491b78de520abc21d90321ffd90c95483662"
+        },
+        {
+          "rfilename": "Encoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "42e638870d73f26b332918a3496ce36793fbb413a81cbd3d16ba01328637a105",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "4738782a8e36389621ff4b3b90dd2a661b35146c"
+        },
+        {
+          "rfilename": "Encoder.mlmodelc/coremldata.bin",
+          "size": 485,
+          "lfs": {
+            "sha256": "4def7aa848599ad0e17a8b9a982edcdbf33cf92e1f4b798de32e2ca0bc74b030",
+            "size": 485,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "e016ed32c20e1563399f15adad451a442644b3d7"
+        },
+        {
+          "rfilename": "Encoder.mlmodelc/metadata.json",
+          "size": 2926,
+          "git_blob_sha1": "c87f9eb24e76b8e518dc1fbead46c8c0029d3925"
+        },
+        {
+          "rfilename": "Encoder.mlmodelc/model.mil",
+          "size": 959769,
+          "git_blob_sha1": "93d1301ccde7c2ca447af6c01ab05bfda5a5dd2c"
+        },
+        {
+          "rfilename": "Encoder.mlmodelc/weights/weight.bin",
+          "size": 445187200,
+          "lfs": {
+            "sha256": "4adc7ad44f9d05e1bffeb2b06d3bb02861a5c7602dff63a6b494aed3bf8a6c3e",
+            "size": 445187200,
+            "pointerSize": 134
+          },
+          "git_blob_sha1": "e6313f81d9d94af46347f28087f51a60eb28164c"
+        },
+        {
+          "rfilename": "JointDecision.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "f1183ba213bb94a918c8d2cad19ab045320618f97f6ca662245b3936d7b090f7",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "5007841fb604e70990e535a2a002ee18f93e83e4"
+        },
+        {
+          "rfilename": "JointDecision.mlmodelc/coremldata.bin",
+          "size": 534,
+          "lfs": {
+            "sha256": "e2c6752f1c8cf2d3f6f26ec93195c9bfa759ad59edf9f806696a138154f96f11",
+            "size": 534,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "72290f46bfb535192ed1ed5ca1fec941874efbca"
+        },
+        {
+          "rfilename": "JointDecision.mlmodelc/metadata.json",
+          "size": 2936,
+          "git_blob_sha1": "db3b2bc33cfda6f7cd1073d21182446180e53f94"
+        },
+        {
+          "rfilename": "JointDecision.mlmodelc/model.mil",
+          "size": 9722,
+          "git_blob_sha1": "339c35b303b074de7fe047bb099311a4cc08cf53"
+        },
+        {
+          "rfilename": "JointDecision.mlmodelc/weights/weight.bin",
+          "size": 3453388,
+          "lfs": {
+            "sha256": "ca22a65903a05e64137677da608077578a8606090a598abf4875fa6199aaa19d",
+            "size": 3453388,
+            "pointerSize": 132
+          },
+          "git_blob_sha1": "8764a151a786b38079c36a409fe5144ddf8b95a9"
+        },
+        {
+          "rfilename": "Melspectogram.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "6271a1b89644607c3ab203f79b33c86a286c041c75cb9c203332322223a398d3",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "864353aea7516982e6070341bfa056759c6068f8"
+        },
+        {
+          "rfilename": "Melspectogram.mlmodelc/coremldata.bin",
+          "size": 396,
+          "lfs": {
+            "sha256": "19e161ad38b48aee83ab23e94a639fd2e4fc49aacbed47086c832bcfa65645c9",
+            "size": 396,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "49907a7e394399770d3870efe48bf51610f6323b"
+        },
+        {
+          "rfilename": "Melspectogram.mlmodelc/model.mil",
+          "size": 22989,
+          "git_blob_sha1": "639a0d1d21ed99cc1b0f5aa38de78da42a3ab14f"
+        },
+        {
+          "rfilename": "Melspectogram.mlmodelc/weights/weight.bin",
+          "size": 592384,
+          "lfs": {
+            "sha256": "9fbb02b5875f7630641c3d6a1fffa9bc73189f87b4c03113333df7e348743888",
+            "size": 592384,
+            "pointerSize": 131
+          },
+          "git_blob_sha1": "bc8a35c12dee2520c4eaa2c4c97e03db5ddc54cb"
+        },
+        {
+          "rfilename": "Melspectrogram_v2.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "4300d03c3fc52901866a5f578d2673ec12c95deaf86b2131c83848339212d218",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "2650a0124599b9ee9f306c72eff893bd644b4cac"
+        },
+        {
+          "rfilename": "Melspectrogram_v2.mlmodelc/coremldata.bin",
+          "size": 402,
+          "lfs": {
+            "sha256": "96c3a2e963dbc871fda545e9ed452173f58be0d995d2d91693361069b7189ee1",
+            "size": 402,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "275c01426948da923d93a8669ebd7dca77b75bd5"
+        },
+        {
+          "rfilename": "Melspectrogram_v2.mlmodelc/metadata.json",
+          "size": 2846,
+          "git_blob_sha1": "4a9a08da114a2ccc41e63f9f46e86cc698c042f2"
+        },
+        {
+          "rfilename": "Melspectrogram_v2.mlmodelc/model.mil",
+          "size": 27085,
+          "git_blob_sha1": "8ea99574120793900ebcda513add2e36d3bd3b2b"
+        },
+        {
+          "rfilename": "Melspectrogram_v2.mlmodelc/weights/weight.bin",
+          "size": 592384,
+          "lfs": {
+            "sha256": "023c2303b7c3a1fafed92fc6ec46c1d43a48c0bbcdf33d6441d383a61747734c",
+            "size": 592384,
+            "pointerSize": 131
+          },
+          "git_blob_sha1": "8011c1a6bd26a9ad143da10618d5416b6f15ce9a"
+        },
+        {
+          "rfilename": "ParakeetDecoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "b657cd50e3e76a508244d46d5270f3bc0dcb047b0cabc684144cadc173dba1e5",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "2bb98e157018e8d209d1d99bd15659b8106aafb8"
+        },
+        {
+          "rfilename": "ParakeetDecoder.mlmodelc/coremldata.bin",
+          "size": 436,
+          "lfs": {
+            "sha256": "c1b9018f1de0d2c7d3b3c962832919af1efbcf6476990f737e11b23b37c46f0a",
+            "size": 436,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "a0c75a8c12f077d87f356baece62fbd313511093"
+        },
+        {
+          "rfilename": "ParakeetDecoder.mlmodelc/model.mil",
+          "size": 13228,
+          "git_blob_sha1": "c12954597e645610f6237c1ad5862d2d3dafa353"
+        },
+        {
+          "rfilename": "ParakeetDecoder.mlmodelc/weights/weight.bin",
+          "size": 27547392,
+          "lfs": {
+            "sha256": "1fd28df8a6356e3f95f52bfcd4b735ba004caaf7c82348a8c5eb970ecc3e6e4a",
+            "size": 27547392,
+            "pointerSize": 133
+          },
+          "git_blob_sha1": "54f52872d703b20b46108167c05d77d12938d4f1"
+        },
+        {
+          "rfilename": "ParakeetEncoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "3225923f625f60fee4a7506b970f519cda74892146cd47b8ac5e36b0597eee14",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "85b374a4fa1b8111be39d4524e8ff3012ccd84cb"
+        },
+        {
+          "rfilename": "ParakeetEncoder.mlmodelc/coremldata.bin",
+          "size": 384,
+          "lfs": {
+            "sha256": "e22b7069673b061dfbbc9d8654538f7583c817eefb25ea75dd1694b6289b1ebb",
+            "size": 384,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "d617ce13b172c2aa02df9fdbc5587df842210a6b"
+        },
+        {
+          "rfilename": "ParakeetEncoder.mlmodelc/model.mil",
+          "size": 756640,
+          "git_blob_sha1": "3fc0f8dcca5ba7115410919f873106591c3ca473"
+        },
+        {
+          "rfilename": "ParakeetEncoder.mlmodelc/weights/weight.bin",
+          "size": 1179765184,
+          "lfs": {
+            "sha256": "17939786f09350757e7b3a8164f201c0a086ab510f5c7e0e42eff7fc9e264860",
+            "size": 1179765184,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "64fbd8afba48e91577f02c52728cfd4f048993f2"
+        },
+        {
+          "rfilename": "ParakeetEncoder_4bit_par.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "4cfc91cb91b47a2e2f6e3bc060795a8f41fa38d28a32fdc5628e6cc7839aa458",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "2bb8afb06ef048937c4a4ed5ae8dd5effb2766b4"
+        },
+        {
+          "rfilename": "ParakeetEncoder_4bit_par.mlmodelc/coremldata.bin",
+          "size": 386,
+          "lfs": {
+            "sha256": "885ee216b79acb509c9983d547180f6ce3b815e090ebecd6388cb399a64d9688",
+            "size": 386,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "a3c54b7f7e63a6fec629471dcdab196c9981ce15"
+        },
+        {
+          "rfilename": "ParakeetEncoder_4bit_par.mlmodelc/metadata.json",
+          "size": 2845,
+          "git_blob_sha1": "aba920959401a47bb5928691446fb5ced4bb4024"
+        },
+        {
+          "rfilename": "ParakeetEncoder_4bit_par.mlmodelc/model.mil",
+          "size": 751645,
+          "git_blob_sha1": "59d4f172cb85be59099eddc62ef9191d02cf49ea"
+        },
+        {
+          "rfilename": "ParakeetEncoder_4bit_par.mlmodelc/weights/weight.bin",
+          "size": 305176576,
+          "lfs": {
+            "sha256": "9c611dc6768cdbedac64ebfccfefba660f9eaf97507aaca8e0e09b98e10b98fd",
+            "size": 305176576,
+            "pointerSize": 134
+          },
+          "git_blob_sha1": "ed69f6d948eb74efbcbcf628a244119425194bba"
+        },
+        {
+          "rfilename": "ParakeetEncoder_v2.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "810d10e271c983398343c8a6372cd77e93b8fa38fa87e5440b52d70141541d3f",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "963af4a026958a4c0b0663ce70f620a0ddff4918"
+        },
+        {
+          "rfilename": "ParakeetEncoder_v2.mlmodelc/coremldata.bin",
+          "size": 386,
+          "lfs": {
+            "sha256": "3a3fdaf971cab989eead103325b0a3d5e6702a4461d803b856b7f39177dc7f2e",
+            "size": 386,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "35df99d538408d2fc32b9f51def5f03246b855ed"
+        },
+        {
+          "rfilename": "ParakeetEncoder_v2.mlmodelc/metadata.json",
+          "size": 2771,
+          "git_blob_sha1": "e38214fb17de7665d43da649a09ba625364bfa48"
+        },
+        {
+          "rfilename": "ParakeetEncoder_v2.mlmodelc/model.mil",
+          "size": 896231,
+          "git_blob_sha1": "f84dbba37930f750591232e5cb22a6f5c88c2e52"
+        },
+        {
+          "rfilename": "ParakeetEncoder_v2.mlmodelc/weights/weight.bin",
+          "size": 591108480,
+          "lfs": {
+            "sha256": "58ebcc6f19497bf6b2c272a7d699dedf26a269a383b0c889f159cd65b33b1f6d",
+            "size": 591108480,
+            "pointerSize": 134
+          },
+          "git_blob_sha1": "304294664206a3b7911182fa878ae0c6f21abd34"
+        },
+        {
+          "rfilename": "Preprocessor.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "03ab3c1327a054c54c07a40325db967ec574f2c91dcc8192bfa44aa561bcf2d8",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "84e7c818c15d2650b6c55b20e618fba3e6289763"
+        },
+        {
+          "rfilename": "Preprocessor.mlmodelc/coremldata.bin",
+          "size": 494,
+          "lfs": {
+            "sha256": "d88ea1fc349459c9e100d6a96688c5b29a1f0d865f544be103001724b986b6d6",
+            "size": 494,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "b53fff2bc93fbe4b468811db15aa17767f3cb33c"
+        },
+        {
+          "rfilename": "Preprocessor.mlmodelc/metadata.json",
+          "size": 2974,
+          "git_blob_sha1": "887f7d4adc6d7f933686f7b984e23a47b45f57e3"
+        },
+        {
+          "rfilename": "Preprocessor.mlmodelc/model.mil",
+          "size": 27166,
+          "git_blob_sha1": "e94cce4bc7fbf55e55788449bf067ffe09a5ca91"
+        },
+        {
+          "rfilename": "Preprocessor.mlmodelc/weights/weight.bin",
+          "size": 298880,
+          "lfs": {
+            "sha256": "a5f7df6c7f47147ae9486fe18cc7792f9a44d093ec3c6a11e91ef2dc363c48dc",
+            "size": 298880,
+            "pointerSize": 131
+          },
+          "git_blob_sha1": "a9af1ac1e407ef336eebc2fd4da9de57e6d172ad"
+        },
+        {
+          "rfilename": "README.md",
+          "size": 1665,
+          "git_blob_sha1": "e5543d2fbe0a404c1d6cd1f27c4686796ed2d2af"
+        },
+        {
+          "rfilename": "RNNTJoint.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "f18d0665c71c76eae9ed704875e89feae268c69d52581f673a73101903c29e81",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "b64386294b86076de22d6d3e88e9d01e304d65a3"
+        },
+        {
+          "rfilename": "RNNTJoint.mlmodelc/coremldata.bin",
+          "size": 392,
+          "lfs": {
+            "sha256": "5fe0254d313f1046d438a606112845c7fc89462e0174f6184a746485918db67b",
+            "size": 392,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "4c714add56bead181d9ce040049aa4b8fe0dc7b7"
+        },
+        {
+          "rfilename": "RNNTJoint.mlmodelc/model.mil",
+          "size": 5437,
+          "git_blob_sha1": "b0fb50faa7242cf9aa3bc4bd586471c709dfba3b"
+        },
+        {
+          "rfilename": "RNNTJoint.mlmodelc/weights/weight.bin",
+          "size": 3453388,
+          "lfs": {
+            "sha256": "863c0b9d0f23533bf3dc20986b917293000bed662f778976b33e1cb0fb3ee1f3",
+            "size": 3453388,
+            "pointerSize": 132
+          },
+          "git_blob_sha1": "fa1fb54c5e0e4feee669c1b481ca85ccdc9578ee"
+        },
+        {
+          "rfilename": "config.json",
+          "size": 3,
+          "git_blob_sha1": "0967ef424bce6791893e9a57bb952f80fd536e93"
+        },
+        {
+          "rfilename": "parakeet_vocab.json",
+          "size": 18762,
+          "git_blob_sha1": "a111d3bd29d44781c4588447c3eac1ea549cb1f1"
+        }
+      ],
+      "repository_bytes": 2575138422
+    },
+    "argmaxinc/whisperkit-coreml": {
+      "revision": "0f63a7800b00dd0226abd051b906c246e1907482",
+      "files": [
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/AudioEncoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "b68eb75cef8a4b3585423dca03d42d2f6ff34029421ad11752ea5be85c9bbf4c",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "21e53554a00db62e687648d98c3b53516bc6b2c8"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/AudioEncoder.mlmodelc/coremldata.bin",
+          "size": 348,
+          "lfs": {
+            "sha256": "273d6cd004f95763e9d03e5d36622f11038819a81b9eafed64b1d95444e04f62",
+            "size": 348,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "006ab208801b940888e28a510de69e9a81a86da9"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/AudioEncoder.mlmodelc/metadata.json",
+          "size": 1877,
+          "git_blob_sha1": "5ec2a1dd6f1a06004348137b9c95941e8daac2cc"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/AudioEncoder.mlmodelc/model.mil",
+          "size": 7006617,
+          "git_blob_sha1": "e0030a80dbb12f94dabe395ee738c2268212984c"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/AudioEncoder.mlmodelc/model.mlmodel",
+          "size": 408667,
+          "lfs": {
+            "sha256": "bf0987c0d8c3fe180877b12ba5b4ac1d890e011f2103926e53186089feced575",
+            "size": 408667,
+            "pointerSize": 131
+          },
+          "git_blob_sha1": "7751f6fecc120f8f701e4bb412aa4949a3c846d4"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/AudioEncoder.mlmodelc/weights/weight.bin",
+          "size": 1273974400,
+          "lfs": {
+            "sha256": "6f46870171555792f9e98d5266d2c7d885a18962093b3a9544fffa54dbe8df16",
+            "size": 1273974400,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "30b6ee15252d8f5a7300cc478ebc3ae34818ce35"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/MelSpectrogram.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "091a361134891f94e613562771beea0d93a9aefbc6984ba86c60f856e07a508f",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "b1fb4634f14b77cb4a3ff9cc85363f2af8f09b1c"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/MelSpectrogram.mlmodelc/coremldata.bin",
+          "size": 329,
+          "lfs": {
+            "sha256": "f3c5778c86d6fbc6a9817a56dbcac05a946a4d95c77f6db8355572f3be9e9a68",
+            "size": 329,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "ea107cb3ba540c3bc9e7e8a7b22e32d671b918c4"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/MelSpectrogram.mlmodelc/metadata.json",
+          "size": 1850,
+          "git_blob_sha1": "13fcb044275d5f71dbffab0fdbcb3b173bb0955e"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/MelSpectrogram.mlmodelc/model.mil",
+          "size": 10187,
+          "git_blob_sha1": "4cbec89bb76fb8a5edf95927d3a888989f287ff4"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/MelSpectrogram.mlmodelc/weights/weight.bin",
+          "size": 373376,
+          "lfs": {
+            "sha256": "2eb5f443dc3a0a0ee0b5931e2c1a2365e6ab557b58f6ca46af26ea09ec1f7d57",
+            "size": 373376,
+            "pointerSize": 131
+          },
+          "git_blob_sha1": "3fa962bce63566e178438ac91386b816a201acb9"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoder.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "09cdcc47a8297a8441b48a3b2859cc75f57c808bc11654f92678188c923533f8",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "69bb02940e8219c3d1adaadcdd05bbae94d2e5c3"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoder.mlmodelc/coremldata.bin",
+          "size": 637,
+          "lfs": {
+            "sha256": "7b49d28fd16bdc6c790a6cca7ff99f83838cec338d84fe44469fa93f16953489",
+            "size": 637,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "be5ea838b3807942dd75da760c53d4c4366a8c29"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoder.mlmodelc/metadata.json",
+          "size": 4770,
+          "git_blob_sha1": "2584f94de8f204a1997ec336411c6431b6e9545a"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoder.mlmodelc/model.mil",
+          "size": 1010477,
+          "git_blob_sha1": "4735d15e5e23b0a2e2a1dbd0dc9ce7cf53729efb"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoder.mlmodelc/model.mlmodel",
+          "size": 805204,
+          "lfs": {
+            "sha256": "a99dd7d7d5412c5be4e3dcd8725e7fa0c9f9c2c8d41cb037bf42084f478717b0",
+            "size": 805204,
+            "pointerSize": 131
+          },
+          "git_blob_sha1": "6a1d14031e33edc1d131ba66ef94429158038fc6"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoder.mlmodelc/weights/weight.bin",
+          "size": 1813201716,
+          "lfs": {
+            "sha256": "745c0c3896c41cd6ad01b6c3ed852e0bb1cb2fd1ef579017c5cc9a8aff1d3c66",
+            "size": 1813201716,
+            "pointerSize": 135
+          },
+          "git_blob_sha1": "36647663b426f6d8541eac884109dc0cca09a970"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoderContextPrefill.mlmodelc/analytics/coremldata.bin",
+          "size": 243,
+          "lfs": {
+            "sha256": "352d00fa1b9b29c06b538013f6b2884029d673a2a246abcd783d5581c4f04c83",
+            "size": 243,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "793fe3e6e7a0d1d9a74427dfdd73251df5a82282"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoderContextPrefill.mlmodelc/coremldata.bin",
+          "size": 382,
+          "lfs": {
+            "sha256": "a91550bdd77216fd43a9b00251b6b5aebbcb2a2eee5ca92b2b3cdd0b8aa75971",
+            "size": 382,
+            "pointerSize": 128
+          },
+          "git_blob_sha1": "933aa6b141ab42a90b18a1ee177bc267889826b1"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoderContextPrefill.mlmodelc/metadata.json",
+          "size": 2236,
+          "git_blob_sha1": "984902b1f28fce7bb9f8124d49b2c97abf214b0d"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoderContextPrefill.mlmodelc/model.mil",
+          "size": 3778,
+          "git_blob_sha1": "1892fcb9467a5ee47f9fec1b7551bd68413af444"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/TextDecoderContextPrefill.mlmodelc/weights/weight.bin",
+          "size": 98304192,
+          "lfs": {
+            "sha256": "40b8dc9229eb9627feff2abc3eae6370df0a1536334b11bc26ec307ebc463bfe",
+            "size": 98304192,
+            "pointerSize": 133
+          },
+          "git_blob_sha1": "9801113f5c7fbde45652115155b3a4e4cda5ab3f"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/config.json",
+          "size": 1163,
+          "git_blob_sha1": "517e587af460e8be33f7ce25a74f6c84783dbfba"
+        },
+        {
+          "rfilename": "openai_whisper-large-v3_turbo/generation_config.json",
+          "size": 2810,
+          "git_blob_sha1": "bb80d1d949760a83e859b8ee1fbaa256ee8894a5"
+        }
+      ],
+      "repository_bytes": 3195115988
+    }
+  }
+}

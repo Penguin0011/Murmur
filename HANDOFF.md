@@ -1,3 +1,86 @@
+# Open issues — October 2, 2026
+
+Not yet addressed, as of `2f31308` on `aakash/bubble-pill-indicator`. [Certain]
+
+**Murmur app**
+1. A refused insertion (`failed`) shows the same "Delivery could not be verified" message as an uncertain one (`unverified`).
+2. Saved and Error bubbles stay on screen until the next action; there is no timeout or dismiss control.
+3. The bubble and three-pill indicator have never been seen in pixels. Screen Recording is not granted to Claude, and the computer-use tool cannot be granted the development build. Contrast of white pills on light glass is unverified.
+4. The pills follow a timer, not the microphone level (capture exposes no level yet).
+5. Settings changes take effect only after Apply Settings, unlike most Mac apps.
+6. No onboarding or first-run explanation of the defaults, no dictionary editor or learning controls, and no model download (the model folder is chosen manually).
+7. Cleanup, cloud routes and correction learning are not wired into the app.
+
+**Shortcut and capture**
+8. Every shortcut now uses an active event tap: Accessibility is required for all bindings, and a stalled main thread would delay keystrokes system-wide.
+9. Whether an active tap fails cleanly without Accessibility on macOS 26.6 is unverified.
+10. Escape swallowing is covered by deterministic checks only. Repeats of an Escape held from before recording still pass through.
+11. The Fn binding and physical key timing are untested live. First-word preservation is unproven with real speech; all live runs used synthetic speech played through the speakers.
+
+**Insertion and observation**
+12. The paste fallback's fixed 300 ms settle can double-insert if an app applies an AX write later; it should use change notifications.
+13. A browser password field not marked secure would receive a paste (accepted risk).
+14. Consecutive dictations need automatic spacing; otherwise words glue and observation is lost.
+15. Learning is unsupported in tested browser fields (Arc), default Google Docs (no AX target), and VS Code (stub text area).
+16. Untested live: permission revocation mid-session, clipboard-manager races, and learning across sessions (no persisted ledger).
+
+**Product, release and housekeeping**
+17. The PRD cleanup-failure conflict (section 3 preserves raw text; section 4 inserts raw text) is unresolved.
+18. Builds are self-signed (`clouddev Development`) only. Developer ID signing and notarization are blocked on an Apple Developer Program account.
+19. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, and the GitHub repository `dictation` still use the old name. Renaming the bundle ID resets macOS permissions and needs a data migration.
+20. The test transcripts from live runs remain in Murmur's History.
+
+# Bubble indicator and Murmur rename — October 2, 2026
+
+Branch `aakash/bubble-pill-indicator`, from `aakash-module-one` at `900ad61`. The app is now named **Murmur** in everything users see: window, menus, microphone prompt and `runtime/Murmur.app/Contents/MacOS/Murmur`. The bundle ID `cc.clouddev.dictation.development` and the Application Support/Caches `Dictation` folders are unchanged, so permissions, settings, history and the model cache carry over. The Listening and Processing bubbles show three white pills: a wave while listening, a sequential pulse while processing. They are static with Reduce Motion and use the primary color on the Reduce Transparency/Increase Contrast fallback. The pills are timed, not driven by audio level. [Certain]
+
+The app compiles, and the history checks pass. A standalone pill render matches the intended shapes. The live app run did not happen: the Mac's screen was locked (`CGSSessionScreenIsLocked=1`), so focus capture returned `com.apple.loginwindow` and every `--test-audio` probe refused before insertion. Nothing was inserted. Storage and pinned model sizes were verified by the same diagnostic. Pixel screenshots also need Screen Recording granted to the Claude app, because the development build cannot be granted to the computer-use tool. A copy is installed at `~/Applications/Murmur.app` for that purpose. [Certain]
+
+Live run (same day, Mac unlocked, `~/Applications/Murmur.app` with Microphone, Accessibility and Input Monitoring granted to Murmur itself, synthetic audio only, throwaway TextEdit document): [Certain]
+
+| Scenario | Observed bubble states | Result |
+|---|---|---|
+| `--test-audio` probe | Processing → Inserted | Transcript inserted into TextEdit |
+| Probe, focus moved to Finder during processing | Processing → Saved | Kept in History; nothing inserted |
+| Injected Control–Option–Space hold, synthetic speech through speakers into the real microphone | Listening (Stop/Cancel) → Processing → Inserted, auto-hid about 1.6 s later | Shortcut → mic → local model → inserted; no stray space |
+| Hold, then Escape | Listening → hidden | Canceled; nothing inserted |
+
+Found and fixed during the run: Control–Option–Space typed its Space into the destination, because both the spike listener and the app's own tap were listen-only. The chord now uses an active tap that drops only the chord's Space (`672badc`, `b3f14df`). At 19% output volume the recording reached only -45 dBFS. The model returned an empty transcript, and the app reported "Transcription failed"; that message should say no speech was detected. [Certain]
+
+Follow-up on the same day: four agent fixes were merged (`8c449d9` permission refresh on activation with automatic shortcut start; `a6d0937` "No speech was detected" for empty transcripts, with the audio kept; `6d605cd` the Audio button only when retry audio exists, selecting that file; `b06a0ec` Escape swallowed only while listening, via one shared `ShortcutListener.createTap()`). Builds are signed with the self-signed `clouddev Development` identity (`c439c34`). Its designated requirement is the bundle ID plus the certificate root, so grants persist across rebuilds. After a one-time user-run `tccutil reset` and re-grant, the status line updated to all-allowed without a relaunch or Apply Settings. [Certain]
+
+Live rerun on the merged, signed build: the probe inserted; the probe with focus moved was Saved; the injected Control–Option–Space hold with speech through the microphone went Listening → Processing → Inserted with no stray space; hold-then-Escape canceled; and a silent hold showed "No speech was detected. Check your microphone and try again." with History and Audio. All active shortcuts now require Accessibility as well as Input Monitoring. [Certain]
+
+Remaining app issues: a refused insertion (`failed`) shows the same "Delivery could not be verified" message as an uncertain one. A Saved/Error bubble stays on screen until the next action. Escape swallowing is covered by deterministic checks, not observed in a destination app. The bubble and pills have not been seen in pixels, because Screen Recording is not granted to Claude. [Certain]
+
+# Connected local path checkpoint — October 2, 2026
+
+Implemented shortcut → capture → local processor → durable text history. Release model runner build and pinned model checksum verification passed on the available M3. Synthetic injected-key microphone hold/cancel and synthetic speaker-to-microphone processing passed; all test audio was deleted. No insertion, physical-key first-word guarantee, or real speech quality claim is made. [Certain]
+
+Build/run commands and precise results are in `module-one/session/README.md`. Model cache: `~/Library/Caches/Dictation/module-one/unified-d32e972`; speech/recovery/cache artifacts are excluded from Git. Recovery history uses the standalone app-support directory. Privacy, retention settings/UI, memory-only capture, and production insertion remain product work. [Certain]
+
+Independent review found queued-action ordering, continuous retry-audio expiry, and processor signal/spawn gaps. All three findings are fixed: processor cancellation reaps its child, keyboard transition/action delivery is serialized with a queued failed-start regression, and a minute timer expires retry audio while the listener runs. Relevant synthetic checks pass. [Certain]
+
+# Superseding hardware scope — October 2, 2026
+
+M1/8 GB performance is no longer a development or release gate, per the user. Use the available M3/16 GB host for functional/inference validation, publish only measured results, and leave users model selection for their hardware. Earlier M1-gate references below are historical and superseded. Next implementation step remains wiring shortcut events into capture, then validating the local transcription path. [Certain]
+
+# Current continuation — October 2, 2026
+
+Work proceeds on `aakash-module-one`, fast-forwarded from the recorded feasibility continuation at `da78462`. The go/no-go report now permits milestone 1 validation and retains NO-GO for production/release. [Certain]
+
+“Module one” is interpreted as PRD milestone 1: resolve decisions, prepare model benchmarks, and validate shortcut/capture/insertion/observation feasibility. No separately named module-one plan exists in the checkout. [Certain]
+
+Current checks: Swift spike build, deterministic checks, ten CLI rejection cases, read-only Codex field inspection, bounded event-tap startup, capture build/synthetic storage checks, and synthetic benchmark scoring checks passed. Microphone permission reports authorized; no speech recording or model inference is claimed. Historical real-app evidence is preserved separately from current verification. [Certain]
+
+Workers own `module-one/capture/`, `module-one/models/`, and `module-one/SAFETY_REVIEW.md`; the lead owns this handoff, PRD decisions, and `spike/FEASIBILITY.md`. Live microphone permission and M1 availability must be reported without requesting intervention or fabricating results. [Certain]
+
+Model checkpoint: immutable runtime/model pins, file integrity verifier, scoring/resource/timeout harness, and a source-checked Swift adapter are committed. Python checks pass; the Swift dependency download was stopped before compilation completed, so the adapter build and all real inference remain unverified. No weights were downloaded. [Certain]
+
+Capture checkpoint: native harness build, synthetic WAV/storage/expiry checks, read-only authorized microphone probe, and five invalid-argument checks passed. Capture is not yet wired into the shortcut state machine; memory-only capture and live speech/device checks remain open. [Certain]
+
+---
+
 # Integration handoff
 
 ## Current checkpoint — October 2, 2026
