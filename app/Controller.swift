@@ -206,6 +206,7 @@ final class PreStart: @unchecked Sendable {
     private var phaseBeforeEarly: (String, String)?
     private var statusShown = UUID()
     private var applyScheduled = false
+    private var folderWatch: AnyCancellable?
     private var preview = false
     private var previewDirectory: URL?
     private lazy var session: CaptureSession = {
@@ -279,6 +280,9 @@ final class PreStart: @unchecked Sendable {
         } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
         modelStatus = downloader?.status() ?? .notDownloaded
         refreshKeys()
+        // Choose Folder, Use Default and a finished download all change the folder, even with
+        // Settings closed; apply each so the folder survives a relaunch.
+        folderWatch = $modelDirectory.dropFirst().removeDuplicates().sink { [weak self] _ in self?.settingsChanged() }
     }
     func start() {
         // Writing to a warm helper that died must fail with EPIPE, not kill Murmur.
@@ -363,7 +367,7 @@ final class PreStart: @unchecked Sendable {
     func chooseModelDirectory() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
         panel.allowsMultipleSelection = false; panel.message = "Choose the pinned Parakeet Unified model folder."
-        if panel.runModal() == .OK, let url = panel.url { modelDirectory = url.path; settingsChanged() }
+        if panel.runModal() == .OK, let url = panel.url { modelDirectory = url.path }
     }
     /// Settings apply as soon as they change; there is no Apply button. Changes made in the same
     /// moment (Faithful Transcription flips three toggles) apply once. Confirmations still appear,
