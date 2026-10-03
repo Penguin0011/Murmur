@@ -713,14 +713,26 @@ final class PreStart: @unchecked Sendable {
                 switch insertion.status {
                 case .verified: setPhase("Inserted", "Inserted.")
                 case .unverified: setPhase("Saved", "\(saved) Delivery could not be verified; no retry was attempted.")
-                case .failed: setPhase("Saved", "\(saved) The text could not be inserted into this field, so nothing was typed.")
+                case .failed:
+                    entry.insertionStatus = copyToClipboard(processed) ? "copied" : entry.insertionStatus; try? store.save(entry)
+                    setPhase("Saved", entry.insertionStatus == "copied" ? "This field could not take the text, so it was copied to the clipboard." : "\(saved) The text could not be inserted into this field, so nothing was typed.")
                 }
             } catch { setPhase("Saved", "\(saved) Insertion status could not be saved.") }
         } else {
             timingLog.notice("insert skipped auto=\(self.insertThisSession, privacy: .public) focus-stable=\(self.focusStable, privacy: .public) destination=\(self.destination?.bundleID ?? "none", privacy: .public)")
-            setPhase("Saved", "\(saved) The destination changed or automatic insertion is off.")
+            // No usable text field (none focused, or focus moved): the text goes to the clipboard instead.
+            if insertThisSession, copyToClipboard(processed) {
+                entry.insertionStatus = "copied"; try? store.save(entry)
+                setPhase("Saved", "No text field was ready, so the text was copied to the clipboard.")
+            } else { setPhase("Saved", "\(saved) The destination changed or automatic insertion is off.") }
         }
         destination = nil; historySaved(); done()
+    }
+    /// Leaves the dictation on the clipboard for the user to paste; replaces what was there.
+    private func copyToClipboard(_ text: String) -> Bool {
+        let board = NSPasteboard.general
+        board.clearContents()
+        return board.setString(text, forType: .string)
     }
     // Explicit developer check of the production pipeline, using a synthetic file
     // and an exact disposable destination. Never enabled during ordinary launch.

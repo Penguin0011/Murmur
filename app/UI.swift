@@ -527,6 +527,7 @@ struct SettingsView: View {
         case "verified": return "Inserted and verified"
         case "unverified", "insertion-pending": return "Delivery uncertain · text saved"
         case "failed": return "Could not insert · text saved"
+        case "copied": return "Copied to clipboard · text saved"
         case "held-cleanup": return "Cleanup held · raw text saved"
         case "held-transcript": return "Transcript held for review · raw text saved"
         default: return "Saved · not inserted"
@@ -538,6 +539,7 @@ struct SettingsView: View {
         case "verified": return "checkmark.circle"
         case "unverified", "insertion-pending": return "questionmark.circle"
         case "failed": return "exclamationmark.circle"
+        case "copied": return "doc.on.clipboard"
         case "held-cleanup", "held-transcript": return "pause.circle"
         default: return "tray"
         }

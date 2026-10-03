@@ -260,16 +260,30 @@ func insertText(_ text: String, into destination: FocusSnapshot, policy: Inserti
 
 private func verifyInsertion(_ before: FocusSnapshot, expected: String?, method: String) -> InsertionResult {
     let after = try? captureFocus()
-    let matched = after.map { $0.pid == before.pid && CFEqual($0.element, before.element) && !$0.secure && expected != nil && $0.value == expected } ?? false
+    let matched = after.map { $0.pid == before.pid && CFEqual($0.element, before.element) && !$0.secure && readbackMatches(expected, $0.value) } ?? false
     let verified = insertionReadbackVerified(expected: expected, actual: after?.value,
                                              sameField: matched, browserTypeUnknown: before.browserTypeUnknown || (after?.browserTypeUnknown ?? true))
+    // Lengths only: the detail is logged, so it must never carry the text.
+    let lengths = "readback \(after?.value.map { String($0.utf16.count) } ?? "unreadable") vs expected \(expected.map { String($0.utf16.count) } ?? "unknown")"
     return InsertionResult(status: verified ? .verified : .unverified,
-                           detail: verified ? "\(method) matched full-field readback" : "\(method) delivery unverified; retain output, never automatically retry",
+                           detail: verified ? "\(method) matched full-field readback" : "\(method) delivery unverified (\(lengths)); retain output, never automatically retry",
                            snapshot: matched ? after : nil)
 }
 
 func insertionReadbackVerified(expected: String?, actual: String?, sameField: Bool, browserTypeUnknown: Bool) -> Bool {
-    sameField && !browserTypeUnknown && expected != nil && actual == expected
+    sameField && !browserTypeUnknown && readbackMatches(expected, actual)
+}
+
+/// Rich text boxes (Electron, ProseMirror) report non-breaking spaces, zero-width spaces, CRLF or
+/// a trailing newline for text that is otherwise identical. A doubled or misplaced insertion still
+/// differs after this normalization.
+func readbackMatches(_ expected: String?, _ actual: String?) -> Bool {
+    guard let expected, let actual else { return false }
+    func normalized(_ s: String) -> String {
+        s.replacingOccurrences(of: "\u{00A0}", with: " ").replacingOccurrences(of: "\u{200B}", with: "")
+            .replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return normalized(expected) == normalized(actual)
 }
 
 /// A write reported successful may fall back to paste only when read-back proves nothing changed.
@@ -286,6 +300,8 @@ func insertionTextRole(_ role: String) -> Bool {
 }
 
 func runInsertionChecks() {
+    assert(readbackMatches("Hi there.", "Hi\u{00A0}there.\n") && readbackMatches(" a b", "a\u{200B} b"))
+    assert(!readbackMatches("Hi there.", "Hi there. Hi there.") && !readbackMatches("ab", nil) && !readbackMatches(nil, "ab"))
     assert(insertionMethod(bundleID: "com.openai.codex", policy: .singleAttempt) == .paste)
     assert(insertionMethod(bundleID: "com.google.Chrome", policy: .singleAttempt) == .paste)
     assert(insertionMethod(bundleID: "com.microsoft.VSCode", policy: .singleAttempt) == .paste)
