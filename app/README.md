@@ -7,7 +7,7 @@ app/build.sh
 open runtime/Murmur.app
 ```
 
-The bundle uses the pinned local ModelBench helper. Model download, cleanup, cloud providers, signing/notarization, and production release remain separate work. [Certain]
+The bundle uses the pinned local ModelBench helper. Model download, cloud providers in the UI, automatic correction learning, signing/notarization, and production release remain separate work. [Certain]
 
 ## Recovery and interface
 
@@ -28,13 +28,30 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 ```
 
+## Processing: dictionary, cleanup and recovery
+
+`Processing.swift` is Foundation-only and is compiled into the app. `ProcessingCoordinator` runs after transcription, on the main thread:
+
+1. `DictionaryStore.apply` runs first, in every mode including faithful transcription.
+2. Cleanup runs on the selected route with the enabled options. Settings offer only the local `RuleCleaner` route. The cloud route (`CleanupProvider` via `CleanupPrompt`, with only the relevant dictionary entries) is tested but not exposed, and the app's synchronous path never calls the network: a cloud route holds rather than falling back to local.
+3. A cleaner error or a guard failure returns `.heldForRecovery(raw:reason:)`. The controller saves the raw transcript with status `held-cleanup` and shows an error. It does not insert. History offers **Copy Raw**. The reason is content-free and is not stored.
+
+Settings has three independent cleanup toggles, a Faithful Transcription button, a learning toggle, and a dictionary editor (add, delete, learned/manual badge, Reset Learned). Cleanup and learning settings take effect on Apply Settings; dictionary edits save immediately. Automatic observation of edits is not wired in, so nothing feeds learning yet. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute`, `learningEnabled`, `historyMode` and `updateChecksEnabled`; the last two are only persisted for now. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
+
+```sh
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/check_processing.swift -o /tmp/murmur-processing-check
+/tmp/murmur-processing-check
+```
+
+The processing check passes with Swift 6.1.2 on Linux. The Controller/UI integration has only been typechecked on Linux against hand-written AppKit/SwiftUI stubs; it has not been built or run on the Mac. [Certain]
+
 ## Dictionary, learning and retention (not yet wired in)
 
-`Dictionary.swift`, `Learning.swift` and `Retention.swift` are Foundation-only, so their checks also run on Linux. They are not in `build.sh` yet; the integration lead wires them into Controller/UI.
+`Dictionary.swift`, `Learning.swift` and `Retention.swift` are Foundation-only, so their checks also run on Linux. They are compiled into the app through `Processing.swift`. The history cap, history-off mode and Delete all data are not wired into Controller/UI yet.
 
 ```sh
 swiftc app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
@@ -55,7 +72,7 @@ Known failure modes: without the lexicon, real-word swaps that look like respell
 
 ### Cloud providers, credentials, and updates
 
-`Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation and are not wired into the app yet. Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. They have not yet been compiled on the macOS 26 host (Swift 6.3.3, `-swift-version 5`), and the Keychain store is compiled only on macOS. [Certain]
+`Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation. `build.sh` compiles `Providers.swift` and `Credentials.swift` because `Processing.swift` uses their types, but no provider, key or update check is reachable from the app yet; `Updates.swift` is not compiled into the app. Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. They have not yet been compiled on the macOS 26 host (Swift 6.3.3, `-swift-version 5`), and the Keychain store is compiled only on macOS. [Certain]
 
 ```sh
 swiftc app/Cleanup.swift app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check
@@ -98,7 +115,7 @@ This explicitly performs transcription and one insertion attempt. It preserves t
 
 ## Cleanup
 
-`Cleanup.swift` is Foundation-only and is not yet wired into the app. It provides:
+`Cleanup.swift` is Foundation-only. The app uses it through `Processing.swift` (see above). It provides:
 - `CleanupOptions`: fillers, corrections, and lists toggle independently. All are on by default, and `.faithful` turns all off.
 - `CleanupGuard`: the PRD bound check between raw and cleaned text.
 - `CleanupPrompt`: messages for an LLM provider.
