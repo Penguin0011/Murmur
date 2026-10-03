@@ -2,7 +2,13 @@ import AppKit
 import SwiftUI
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
-    let controller = AppController(preview: CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--test-audio"))
+    let options: LaunchOptions
+    let controller: AppController
+    init(options: LaunchOptions) {
+        self.options = options
+        controller = AppController(preview: options.preview || options.testAudio != nil)
+        super.init()
+    }
     var window: NSWindow?
     var statusItem: NSStatusItem?
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -14,12 +20,10 @@ import SwiftUI
         controller.openSettings = { [weak self] in self?.showWindow() }
         controller.updateMenu = { [weak self] in self?.refreshMenu() }
         controller.start(); refreshMenu()
-        if let audioIndex = CommandLine.arguments.firstIndex(of: "--test-audio"), audioIndex + 1 < CommandLine.arguments.count,
-           let expectedIndex = CommandLine.arguments.firstIndex(of: "--expected-app"), expectedIndex + 1 < CommandLine.arguments.count {
-            controller.checkSavedAudio(URL(fileURLWithPath: CommandLine.arguments[audioIndex + 1]), expectedApp: CommandLine.arguments[expectedIndex + 1]) { NSApp.terminate(nil) }
+        if let audio = options.testAudio, let expectedApp = options.expectedApp {
+            controller.checkSavedAudio(URL(fileURLWithPath: audio), expectedApp: expectedApp) { NSApp.terminate(nil) }
         } else { showWindow() }
-        if let i = CommandLine.arguments.firstIndex(of: "--quit-after"), i + 1 < CommandLine.arguments.count,
-           let seconds = Double(CommandLine.arguments[i + 1]), seconds.isFinite, (0.1...60).contains(seconds) {
+        if let seconds = options.quitAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
         }
     }
@@ -54,8 +58,11 @@ import SwiftUI
     func applicationWillTerminate(_ notification: Notification) { controller.shutdown() }
 }
 MainActor.assumeIsolated {
+    let options: LaunchOptions
+    do { options = try LaunchOptions(arguments: Array(CommandLine.arguments.dropFirst())) }
+    catch { fputs("Invalid launch options. Use --preview [--quit-after SECONDS], or --test-audio FILE --expected-app BUNDLE_ID.\n", stderr); exit(2) }
     let application = NSApplication.shared
-    let delegate = AppDelegate()
+    let delegate = AppDelegate(options: options)
     application.delegate = delegate
     withExtendedLifetime(delegate) { application.run() }
 }

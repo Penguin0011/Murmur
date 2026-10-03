@@ -11,7 +11,7 @@ swiftc -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/spike/Shortcut.swift" "$project_root/spike/Insertion.swift" \
   "$project_root/module-one/capture/Capture.swift" "$project_root/module-one/session/Session.swift" \
   "$project_root/app/History.swift" "$project_root/app/Controller.swift" \
-  "$project_root/app/UI.swift" "$project_root/app/main.swift" \
+  "$project_root/app/UI.swift" "$project_root/app/LaunchOptions.swift" "$project_root/app/main.swift" \
   -o "$app_path/Contents/MacOS/Dictation"
 cp "$project_root/app/Info.plist" "$app_path/Contents/Info.plist"
 cp "$runner_path" "$app_path/Contents/MacOS/ModelBench"
