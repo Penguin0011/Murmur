@@ -55,4 +55,4 @@ The folders still use the app's old name, Dictation. [Certain] App preferences a
 
 ## License
 
-Murmur is intended to be released under the MIT License. The LICENSE file has not been added yet, because the copyright holder's legal name is still to be supplied. [Certain] Third-party licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Parakeet model is downloaded under the NVIDIA Open Model License and is not bundled. [Certain]
+Murmur is released under the [MIT License](LICENSE). [Certain] Third-party licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Parakeet model is downloaded under the NVIDIA Open Model License and is not bundled. [Certain]

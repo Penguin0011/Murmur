@@ -29,7 +29,7 @@ Later the same day (through `e0b39b4`): [Certain]
 
 Every Controller/UI/main change is **uncompiled on the Mac**. Workers type-checked Controller and UI against stub AppKit/SwiftUI modules on Linux, which catches names and bindings but not real SDK signatures. Expect the first `app/build.sh` run to need fixes. [Certain]
 
-Still not wired: automatic observation feeding learning (`TODO(observation)`; spike `Observation.swift` is not in the app), cloud provider and Keychain settings UI, onboarding, VoiceOver announcements, launch at login, input-device selection. Open user decisions: OpenRouter vs Gemini as STT default, whether to pursue `gemini-3.5-transcribe` (Interactions API is Beta and stores requests by default), the proposed promotion rule. [Certain]
+Still not wired: automatic observation feeding learning (`TODO(observation)`; spike `Observation.swift` is not in the app), cloud provider and Keychain settings UI, onboarding, VoiceOver announcements, launch at login, input-device selection. Decided since: pursue `gemini-3.5-transcribe` with stored requests; promotion rule approved. [Certain]
 
 **Mac-side next steps**
 1. Pull this branch, run `app/build.sh` and every check in `app/README.md` (including `check_ui.sh`) on the macOS 26 host. Fix anything that fails under Swift 6.3.3 and `-swift-version 5`. [Certain]
@@ -37,7 +37,7 @@ Still not wired: automatic observation feeding learning (`TODO(observation)`; sp
 3. Back the learning lexicon with NSSpellChecker (`isCommonWord`) before shipping learning. Without it, real-word swaps such as casual→causal pass the filter and can promote. [Certain]
 4. Get user approval for the proposed provider split and the proposed promotion rule. [Certain]
 
-**Release blocker: LICENSE.** R11 requires an MIT LICENSE with the confirmed copyright holder. The PRD says the user is the holder and the legal name must be supplied, not invented. Ask the user for the legal name, then add `LICENSE`. Developer ID signing still needs an Apple Developer Program account. [Certain]
+**User decisions, October 3, 2026:** MIT `LICENSE` added with holder "Aakash"; the promotion rule is approved (NSSpellChecker lexicon still required before learning ships); pursue Gemini 3.5 Transcribe and accept Google storing requests (must be disclosed); Apple Developer enrollment deferred, so Developer ID signing and notarization remain blocked. [Certain]
 
 ---
 
@@ -73,13 +73,13 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 13. Builds are self-signed (`clouddev Development`); Developer ID signing and notarization need an Apple Developer Program account.
 14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders, notification names and the repository still use the old name.
 15. Test transcripts from live runs remain in Murmur's History.
-16. No LICENSE file: the copyright holder's legal name is needed (release blocker). `README.md`, `CONTRIBUTING.md` and `THIRD_PARTY_NOTICES.md` now exist.
+16. ~~No LICENSE file~~: added (MIT, Aakash). `README.md`, `CONTRIBUTING.md` and `THIRD_PARTY_NOTICES.md` now exist.
 17. The new modules have never been compiled on the Mac; the Keychain store has never been compiled at all.
 
 **Processing and providers**
 18. No provider has been called with a real API key. Fireworks STT is deprecated upstream; the OpenRouter STT and Gemini/OpenRouter cleanup split is a proposal pending user approval.
 19. The local cleanup model is unselected. `RuleCleaner` is a baseline; its corpus has no real ASR transcripts, and the guard will hold more real LLM output than baseline output.
-20. Learning's lexicon check needs NSSpellChecker on macOS before learning ships; the semantic promotion rule is still pending user approval.
+20. Learning's lexicon check needs NSSpellChecker on macOS before learning ships; the semantic promotion rule is approved.
 21. The Parakeet conversion's CC-BY-4.0 label conflicts with the upstream NVIDIA Open Model License; the app must show the model license before download.
 
 ---

@@ -72,4 +72,4 @@ These are the patterns in the existing code and docs. [Likely]
 
 ## Licensing
 
-Murmur's source is intended to be MIT, but the LICENSE file is not added yet (the copyright holder's legal name is pending). Hold outside contributions until it exists. Add any new dependency or model to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) after checking its license at the pinned version. [Certain]
+Murmur's source is MIT licensed ([LICENSE](LICENSE)); contributions are accepted under the same license. Add any new dependency or model to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) after checking its license at the pinned version. [Certain]
