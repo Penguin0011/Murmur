@@ -4,7 +4,18 @@ Branch `aakash/bubble-pill-indicator`, from `aakash-module-one` at `900ad61`. Th
 
 The app compiles, and the history checks pass. A standalone pill render matches the intended shapes. The live app run did not happen: the Mac's screen was locked (`CGSSessionScreenIsLocked=1`), so focus capture returned `com.apple.loginwindow` and every `--test-audio` probe refused before insertion. Nothing was inserted. Storage and pinned model sizes were verified by the same diagnostic. Pixel screenshots also need Screen Recording granted to the Claude app, because the development build cannot be granted to the computer-use tool. A copy is installed at `~/Applications/Murmur.app` for that purpose. [Certain]
 
-To resume, unlock the Mac and keep it unlocked, then run the scratch scenario script (probe → Inserted; probe with focus change → Saved; injected Control–Option–Space hold with synthetic speech → Listening/Processing; hold then Escape → cancel). Record the results here. [Certain]
+Live run (same day, Mac unlocked, `~/Applications/Murmur.app` with Microphone, Accessibility and Input Monitoring granted to Murmur itself, synthetic audio only, throwaway TextEdit document): [Certain]
+
+| Scenario | Observed bubble states | Result |
+|---|---|---|
+| `--test-audio` probe | Processing → Inserted | Transcript inserted into TextEdit |
+| Probe, focus moved to Finder during processing | Processing → Saved | Kept in History; nothing inserted |
+| Injected Control–Option–Space hold, synthetic speech through speakers into the real microphone | Listening (Stop/Cancel) → Processing → Inserted, auto-hid about 1.6 s later | Shortcut → mic → local model → inserted; no stray space |
+| Hold, then Escape | Listening → hidden | Canceled; nothing inserted |
+
+Found and fixed during the run: Control–Option–Space typed its Space into the destination, because both the spike listener and the app's own tap were listen-only. The chord now uses an active tap that drops only the chord's Space (`672badc`, `b3f14df`). At 19% output volume the recording reached only -45 dBFS. The model returned an empty transcript, and the app reported "Transcription failed"; that message should say no speech was detected. [Certain]
+
+Open app issues: the permission status does not refresh when returning from System Settings. Ad-hoc signing makes every rebuild drop the Microphone, Accessibility and Input Monitoring grants, and stale entries had to be cleared with `tccutil reset` (user-run). A stable development signing identity would avoid this. The Error bubble offers Audio even when no audio exists, and Escape still reaches the focused app while listening. Bubble states were verified through the accessibility tree, not pixel screenshots, because Screen Recording is not granted to Claude. [Certain]
 
 # Connected local path checkpoint — October 2, 2026
 
