@@ -121,10 +121,19 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
     }
     // Without an expected value, a successful write remains uncertain and must never be retried.
     let write = AXUIElementSetAttributeValue(current.element, kAXSelectedTextAttribute as CFString, text as CFString)
+    var pasteMethod = "clipboard paste"
     if write == .success {
-        return verifyInsertion(current, expected: expected, method: "AX selected-text write")
-    }
-    guard write == .attributeUnsupported || write == .notImplemented else {
+        let written = verifyInsertion(current, expected: expected, method: "AX selected-text write")
+        guard written.status == .unverified else { return written }
+        // Some Chromium/Electron fields accept the write and drop it. Paste only if the field still reads exactly as before.
+        // ponytail: fixed 300 ms settle; a write applied later than this would double-insert. Use change notifications in the app.
+        Thread.sleep(forTimeInterval: 0.3)
+        guard let settled = try? captureFocus(), sameDestination(current, settled),
+              silentWriteAllowsPaste(before: current.value, after: settled.value, browserTypeUnknown: current.browserTypeUnknown) else {
+            return written
+        }
+        pasteMethod = "clipboard paste after unchanged AX write"
+    } else if write != .attributeUnsupported && write != .notImplemented {
         return result(.unverified, "AX write returned \(write.rawValue); delivery uncertain, no paste retry")
     }
     guard let rechecked = try? captureFocus(), sameDestination(current, rechecked) else {
@@ -191,7 +200,7 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
     down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
     // ponytail: bounded synchronous spike wait; use asynchronous completion in the application.
     Thread.sleep(forTimeInterval: 0.2)
-    return verifyInsertion(current, expected: expected, method: "clipboard paste")
+    return verifyInsertion(current, expected: expected, method: pasteMethod)
 }
 
 private func verifyInsertion(_ before: FocusSnapshot, expected: String?, method: String) -> InsertionResult {
@@ -206,6 +215,11 @@ private func verifyInsertion(_ before: FocusSnapshot, expected: String?, method:
 
 func insertionReadbackVerified(expected: String?, actual: String?, sameField: Bool, browserTypeUnknown: Bool) -> Bool {
     sameField && !browserTypeUnknown && expected != nil && actual == expected
+}
+
+/// A write reported successful may fall back to paste only when read-back proves nothing changed.
+func silentWriteAllowsPaste(before: String?, after: String?, browserTypeUnknown: Bool) -> Bool {
+    !browserTypeUnknown && before != nil && after == before
 }
 
 func clipboardOwnershipVerified(expectedCount: Int, beforeCount: Int, afterCount: Int, expectedToken: String, actualToken: String?) -> Bool {
@@ -227,6 +241,10 @@ func runInsertionChecks() {
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 4, expectedToken: "ours", actualToken: nil))
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 5, afterCount: 5, expectedToken: "ours", actualToken: "ours"))
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 5, expectedToken: "ours", actualToken: "ours"))
+    assert(silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: ", browserTypeUnknown: false))
+    assert(!silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: Acme", browserTypeUnknown: false))
+    assert(!silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: ", browserTypeUnknown: true))
+    assert(!silentWriteAllowsPaste(before: nil, after: nil, browserTypeUnknown: false))
     assert(insertionReadbackVerified(expected: "text", actual: "text", sameField: true, browserTypeUnknown: false))
     assert(!insertionReadbackVerified(expected: "text", actual: "text", sameField: true, browserTypeUnknown: true))
     assert(!insertionReadbackVerified(expected: "text", actual: "text", sameField: false, browserTypeUnknown: false))
