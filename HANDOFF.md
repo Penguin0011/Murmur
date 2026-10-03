@@ -45,3 +45,5 @@ Chat composer (ChatGPT/Codex desktop 26.928.40906, new unsent chat): readable AX
 Paste fallback added for AX writes that report success but leave a non-browser field unchanged (300 ms settle). Codex composer now verifies via the fallback, and observation passes the live-testable cases. Arc exposed a focused AXTextArea this time, but the write was dropped again and the fallback correctly skipped the unknown browser field type. Open decision: whether browser fields may use the fallback. [Certain]
 
 Fallback extended to browser fields of unknown type (user decision; secure fields still rejected). Arc textarea now receives the text exactly once via paste, screen-confirmed; it stays harness-unverified and learning-ineligible. [Certain]
+
+Code editor (VS Code 1.140.0, default settings): the editor exposes an empty stub AXTextArea. The AX write is ignored; the paste fallback delivered the text once (screen-confirmed) but stays unverified, so no observation is possible. Learning in VS Code would need screen reader mode or an extension. [Certain]

@@ -50,7 +50,7 @@ Repeated down events do not create sessions. A release belonging to the tap that
 | Browser text field | Arc 1.166.0, local textarea | Delivered once via paste fallback (screen-confirmed); harness-unverified by design | Ineligible (unknown browser field type) | AX write alone silently drops text; field exposed as AXTextArea this session |
 | Rich text | Safari 26.6.2, synthetic Google Doc | Default: no field exposed. With Docs screen reader support: AX write delivered (user-observed), harness-unverified | Ineligible (browser field type unknown) | Requires a user-enabled Docs setting; product requirement says this must not be needed |
 | Chat composer | ChatGPT/Codex desktop 26.928.40906 (`com.openai.codex`), new unsent chat | Verified via paste fallback after unchanged AX write | Pass for live-testable cases | Replacement, Undo, append, focus departure, consecutive dictations; AX write alone silently drops text |
-| Code editor | Synthetic disposable editor buffer | Pending | Pending | No live result yet |
+| Code editor | VS Code 1.140.0, throwaway `code-probe.txt`, default settings (no screen reader mode) | Delivered once via paste fallback (screen-confirmed); harness-unverified | Not possible: AX value is an empty stub | AX write silently dropped; editor buffer not exposed to AX |
 
 Remaining rows are pending, not classified unsupported. Target versions must be recorded when executed. [Certain]
 
@@ -157,6 +157,25 @@ insertion=unverified detail=clipboard paste after unchanged AX write delivery un
 ```
 
 A screenshot afterwards showed `Browser probe: Acme dictation probe`: delivered exactly once, no duplicate. [Certain]
+
+## Code-editor synthetic test evidence
+
+VS Code 1.140.0 (`com.microsoft.VSCode`, updated from the 1.138.0 seen earlier), default settings with screen reader optimized mode off, in Restricted Mode. A throwaway `code-probe.txt` containing `Code probe: ` was opened in a new window from Claude's scratchpad (outside the repo), caret at line 1, column 13. Claude had click-only access to VS Code, so the user ran the insertion. [Certain]
+
+Before any click, with VS Code frontmost after an update, the harness found no focused AX element (`systemAX=-25204 appAX=-25212`); the release-notes tab had focus. After Claude clicked the `code-probe.txt` tab, the editor exposed a readable, learning-eligible `AXTextArea`. As with Arc, this exposure may follow from another accessibility client activating Electron's tree. [Certain]
+
+```text
+app=com.microsoft.VSCode role=AXTextArea subrole=unknown secure=false valueReadable=true selectionReadable=true learningEligible=true
+insertion=unverified detail=clipboard paste after unchanged AX write delivery unverified; retain output, never automatically retry
+```
+
+A screenshot afterwards showed `Code probe: Acme dictation probe` (Ln 1, Col 33): delivered exactly once by the paste fallback. Reading the focused element's AX value afterwards returned an empty string with 0 characters. VS Code exposes a stub text area, not the buffer, outside screen reader mode. The AX write went into the stub and was ignored. Read-back stayed unchanged, which correctly triggered the paste, but read-back can never confirm delivery or support observation here. [Certain]
+
+Product findings: [Certain]
+
+- Insertion into VS Code works in its default configuration via the paste fallback, which meets the no-user-setup requirement for delivery.
+- `learningEligible=true` is wrong for this field: the role and readable attributes pass, but the value is a stub. A learning gate should also require read-back to have verified the inserted text; here it did not, so no observation ran.
+- Correction learning in VS Code would need screen reader mode or an editor extension, both setup the user has ruled out for launch.
 
 ## Rich-text synthetic test evidence
 
