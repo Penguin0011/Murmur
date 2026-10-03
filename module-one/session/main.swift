@@ -34,6 +34,16 @@ func sessionCheck() throws {
     empty.receive(.start) {}; let emptyURL = empty.audio!
     empty.receive(.finish) {}; assert(!FileManager.default.fileExists(atPath: emptyURL.path) && empty.state == .idle)
 
+    // A release tail keeps capturing after release; stop and processing follow on the main queue.
+    var tailStops = 0, tailProcessed = false
+    let tail = CaptureSession(store: store, start: { _ in }, stop: { tailStops += 1; return true }, process: { _, done in tailProcessed = true; done() })
+    tail.releaseTail = 0.05
+    tail.receive(.start) {}; tail.receive(.finish) {}
+    assert(tailStops == 0 && tail.state == .processing)
+    tail.receive(.start) {}; assert(tail.state == .processing)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    assert(tailStops == 1 && tailProcessed && tail.state == .idle)
+
     var attempts = 0
     let retry = CaptureSession(store: store, start: { _ in
         attempts += 1

@@ -12,6 +12,9 @@ final class CaptureSession {
     var timer: Timer?
     var finishRecording: (() -> Void)?
     var resetShortcut: (() -> Void)?
+    /// Capture keeps running this long after release so the last word, still in the input
+    /// pipeline when the key comes up, is not cut off. 0 stops synchronously (checks).
+    var releaseTail: TimeInterval = 0
 
     init(store: RetryAudio, start: @escaping (URL) throws -> Void,
          stop: @escaping () -> Bool, process: @escaping (URL, @escaping () -> Void) -> Void) {
@@ -35,14 +38,18 @@ final class CaptureSession {
             guard state == .listening, let url = audio else { completed(); return }
             timer?.invalidate(); timer = nil
             state = .processing
-            guard stopCapture() else {
-                discard(); completed(); print("capture=failed-or-empty audio=deleted"); return
+            let stopAndProcess = { [self] in
+                guard stopCapture() else {
+                    discard(); completed(); print("capture=failed-or-empty audio=deleted"); return
+                }
+                print("capture=processing")
+                process(url) { [weak self] in
+                    self?.audio = nil; self?.state = .idle
+                    completed(); print("capture=idle")
+                }
             }
-            print("capture=processing")
-            process(url) { [weak self] in
-                self?.audio = nil; self?.state = .idle
-                completed(); print("capture=idle")
-            }
+            if releaseTail > 0 { DispatchQueue.main.asyncAfter(deadline: .now() + releaseTail, execute: stopAndProcess) }
+            else { stopAndProcess() }
         case .cancel:
             if state == .listening { _ = stopCapture(); discard(); print("capture=canceled audio=deleted") }
         }

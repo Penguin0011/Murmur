@@ -317,6 +317,8 @@ import Darwin
         next.onEscapeWhileProcessing = { [weak self] in self?.cancelCloudRequest() }
         listener = next; source = nextSource
         CFRunLoopAddSource(CFRunLoopGetMain(), nextSource, .commonModes); CGEvent.tapEnable(tap: tap, enable: true)
+        // ponytail: fixed tail; measured: long dictations lost the last word at 0 s, kept it at 0.6 s.
+        session.releaseTail = 0.4
         session.finishRecording = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
