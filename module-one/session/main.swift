@@ -25,6 +25,14 @@ func sessionCheck() throws {
     let failed = CaptureSession(store: store, start: { _ in throw CaptureError("synthetic") }, stop: { false }, process: { _, _ in assertionFailure() })
     failed.receive(.start) {}; assert(failed.audio == nil && failed.state == .idle)
     assert(starts == 5 && stops == 5)
+    var capped = ShortcutMachine()
+    assert(capped.press(at: 0) == .start && capped.finish() == .finish)
+    assert(capped.finish() == nil && capped.state == .processing)
+    capped.processingFinished(); assert(capped.state == .idle)
+    let empty = CaptureSession(store: store, start: { _ in }, stop: { false }, process: { _, _ in assertionFailure() })
+    empty.receive(.start) {}; let emptyURL = empty.audio!
+    empty.receive(.finish) {}; assert(!FileManager.default.fileExists(atPath: emptyURL.path) && empty.state == .idle)
+
     print("session-check=passed tap hold processing-guard cancellation event-loss shutdown startup-failure")
 }
 
