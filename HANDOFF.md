@@ -1,3 +1,11 @@
+# Bubble indicator and Murmur rename — October 2, 2026
+
+Branch `aakash/bubble-pill-indicator`, from `aakash-module-one` at `900ad61`. The app is now named **Murmur** in everything users see: window, menus, microphone prompt and `runtime/Murmur.app/Contents/MacOS/Murmur`. The bundle ID `cc.clouddev.dictation.development` and the Application Support/Caches `Dictation` folders are unchanged, so permissions, settings, history and the model cache carry over. The Listening and Processing bubbles show three white pills: a wave while listening, a sequential pulse while processing. They are static with Reduce Motion and use the primary color on the Reduce Transparency/Increase Contrast fallback. The pills are timed, not driven by audio level. [Certain]
+
+The app compiles, and the history checks pass. A standalone pill render matches the intended shapes. The live app run did not happen: the Mac's screen was locked (`CGSSessionScreenIsLocked=1`), so focus capture returned `com.apple.loginwindow` and every `--test-audio` probe refused before insertion. Nothing was inserted. Storage and pinned model sizes were verified by the same diagnostic. Pixel screenshots also need Screen Recording granted to the Claude app, because the development build cannot be granted to the computer-use tool. A copy is installed at `~/Applications/Murmur.app` for that purpose. [Certain]
+
+To resume, unlock the Mac and keep it unlocked, then run the scratch scenario script (probe → Inserted; probe with focus change → Saved; injected Control–Option–Space hold with synthetic speech → Listening/Processing; hold then Escape → cancel). Record the results here. [Certain]
+
 # Connected local path checkpoint — October 2, 2026
 
 Implemented shortcut → capture → local processor → durable text history. Release model runner build and pinned model checksum verification passed on the available M3. Synthetic injected-key microphone hold/cancel and synthetic speaker-to-microphone processing passed; all test audio was deleted. No insertion, physical-key first-word guarantee, or real speech quality claim is made. [Certain]
