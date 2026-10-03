@@ -86,8 +86,14 @@ let fireworksAudioUnauthorized = #"{"error":{"object":"error","type":"unauthoriz
         checkLocalErrorsAndRedaction()
         await checkLocalTransportBehaviour()
         await checkGeminiSTTTransport()
+        checkTranscribeRequest()
+        checkTranscribeParsing()
+        checkTranscribeErrors()
+        checkTranscribeDisclosureAndRedaction()
+        await checkTranscribePolling()
+        await checkTranscribeDeleteAndValidate()
         print(failures == 0
-              ? "Provider checks passed (\(passes) assertions: credentials, multipart/JSON shape, parsing, classification, redaction, disclosure, deadline, cancellation, no retry, Gemini STT, silence/answer heuristics, host classification, local server)."
+              ? "Provider checks passed (\(passes) assertions: credentials, multipart/JSON shape, parsing, classification, redaction, disclosure, deadline, cancellation, no retry, Gemini STT, silence/answer heuristics, host classification, local server, Gemini 3.5 Transcribe)."
               : "Provider checks FAILED: \(failures) of \(passes + failures) assertions.")
         exit(failures == 0 ? 0 : 1)
     }
@@ -749,5 +755,333 @@ extension ProviderChecks {
         stt.transport = blocked
         do { _ = try await stt.transcribe(AudioPayload(data: Data(repeating: 1, count: 64))); check(false, "blocked should throw") }
         catch { check(error as? ProviderError == .contentBlocked(.gemini) && blocked.requests.count == 1, "blocked: contentBlocked, no retry") }
+    }
+}
+
+// MARK: - Gemini 3.5 Transcribe (Interactions API)
+
+// Fixtures. `transcribeGuideResponse` is copied from the "Parsing transcription output" REST
+// example in https://ai.google.dev/gemini-api/docs/transcribe; `interactionsRefResponse` from the
+// CreateInteraction example in https://ai.google.dev/api/interactions-api; the error bodies from
+// https://ai.google.dev/gemini-api/docs/api-errors, except the array-wrapped ones, which were
+// observed on unauthenticated requests to POST /v1beta/interactions on 2026-10-03. Pending and
+// failed bodies are constructed from the documented `status` enum and `errors[]` fields.
+let transcribeGuideResponse = #"{"id": "interactions/abc123xyz", "status": "completed", "steps": [{"id": "step_001", "type": "model_output", "content": [{"type": "text", "text": "Hello world", "annotations": [{"type": "word_info", "text": "Hello", "speaker": "spk_1", "start_offset": "0.100s", "end_offset": "0.450s"}, {"type": "word_info", "text": "world", "speaker": "spk_1", "start_offset": "0.500s", "end_offset": "0.850s"}]}]}]}"#
+let interactionsRefResponse = #"{"created": "2025-11-26T12:25:15Z", "id": "v1_ChdPU0F4YWFtNkFwS2kxZThQZ05lbXdROBIXT1NBeGFhbTZBcEtpMWU4UGdOZW13UTg", "model": "gemini-3.6-flash", "object": "interaction", "status": "completed", "steps": [{"type": "model_output", "content": [{"type": "text", "text": "Hello! I'm functioning perfectly and ready to assist you.\n\nHow are you doing today?"}]}], "updated": "2025-11-26T12:25:15Z", "usage": {"input_tokens_by_modality": [{"modality": "text", "tokens": 7}], "total_cached_tokens": 0, "total_input_tokens": 7, "total_output_tokens": 20, "total_thought_tokens": 22, "total_tokens": 49, "total_tool_use_tokens": 0}}"#
+let interactionsInvalidRequest = #"{"error": {"code": "invalid_request", "message": "The value 'invalid_tool_type_xyz' is not supported for 'type' at 'tools[0]'."}}"#
+let interactionsAuthentication = #"{"error": {"code": "authentication", "message": "The API key is missing, invalid, or expired."}}"#
+let interactionsRateLimit = #"{"error": {"code": "rate_limit_exceeded", "message": "You have exceeded the per-minute request limit."}}"#
+let interactionsModelNotFound = #"{"error": {"code": "model_not_found", "message": "The specified model was not found."}}"#
+let interactionsUnavailable = #"{"error": {"code": "service_unavailable", "message": "The service is temporarily overloaded or down."}}"#
+let observedArrayUnregistered = "[" + geminiUnregistered + "\n]"
+let observedArrayBadKey = "[" + geminiBadKey + "\n]"
+private func pending(_ id: String = "v1_abc", _ status: String = "in_progress") -> String { #"{"id": ""# + id + #"", "object": "interaction", "status": ""# + status + #""}"# }
+private func completed(_ text: String, id: String = "v1_abc") -> String {
+    #"{"id": ""# + id + #"", "status": "completed", "steps": [{"type": "model_output", "content": [{"type": "text", "text": ""# + text + #""}]}]}"#
+}
+
+/// Virtual time: `sleep` advances the clock instantly. With `realSleep`, each sleep also waits
+/// that long in real time, so a test can cancel the polling Task mid-sleep.
+final class VirtualClock: PollingClock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var time: TimeInterval = 1_000
+    private var _sleeps: [TimeInterval] = []
+    let realSleep: TimeInterval
+    init(realSleep: TimeInterval = 0) { self.realSleep = realSleep }
+    var sleeps: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return _sleeps }
+    var elapsed: TimeInterval { lock.lock(); defer { lock.unlock() }; return time - 1_000 }
+    func now() -> TimeInterval { lock.lock(); defer { lock.unlock() }; return time }
+    private func advance(_ seconds: TimeInterval) { lock.lock(); _sleeps.append(seconds); time += seconds; lock.unlock() }
+    func sleep(seconds: TimeInterval) async throws {
+        if Task.isCancelled { throw CancellationError() }
+        advance(seconds)
+        if realSleep > 0 { try await Task.sleep(nanoseconds: UInt64(realSleep * 1_000_000_000)) }
+    }
+}
+
+/// Answers POSTs with `post` and GETs from `gets` in order (the last one repeats).
+final class SequenceTransport: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _requests: [URLRequest] = []
+    private var getIndex = 0
+    let post: Result<HTTPResult, Error>
+    let gets: [Result<HTTPResult, Error>]
+    init(post: Result<HTTPResult, Error>, gets: [Result<HTTPResult, Error>] = []) { self.post = post; self.gets = gets }
+    var requests: [URLRequest] { lock.lock(); defer { lock.unlock() }; return _requests }
+    var posts: Int { requests.filter { $0.httpMethod == "POST" }.count }
+    var getCount: Int { requests.filter { $0.httpMethod == "GET" }.count }
+    private func next(_ request: URLRequest) -> Result<HTTPResult, Error> {
+        lock.lock(); defer { lock.unlock() }
+        _requests.append(request)
+        if request.httpMethod == "POST" { return post }
+        defer { getIndex += 1 }
+        return gets.isEmpty ? .failure(URLError(.badServerResponse)) : gets[min(getIndex, gets.count - 1)]
+    }
+    func send(_ request: URLRequest) async throws -> HTTPResult { try next(request).get() }
+}
+
+final class IDBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _ids: [String] = []
+    var ids: [String] { lock.lock(); defer { lock.unlock() }; return _ids }
+    func add(_ id: String) { lock.lock(); _ids.append(id); lock.unlock() }
+}
+
+extension ProviderChecks {
+    static func transcribeBody(_ request: URLRequest?) -> [String: Any] { json(request?.httpBody) }
+    static func transcriptionConfig(_ body: [String: Any]) -> [String: Any] {
+        ((body["generation_config"] as? [String: Any])?["transcription_config"] as? [String: Any]) ?? [:]
+    }
+
+    static func checkTranscribeRequest() {
+        let audioBytes = Data([0x52, 0x49, 0x46, 0x46, 0xFF, 0xFE, 0x00, 0x3F])
+        let audio = AudioPayload(data: audioBytes, vocabularyHint: "Nightingale, Kubernetes\nNightingale\n  \u{0007}BigQuery ")
+        guard let request = try? GeminiTranscribeProvider.makeRequest(audio: audio, apiKey: key) else { check(false, "transcribe request builds"); return }
+        check(request.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/interactions", "transcribe: POST /v1beta/interactions")
+        check(request.httpMethod == "POST", "transcribe: POST")
+        check(request.value(forHTTPHeaderField: "x-goog-api-key") == fakeSecret, "transcribe: x-goog-api-key header")
+        check(request.value(forHTTPHeaderField: "Authorization") == nil, "transcribe: no bearer header")
+        check(!(request.url?.absoluteString ?? "").contains(fakeSecret), "transcribe: key never in URL")
+        check(request.value(forHTTPHeaderField: "Content-Type") == "application/json", "transcribe: JSON content type")
+        let body = transcribeBody(request)
+        check(body["model"] as? String == "gemini-3.5-transcribe", "transcribe: model id")
+        check(body["store"] as? Bool == true, "transcribe: store true by default (user decision)")
+        check(body["background"] == nil && body["stream"] == nil && body["system_instruction"] == nil, "transcribe: no background, stream or system instruction")
+        let input = body["input"] as? [[String: Any]] ?? []
+        check(input.count == 1, "transcribe: one input block")
+        check(input.first?["type"] as? String == "audio" && input.first?["mime_type"] as? String == "audio/wav", "transcribe: audio block with mime_type")
+        check(input.first?["data"] as? String == audioBytes.base64EncodedString() && input.first?["uri"] == nil, "transcribe: inline base64 data, no file uri")
+        let config = transcriptionConfig(body)
+        check((config["mode"] as? [String: Any])?["type"] as? String == "verbatim" && (config["mode"] as? [String: Any])?.count == 1, "transcribe: verbatim mode object by default")
+        check(config["language_codes"] as? [String] == ["en"], "transcribe: language hint en")
+        check(config["custom_vocabulary"] as? [String] == ["Nightingale", "Kubernetes", "BigQuery"], "transcribe: vocabulary split, cleaned, deduplicated")
+        check(config["timestamp_granularities"] == nil && config["diarization_mode"] == nil, "transcribe: no timestamps or diarization (incompatible with vocabulary)")
+        check(config.count == 3, "transcribe: only mode, language and vocabulary fields")
+
+        let smart = try? GeminiTranscribeProvider.makeRequest(audio: audio, apiKey: key, mode: .smart, store: false)
+        check(transcriptionConfig(transcribeBody(smart))["mode"] as? String == "smart", "transcribe: smart mode is the string \"smart\"")
+        check(transcribeBody(smart)["store"] as? Bool == false, "transcribe: store false when turned off")
+
+        let plain = try? GeminiTranscribeProvider.makeRequest(audio: AudioPayload(data: audioBytes, language: nil), apiKey: key)
+        let plainConfig = transcriptionConfig(transcribeBody(plain))
+        check(plainConfig["language_codes"] == nil && plainConfig["custom_vocabulary"] == nil, "transcribe: no language or vocabulary fields when absent")
+        let override = try? GeminiTranscribeProvider.makeRequest(audio: audio, apiKey: key, languageCodes: ["en-US"])
+        check(transcriptionConfig(transcribeBody(override))["language_codes"] as? [String] == ["en-US"], "transcribe: language override")
+        let auto = try? GeminiTranscribeProvider.makeRequest(audio: audio, apiKey: key, languageCodes: [])
+        check(transcriptionConfig(transcribeBody(auto))["language_codes"] == nil, "transcribe: empty override means auto-detect")
+        check(GeminiTranscribeProvider.languageCodes(for: AudioPayload(data: audioBytes, language: "en US\"")) == nil, "transcribe: malformed language dropped")
+        check(GeminiTranscribeProvider.vocabularyTerms(from: (0..<1_500).map { "term\($0)" }.joined(separator: "\n")).count == 1_000, "transcribe: vocabulary capped at 1,000 terms")
+        check(GeminiTranscribeProvider.vocabularyTerms(from: " ,\n, ").isEmpty && GeminiTranscribeProvider.vocabularyTerms(from: nil).isEmpty, "transcribe: empty hint sends nothing")
+        let noVocab = try? GeminiTranscribeProvider.makeRequest(audio: AudioPayload(data: audioBytes, vocabularyHint: " , "), apiKey: key)
+        check(transcriptionConfig(transcribeBody(noVocab))["custom_vocabulary"] == nil, "transcribe: blank hint omits custom_vocabulary")
+        let mime = try? GeminiTranscribeProvider.makeRequest(audio: AudioPayload(data: audioBytes, mimeType: "AUDIO/FLAC"), apiKey: key)
+        check((transcribeBody(mime)["input"] as? [[String: Any]])?.first?["mime_type"] as? String == "audio/flac", "transcribe: MIME lowercased")
+        expectError(.invalidConfiguration(.gemini), "transcribe: unsupported MIME") { try GeminiTranscribeProvider.makeRequest(audio: AudioPayload(data: audioBytes, mimeType: "video/mp4"), apiKey: key) }
+        expectError(.invalidConfiguration(.gemini), "transcribe: bad model id") { try GeminiTranscribeProvider.makeRequest(audio: audio, apiKey: key, model: "../x") }
+        let custom = try? GeminiTranscribeProvider.makeRequest(audio: audio, apiKey: key, baseURL: URL(string: "https://example.test/v1beta/")!)
+        check(custom?.url?.absoluteString == "https://example.test/v1beta/interactions", "transcribe: trailing slash on base URL")
+
+        let get = try? GeminiTranscribeProvider.makeGetRequest(interactionID: "interactions/abc123xyz", apiKey: key)
+        check(get?.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/interactions/abc123xyz" && get?.httpMethod == "GET" && get?.httpBody == nil, "transcribe: GET strips interactions/ prefix")
+        check(GeminiTranscribeProvider.interactionURL(baseURL: GeminiTranscribeProvider.defaultBaseURL, interactionID: "v1_ChdPU0F4-x.y") != nil, "transcribe: v1_ id accepted")
+        for bad in ["", "..", "a/b", "../models", "a?b", "a%2Fb", "a b", String(repeating: "a", count: 513)] {
+            check(GeminiTranscribeProvider.interactionURL(baseURL: GeminiTranscribeProvider.defaultBaseURL, interactionID: bad) == nil, "transcribe: id \(bad.prefix(12)) refused")
+        }
+    }
+
+    static func checkTranscribeParsing() {
+        func p(_ body: String, _ status: Int = 200) throws -> GeminiTranscribeProvider.Outcome { try GeminiTranscribeProvider.parse(result(status, body)) }
+        check((try? p(transcribeGuideResponse)) == .completed(text: "Hello world", interactionID: "interactions/abc123xyz"), "parse: transcribe guide fixture")
+        check((try? p(interactionsRefResponse)) == .completed(text: "Hello! I'm functioning perfectly and ready to assist you.\n\nHow are you doing today?", interactionID: "v1_ChdPU0F4YWFtNkFwS2kxZThQZ05lbXdROBIXT1NBeGFhbTZBcEtpMWU4UGdOZW13UTg"), "parse: reference fixture")
+        check((try? p(#"{"id": "v1_s", "status": "completed", "steps": []}"#)) == .completed(text: "", interactionID: "v1_s"), "parse: completed with no text is silence")
+        check((try? p(#"{"status": "completed", "steps": [{"type": "thought", "content": [{"type": "text", "text": "x"}]}, {"type": "model_output", "content": [{"type": "text", "text": "Meet "}, {"type": "text", "text": "Thursday."}]}]}"#)) == .completed(text: "Meet Thursday.", interactionID: nil), "parse: joins text runs, ignores thought steps")
+        check((try? p(#"{"status": "completed", "steps": [{"type": "model_output", "content": [{"type": "text", "text": "old"}, {"type": "audio", "data": "AA=="}, {"type": "text", "text": "new"}]}]}"#)) == .completed(text: "new", interactionID: nil), "parse: last text run, like output_text")
+        check((try? p(pending())) == .pending(interactionID: "v1_abc"), "parse: in_progress is pending")
+        check((try? p(pending("v1_q", "queued"))) == .pending(interactionID: "v1_q"), "parse: queued is pending")
+        expectError(.malformedResponse(.gemini), "parse: pending without id") { try p(#"{"status": "in_progress"}"#) }
+        expectError(.malformedResponse(.gemini), "parse: pending with path-like id") { try p(pending("../models")) }
+        expectError(.malformedResponse(.gemini), "parse: completed without steps (legacy outputs)") { try p(#"{"status": "completed", "outputs": [{"type": "text", "text": "hi"}]}"#) }
+        expectError(.malformedResponse(.gemini), "parse: no status") { try p(#"{"id": "v1_a"}"#) }
+        expectError(.malformedResponse(.gemini), "parse: not JSON") { try p("<html>") }
+        expectError(.malformedResponse(.gemini), "parse: incomplete") { try p(#"{"status": "incomplete", "steps": [{"type": "model_output", "content": [{"type": "text", "text": "Please"}]}]}"#) }
+        expectError(.malformedResponse(.gemini), "parse: requires_action") { try p(#"{"status": "requires_action", "steps": []}"#) }
+        expectError(.contentBlocked(.gemini), "parse: failed with safety code") { try p(#"{"status": "failed", "errors": [{"code": "safety", "message": "blocked"}]}"#) }
+        expectError(.contentBlocked(.gemini), "parse: failed with URI blocked code") { try p(#"{"status": "failed", "errors": [{"code": "https://ai.google.dev/errors/prohibited_content"}]}"#) }
+        expectError(.server(.gemini, status: nil), "parse: failed otherwise") { try p(#"{"status": "failed", "errors": [{"code": "api_error"}]}"#) }
+        expectError(.server(.gemini, status: nil), "parse: cancelled by server") { try p(#"{"status": "cancelled"}"#) }
+        expectError(.rejected(.gemini, status: 400), "parse: 200 carrying an error object") { try p(#"{"error": {"code": 400, "message": "bad", "status": "INVALID_ARGUMENT"}}"#) }
+    }
+
+    static func checkTranscribeErrors() {
+        func c(_ status: Int, _ body: String, _ headers: [String: String] = [:]) -> ProviderError {
+            do { _ = try GeminiTranscribeProvider.parse(result(status, body, headers)); return .cancelled } catch { return error as? ProviderError ?? .cancelled }
+        }
+        check(c(401, interactionsAuthentication) == .authentication(.gemini), "transcribe error: 401 authentication")
+        check(c(403, observedArrayUnregistered) == .authentication(.gemini), "transcribe error: observed array-wrapped 403")
+        check(c(400, observedArrayBadKey) == .authentication(.gemini), "transcribe error: observed array-wrapped API_KEY_INVALID")
+        check(c(400, geminiBadKey) == .authentication(.gemini), "transcribe error: object API_KEY_INVALID")
+        check(c(402, geminiPrepay) == .quota(.gemini), "transcribe error: 402 payment_required")
+        check(c(429, geminiInteractionsQuota) == .quota(.gemini), "transcribe error: 429 quota_exceeded")
+        check(c(429, interactionsRateLimit, ["Retry-After": "7"]) == .rateLimited(.gemini, retryAfter: 7), "transcribe error: 429 rate_limit_exceeded with Retry-After")
+        check(c(404, interactionsModelNotFound) == .rejected(.gemini, status: 404), "transcribe error: model_not_found")
+        check(c(400, interactionsInvalidRequest) == .rejected(.gemini, status: 400), "transcribe error: invalid_request")
+        check(c(413, "") == .payloadTooLarge(.gemini, limitBytes: nil), "transcribe error: 413")
+        check(c(503, interactionsUnavailable) == .server(.gemini, status: 503), "transcribe error: 503")
+        check(c(504, #"{"error": {"code": "deadline_exceeded", "message": "late"}}"#) == .timeout(.gemini), "transcribe error: 504 deadline_exceeded")
+        check(ErrorBody(Data("[1, 2]".utf8)).message == nil && ErrorBody(Data(observedArrayBadKey.utf8)).reasons.contains("API_KEY_INVALID"), "ErrorBody unwraps only one-object arrays")
+    }
+
+    static func checkTranscribeDisclosureAndRedaction() {
+        var provider = GeminiTranscribeProvider(apiKey: key)
+        let d = provider.disclosure
+        check(d.provider == .gemini && d.stage == .transcription && d.destinationHost == "generativelanguage.googleapis.com", "transcribe disclosure: Google host")
+        check(d.leavesDevice.contains { $0.contains("audio") && $0.contains("stored by Google") }, "transcribe disclosure: audio sent to and stored by Google")
+        check(d.leavesDevice.contains { $0.contains("relevant dictionary terms") && $0.contains("stored by Google") }, "transcribe disclosure: relevant terms sent to and stored by Google")
+        check(d.retentionNote.contains("55 days") && d.retentionNote.contains("1 day"), "transcribe disclosure: retention periods")
+        check(d.retentionNote.contains("can be deleted earlier"), "transcribe disclosure: deletion")
+        check(d.retentionNote.contains("human reviewers"), "transcribe disclosure: free-tier human review")
+        check(!d.staysOnThisMac && d.summary.contains("generativelanguage.googleapis.com") && d.summary.contains("stored by Google"), "transcribe disclosure: summary")
+        check(d.staysOnDevice.contains("the rest of the dictionary") && d.staysOnDevice.contains("history"), "transcribe disclosure: what stays")
+        provider.store = false
+        check(provider.disclosure.retentionNote.contains("does not keep") && !provider.disclosure.leavesDevice.joined().contains("stored by Google"), "transcribe disclosure: store off")
+
+        check(!"\(provider)".contains(fakeSecret) && !String(reflecting: provider).contains(fakeSecret), "transcribe: provider description redacts key")
+        var dumped = ""; dump(provider, to: &dumped)
+        check(!dumped.contains(fakeSecret), "transcribe: dump redacts key")
+        let errors: [ProviderError] = [.authentication(.gemini), .quota(.gemini), .rateLimited(.gemini, retryAfter: 3), .contentBlocked(.gemini), .malformedResponse(.gemini), .timeout(.gemini), .server(.gemini, status: 503), .rejected(.gemini, status: 400)]
+        check(errors.allSatisfy { !$0.userMessage.contains(fakeSecret) && !$0.userMessage.contains(transcriptSecret) && !$0.userMessage.contains("Nightingale") }, "transcribe: messages carry no key, transcript or terms")
+        let leaky = result(400, #"{"error": {"code": "invalid_request", "message": "Synthetic private dictation about Project Nightingale sk-or-v1-FAKEKEY0123456789abcdefFAKE"}}"#)
+        let leakyError = (try? GeminiTranscribeProvider.parse(leaky)) == nil ? ProviderErrorClassifier.classify(provider: .gemini, result: leaky) : .cancelled
+        check(!leakyError.userMessage.contains("Nightingale") && !leakyError.userMessage.contains(fakeSecret), "transcribe: response body never echoed")
+    }
+
+    static func checkTranscribePolling() async {
+        let audio = AudioPayload(data: Data(repeating: 7, count: 32), vocabularyHint: "Nightingale")
+
+        // Synchronous answer: one POST, no polling.
+        var provider = GeminiTranscribeProvider(apiKey: key)
+        let sync = SequenceTransport(post: .success(result(200, transcribeGuideResponse)))
+        let syncClock = VirtualClock()
+        provider.transport = sync; provider.clock = syncClock
+        let syncResult = try? await provider.transcribeDetailed(audio)
+        check(syncResult == GeminiTranscribeResult(text: "Hello world", interactionID: "interactions/abc123xyz", stored: true), "poll: synchronous result with id")
+        check(sync.posts == 1 && sync.getCount == 0 && syncClock.sleeps.isEmpty, "poll: synchronous needs no GET")
+        check(sync.requests.first?.timeoutInterval == 60, "poll: 60 s per-request timeout")
+        let plainText = try? await provider.transcribe(audio)
+        check(plainText == "Hello world", "poll: transcribe returns the text")
+
+        // in_progress, then in_progress, then completed.
+        let slow = SequenceTransport(post: .success(result(200, pending())), gets: [.success(result(200, pending())), .success(result(200, completed("Send it to Dana.")))])
+        let slowClock = VirtualClock()
+        provider.transport = slow; provider.clock = slowClock
+        let box = IDBox()
+        let slowResult = try? await provider.transcribeDetailed(audio, onInteractionCreated: { box.add($0) })
+        check(slowResult == GeminiTranscribeResult(text: "Send it to Dana.", interactionID: "v1_abc", stored: true), "poll: completes after polling")
+        check(slow.posts == 1 && slow.getCount == 2, "poll: one POST, two GETs")
+        check(slow.requests.dropFirst().allSatisfy { $0.url?.path == "/v1beta/interactions/v1_abc" && $0.httpBody == nil && $0.value(forHTTPHeaderField: "x-goog-api-key") == fakeSecret }, "poll: GETs the same interaction, no audio re-sent")
+        check(slowClock.sleeps == [1, 1.5], "poll: backoff 1 s then 1.5 s")
+        check(box.ids == ["v1_abc"], "poll: id reported once")
+
+        // Never completes: overall deadline.
+        let stuck = SequenceTransport(post: .success(result(200, pending())), gets: [.success(result(200, pending()))])
+        let stuckClock = VirtualClock()
+        provider.transport = stuck; provider.clock = stuckClock; provider.overallDeadline = 10
+        do { _ = try await provider.transcribeDetailed(audio); check(false, "stuck should time out") }
+        catch { check(error as? ProviderError == .timeout(.gemini), "poll: deadline gives timeout") }
+        check(stuck.posts == 1 && stuck.getCount >= 3 && stuck.getCount <= 6, "poll: bounded GETs within the deadline (\(stuck.getCount))")
+        check(stuckClock.elapsed <= 10.0001 && stuckClock.sleeps.allSatisfy { $0 <= 4 }, "poll: never sleeps past the deadline or the max interval")
+
+        // maxPolls bounds it independently of the deadline.
+        let capped = SequenceTransport(post: .success(result(200, pending())), gets: [.success(result(200, pending()))])
+        provider.transport = capped; provider.clock = VirtualClock(); provider.overallDeadline = 10_000; provider.maxPolls = 3
+        do { _ = try await provider.transcribeDetailed(audio); check(false, "capped should time out") }
+        catch { check(error as? ProviderError == .timeout(.gemini) && capped.getCount == 3 && capped.posts == 1, "poll: maxPolls caps GETs") }
+        provider.maxPolls = 60; provider.overallDeadline = 90
+
+        // Transient GET failures are retried with GET only.
+        let flaky = SequenceTransport(post: .success(result(200, pending())), gets: [.success(result(503, interactionsUnavailable)), .failure(URLError(.networkConnectionLost)), .success(result(429, interactionsRateLimit, ["Retry-After": "2"])), .success(result(200, completed("ok")))])
+        let flakyClock = VirtualClock()
+        provider.transport = flaky; provider.clock = flakyClock
+        let flakyResult = try? await provider.transcribeDetailed(audio)
+        check(flakyResult?.text == "ok" && flaky.posts == 1 && flaky.getCount == 4, "poll: transient 503, network and 429 retried by GET, one POST")
+        check(flakyClock.sleeps == [1, 2, 4, 4], "poll: backoff on transient failures, honours Retry-After (\(flakyClock.sleeps))")
+
+        // A permanent error while polling stops at once.
+        let denied = SequenceTransport(post: .success(result(200, pending())), gets: [.success(result(401, interactionsAuthentication))])
+        provider.transport = denied; provider.clock = VirtualClock()
+        do { _ = try await provider.transcribeDetailed(audio); check(false, "401 poll should throw") }
+        catch { check(error as? ProviderError == .authentication(.gemini) && denied.getCount == 1 && denied.posts == 1, "poll: 401 stops polling") }
+        let blocked = SequenceTransport(post: .success(result(200, pending())), gets: [.success(result(200, #"{"id": "v1_abc", "status": "failed", "errors": [{"code": "spii"}]}"#))])
+        provider.transport = blocked; provider.clock = VirtualClock()
+        do { _ = try await provider.transcribeDetailed(audio); check(false, "blocked poll should throw") }
+        catch { check(error as? ProviderError == .contentBlocked(.gemini), "poll: failed spii is contentBlocked") }
+
+        // store=false: a pending answer cannot be fetched, so no GET.
+        let unstored = SequenceTransport(post: .success(result(200, pending())))
+        provider.transport = unstored; provider.clock = VirtualClock(); provider.store = false
+        do { _ = try await provider.transcribeDetailed(audio); check(false, "unstored pending should throw") }
+        catch { check(error as? ProviderError == .malformedResponse(.gemini) && unstored.getCount == 0, "poll: store off never polls") }
+        check(transcribeBody(unstored.requests.first)["store"] as? Bool == false, "poll: store property reaches the request")
+        provider.store = true
+
+        // Cancellation mid-poll.
+        let forever = SequenceTransport(post: .success(result(200, pending())), gets: [.success(result(200, pending()))])
+        provider.transport = forever; provider.clock = VirtualClock(realSleep: 0.05); provider.overallDeadline = 10_000; provider.maxPolls = 10_000
+        let running = provider
+        let task = Task { try await running.transcribeDetailed(audio) }
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        task.cancel()
+        do { _ = try await task.value; check(false, "cancelled poll should throw") }
+        catch { check(error as? ProviderError == .cancelled, "poll: cancellation gives .cancelled (got \(error))") }
+        let getsAtCancel = forever.getCount
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        check(forever.posts == 1 && forever.getCount == getsAtCancel && getsAtCancel <= 4, "poll: nothing sent after cancellation")
+
+        // Cancelled before start: nothing sent.
+        let idle = SequenceTransport(post: .success(result(200, transcribeGuideResponse)))
+        provider.transport = idle; provider.clock = VirtualClock()
+        let early = provider
+        let earlyTask = Task { () -> GeminiTranscribeResult in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await early.transcribeDetailed(audio)
+        }
+        do { _ = try await earlyTask.value; check(false, "pre-cancelled should throw") }
+        catch { check(error as? ProviderError == .cancelled && idle.requests.isEmpty, "poll: pre-cancelled sends nothing") }
+
+        // Oversize audio rejected before upload.
+        let unused = SequenceTransport(post: .success(result(200, transcribeGuideResponse)))
+        provider.transport = unused
+        do { _ = try await provider.transcribeDetailed(AudioPayload(data: Data(count: GeminiTranscribeProvider.maxInlineAudioBytes + 1))); check(false, "oversize should throw") }
+        catch { check(error as? ProviderError == .payloadTooLarge(.gemini, limitBytes: GeminiTranscribeProvider.maxInlineAudioBytes) && unused.requests.isEmpty, "transcribe: oversize rejected before upload") }
+        check(GeminiTranscribeProvider.maxInlineAudioBytes > 3_840_000 * 3, "transcribe: inline limit fits several minutes of 16 kHz WAV")
+    }
+
+    static func checkTranscribeDeleteAndValidate() async {
+        var provider = GeminiTranscribeProvider(apiKey: key)
+        let ok = MockTransport(.success(result(200, "")))
+        provider.transport = ok
+        do { try await provider.deleteStored(interactionID: "interactions/abc123xyz") } catch { check(false, "delete should succeed") }
+        let del = ok.requests.first
+        check(del?.httpMethod == "DELETE" && del?.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/interactions/abc123xyz", "delete: DELETE /v1beta/interactions/{id}")
+        check(del?.value(forHTTPHeaderField: "x-goog-api-key") == fakeSecret && del?.httpBody == nil && ok.requests.count == 1, "delete: key header, no body, one request")
+        provider.transport = MockTransport(.success(result(404, #"{"error": {"code": "not_found", "message": "Interaction not found."}}"#)))
+        do { try await provider.deleteStored(interactionID: "v1_gone") } catch { check(false, "delete 404 should count as deleted") }
+        provider.transport = MockTransport(.success(result(403, #"{"error": {"code": 403, "message": "Method doesn't allow unregistered callers", "status": "PERMISSION_DENIED"}}"#)))
+        do { try await provider.deleteStored(interactionID: "v1_x"); check(false, "delete 403 should throw") }
+        catch { check(error as? ProviderError == .authentication(.gemini), "delete: 403 authentication") }
+        let never = MockTransport(.success(result(200, "")))
+        provider.transport = never
+        do { try await provider.deleteStored(interactionID: "../models/x"); check(false, "bad id should throw") }
+        catch { check(error as? ProviderError == .invalidConfiguration(.gemini) && never.requests.isEmpty, "delete: bad id refused locally") }
+
+        let validation = MockTransport(.success(result(200, #"{"models": []}"#)))
+        provider.transport = validation
+        do { try await provider.validate() } catch { check(false, "validate should succeed") }
+        let v = validation.requests.first
+        check(v?.httpMethod == "GET" && v?.url?.absoluteString == "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1" && v?.value(forHTTPHeaderField: "x-goog-api-key") == fakeSecret && v?.httpBody == nil, "validate: models.list pageSize=1")
+        provider.transport = MockTransport(.success(result(400, observedArrayBadKey)))
+        do { try await provider.validate(); check(false, "bad key validate should throw") }
+        catch { check(error as? ProviderError == .authentication(.gemini), "validate: observed bad key is authentication") }
+        check(GeminiTranscribeProvider(apiKey: key).id == .gemini, "transcribe: reports as Gemini")
     }
 }
