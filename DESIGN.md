@@ -75,4 +75,4 @@ Implementation values are extracted from app/UI.swift and app/main.swift. Integr
 
 ## Compact floating indicators
 
-Recording and processing always use a 96-point glass panel containing five voice-reactive circles. Processing becomes static with Reduce Motion. The phase remains an accessibility label; the shortcut controls finish/cancel. Saved output and successful insertion hide the panel. Error messages use a 320-point maximum panel, a short summary, Dismiss, Details, and conditional Audio. Settings retain full error details; History retains delivery results and copy controls. [Certain]
+Recording and processing always use a 96-point glass panel containing five voice-reactive circles. Processing becomes static with Reduce Motion. The phase remains an accessibility label; the shortcut controls finish/cancel. Saved output and successful insertion hide the panel. Error messages use a 320-point maximum panel, a clickable short summary, Dismiss, and conditional Audio. Settings retain full error details; History retains delivery results and copy controls. [Certain]

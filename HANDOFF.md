@@ -1,3 +1,9 @@
+# Clickable errors — October 2, 2026
+
+Removed Details from the compact error panel. Clicking its surface opens the app and selects Dictation to show the full error; Dismiss and Audio remain independent controls. The popup is exposed as an accessible button with an error label and open-app hint. [Certain]
+
+---
+
 # Compact indicators — October 2, 2026
 
 User superseded the optional minimal display: compact voice indicators are now the default (96 points), with no Saved or Inserted popup. Only errors show short messages and Details/conditional Audio actions. Full status remains in settings and History. The prior minimal-display preference is ignored; leading-space settings remain available. [Certain]

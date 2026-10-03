@@ -3,6 +3,7 @@ import SwiftUI
 
 private extension Notification.Name {
     static let dictationShowHistory = Notification.Name("DictationShowHistory")
+    static let dictationShowError = Notification.Name("DictationShowError")
 }
 
 // Only the isolated visual fixture supplies this override; production uses system preferences.
@@ -80,6 +81,7 @@ struct SettingsView: View {
         .onChange(of: searchText) { _, _ in
             if !filteredHistory.contains(where: { $0.id == selectedID }) { selectedID = filteredHistory.first?.id }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .dictationShowError)) { _ in selectedTab = 0 }
         .onReceive(NotificationCenter.default.publisher(for: .dictationShowHistory)) { _ in
             searchText = ""
             selectedTab = 1
@@ -355,20 +357,30 @@ private struct BubbleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityHidden(true)
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange).accessibilityHidden(true).allowsHitTesting(false)
                 Text(summary).font(.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
-                    .help(message)
+                    .help(message).allowsHitTesting(false).accessibilityHidden(true)
                 Spacer(minLength: 4)
                 Button(action: controller.dismissStatus) { Image(systemName: "xmark") }
                     .buttonStyle(.plain).help("Dismiss error").accessibilityLabel("Dismiss error")
             }
-            HStack(spacing: 8) {
-                Button("Details…", action: controller.showSettings)
-                if controller.hasRecoveryAudio { Button("Audio…", action: controller.revealRecoveryAudio) }
+            if controller.hasRecoveryAudio {
+                Button("Audio…", action: controller.revealRecoveryAudio)
+                    .buttonStyle(.bordered).controlSize(.small)
             }
-            .buttonStyle(.bordered).controlSize(.small)
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            Button {
+                controller.showSettings()
+                DispatchQueue.main.async { NotificationCenter.default.post(name: .dictationShowError, object: nil) }
+            } label: {
+                Color.clear.contentShape(RoundedRectangle(cornerRadius: 18))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(summary)
+            .accessibilityHint("Open Dictation to view the full error.")
+        }
         .accessibilityElement(children: .contain)
         .modifier(UtilityGlass(radius: 18))
     }
