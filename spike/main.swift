@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 
 let arguments = Array(CommandLine.arguments.dropFirst())
+setbuf(stdout, nil)
 
 func validateArguments() throws {
     let modes = ["--check", "--inspect", "--listen", "--insert-test"]

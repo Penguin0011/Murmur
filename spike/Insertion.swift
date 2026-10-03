@@ -11,7 +11,7 @@ struct FocusSnapshot {
     let selection: CFRange?
     let secure: Bool
     let browserTypeUnknown: Bool
-    var learningEligible: Bool { !secure && !browserTypeUnknown && value != nil && selection != nil }
+    var learningEligible: Bool { insertionTextRole(role) && !secure && !browserTypeUnknown && value != nil && selection != nil }
 }
 
 struct InsertionResult {
@@ -41,6 +41,7 @@ func captureFocus() throws -> FocusSnapshot {
     guard let frontmost = NSWorkspace.shared.frontmostApplication else {
         throw InsertionError.unavailable("No frontmost application")
     }
+    let application = AXUIElementCreateApplication(frontmost.processIdentifier)
     func focusedElement(_ owner: AXUIElement) -> (AXUIElement?, AXError) {
         var raw: CFTypeRef?
         let error = AXUIElementCopyAttributeValue(owner, kAXFocusedUIElementAttribute as CFString, &raw)
@@ -48,7 +49,7 @@ func captureFocus() throws -> FocusSnapshot {
         return (unsafeBitCast(raw, to: AXUIElement.self), error)
     }
     let systemFocus = focusedElement(AXUIElementCreateSystemWide())
-    let appFocus = systemFocus.0 == nil ? focusedElement(AXUIElementCreateApplication(frontmost.processIdentifier)) : (nil, AXError.success)
+    let appFocus = systemFocus.0 == nil ? focusedElement(application) : (nil, AXError.success)
     guard let element = systemFocus.0 ?? appFocus.0 else {
         throw InsertionError.unavailable("No accessible focused field; frontmost=\(frontmost.bundleIdentifier ?? "unknown") systemAX=\(systemFocus.1.rawValue) appAX=\(appFocus.1.rawValue)")
     }
@@ -96,6 +97,7 @@ func expectedInsertedValue(_ value: String?, selection: CFRange?, text: String) 
 
 private func sameDestination(_ original: FocusSnapshot, _ current: FocusSnapshot) -> Bool {
     original.pid == current.pid && CFEqual(original.element, current.element) && !current.secure
+        && original.role == current.role && insertionTextRole(current.role)
         && original.value == current.value
         && original.selection?.location == current.selection?.location
         && original.selection?.length == current.selection?.length
@@ -107,6 +109,7 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
     }
     guard !text.isEmpty else { return result(.failed, "Empty output; no insertion attempted") }
     guard !destination.secure else { return result(.failed, "Secure field rejected") }
+    guard insertionTextRole(destination.role) else { return result(.failed, "Focused element is not a supported text field") }
     guard let current = try? captureFocus(), sameDestination(destination, current) else {
         return result(.failed, "Focus, value, or selection changed; retain output for recovery")
     }
@@ -142,11 +145,27 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
         return result(.failed, "Cannot create paste events")
     }
     let stagedItem = NSPasteboardItem()
-    guard stagedItem.setString(text, forType: .string) else { return result(.failed, "Cannot prepare clipboard text") }
+    let ownershipType = NSPasteboard.PasteboardType("org.dictation.spike.clipboard-owner")
+    let ownershipToken = UUID().uuidString
+    guard stagedItem.setString(text, forType: .string),
+          stagedItem.setString(ownershipToken, forType: ownershipType) else {
+        return result(.failed, "Cannot prepare clipboard text")
+    }
+    func ownsClipboard(_ expectedCount: Int) -> Bool {
+        let before = clipboard.changeCount
+        let token = clipboard.string(forType: ownershipType)
+        return clipboardOwnershipVerified(expectedCount: expectedCount, beforeCount: before,
+                                          afterCount: clipboard.changeCount, expectedToken: ownershipToken, actualToken: token)
+    }
+    guard clipboard.changeCount == oldCount else { return result(.failed, "Clipboard changed before staging; no paste attempted") }
     let clearedCount = clipboard.clearContents()
+    guard clipboard.changeCount == clearedCount else { return result(.failed, "Clipboard changed after clearing; no paste attempted") }
     guard clipboard.writeObjects([stagedItem]) else {
-        // We still own this change count; restore without posting events.
-        if clipboard.changeCount == clearedCount {
+        // Restore only our unchanged empty clear or a partial write carrying our unique token.
+        let failureCount = clipboard.changeCount
+        let stillEmpty = failureCount == clearedCount && (clipboard.pasteboardItems ?? []).isEmpty
+            && clipboard.changeCount == clearedCount
+        if stillEmpty || ownsClipboard(failureCount) {
             clipboard.clearContents()
             if !saved.isEmpty { clipboard.writeObjects(saved) }
         }
@@ -155,13 +174,16 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
     // NSPasteboard has no atomic compare-and-restore; another writer can race this bounded check.
     let stagedCount = clipboard.changeCount
     defer {
-        if clipboard.changeCount == stagedCount {
+        if ownsClipboard(stagedCount) {
             clipboard.clearContents()
             if !saved.isEmpty { clipboard.writeObjects(saved) }
         }
     }
     guard let finalFocus = try? captureFocus(), sameDestination(current, finalFocus) else {
         return result(.failed, "Destination changed after clipboard staging; no paste attempted")
+    }
+    guard ownsClipboard(stagedCount) else {
+        return result(.failed, "Clipboard ownership changed; no paste attempted")
     }
     down.flags = .maskCommand; up.flags = .maskCommand
     down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
@@ -184,7 +206,25 @@ func insertionReadbackVerified(expected: String?, actual: String?, sameField: Bo
     sameField && !browserTypeUnknown && expected != nil && actual == expected
 }
 
+func clipboardOwnershipVerified(expectedCount: Int, beforeCount: Int, afterCount: Int, expectedToken: String, actualToken: String?) -> Bool {
+    beforeCount == expectedCount && afterCount == expectedCount && actualToken == expectedToken
+}
+
+func insertionTextRole(_ role: String) -> Bool {
+    role == kAXTextFieldRole || role == kAXTextAreaRole
+}
+
 func runInsertionChecks() {
+    assert(insertionTextRole(kAXTextFieldRole))
+    assert(insertionTextRole(kAXTextAreaRole))
+    assert(!insertionTextRole("AXWebArea"))
+    assert(!insertionTextRole("AXDocument"))
+    assert(!insertionTextRole("AXComboBox"))
+    assert(clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 4, expectedToken: "ours", actualToken: "ours"))
+    assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 4, expectedToken: "ours", actualToken: "other"))
+    assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 4, expectedToken: "ours", actualToken: nil))
+    assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 5, afterCount: 5, expectedToken: "ours", actualToken: "ours"))
+    assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 5, expectedToken: "ours", actualToken: "ours"))
     assert(insertionReadbackVerified(expected: "text", actual: "text", sameField: true, browserTypeUnknown: false))
     assert(!insertionReadbackVerified(expected: "text", actual: "text", sameField: true, browserTypeUnknown: true))
     assert(!insertionReadbackVerified(expected: "text", actual: "text", sameField: false, browserTypeUnknown: false))

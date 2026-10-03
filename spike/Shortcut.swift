@@ -105,9 +105,13 @@ private final class ShortcutListener {
         guard key == binding.keyCode else { return }
         let time = Double(event.timestamp) / 1_000_000_000
         if type == .keyUp || (type == .flagsChanged && !binding.isDown(event)) {
-            emit(machine.release(at: time))
+            let action = machine.release(at: time)
+            if action == .finish { print("shortcut gesture=hold-release") }
+            emit(action)
         } else if (type == .keyDown || type == .flagsChanged) && binding.isDown(event) {
-            emit(machine.press(at: time, isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0))
+            let action = machine.press(at: time, isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0)
+            if action == .finish { print("shortcut gesture=tap-stop") }
+            emit(action)
         }
     }
 }
