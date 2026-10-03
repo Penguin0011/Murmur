@@ -113,6 +113,23 @@ runtime/Murmur.app/Contents/MacOS/Murmur --test-audio /absolute/synthetic.wav --
 
 This explicitly performs transcription and one insertion attempt. It preserves the supplied audio, using a private retry copy, and writes durable history. It cannot be combined with preview or timed quit; malformed flags exit before storage/UI initialization. [Certain]
 
+## Model download (not yet wired in)
+
+`ModelDownload.swift` is Foundation-only and not in `build.sh` yet; the integration lead wires it into Controller/UI. [Certain]
+
+```sh
+swiftc -swift-version 5 app/ModelDownload.swift app/check_model_download.swift -o /tmp/cm && /tmp/cm   # run from the repository root
+```
+
+- `ModelManifest(contentsOf:)` reads `artifact-pins.json`. It keeps only the pinned `batch_files` for `FluidInference/parakeet-unified-en-0.6b-coreml` and requires a 40-hex revision. It rejects unsafe `rfilename`s (absolute, `..`, `.`, empty segments, backslashes, control characters). `totalBytes` is the download size to show first: 1,801,783,964 bytes (~1.80 GB) for the current pins.
+- `ModelDownloader.install(progress:)` blocks; `start(progress:completion:)` runs it on a background queue. It fetches `https://huggingface.co/<repo>/resolve/<revision>/<rfilename>` into a hidden sibling `.<name>.download-<rev12>`. It checks each file's size, then its SHA-256 (LFS files) or blob SHA-1 (other files) through `FileHasher`. Only when every file passes is staging renamed onto the target. An existing model is first renamed aside, then restored if the rename fails. Stray staged files are deleted, not installed.
+- `cancel()` keeps verified and partial files in staging. The next `install` re-hashes verified files locally instead of re-downloading them, and resumes a partial with `Range` (or restarts it if the server sends 200). `remove()` deletes the target and staging.
+- `status()` returns `notDownloaded`, `downloading(progress)`, `verifying`, `ready`, `corrupt(reason)` or `failed(error)`. It is a cheap size check, the same as `modelFilesAvailable`. `verifyInstalled()` hashes every file.
+- `ModelDownloadError` covers network, disk full (preflight and ENOSPC), checksum mismatch, HTTP status, cancelled, invalid manifest, unsafe path, file system, and busy. Each `userMessage` names no file, path, or URL.
+- `license` is read from the manifest only when the manifest records one. The current pins record none, so the downloader shows both model-card declarations and says they are unresolved: upstream NVIDIA Open Model License, conversion CC-BY-4.0.
+
+The SHA-256/SHA-1 code is pure Swift because CryptoKit is unavailable on Linux. It runs at about 56 MB/s on SHA-256 in an unoptimized build on the Linux dev box, and about 210 MB/s with `-O`. On October 3, 2026, `URLSessionModelTransport` installed four small pinned files through the real Hugging Face redirects on Linux. All four verified, and a `Range` request returned 206. The full weights were not downloaded, and the code has not been compiled on macOS yet. [Certain]
+
 ## Cleanup
 
 `Cleanup.swift` is Foundation-only. The app uses it through `Processing.swift` (see above). It provides:
