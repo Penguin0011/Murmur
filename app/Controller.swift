@@ -103,7 +103,9 @@ import Darwin
             if isolatedStorage { previewDirectory = base }
             store = try HistoryStore(directory: base.appendingPathComponent("history"))
             retry = try RetryAudio(directory: base.appendingPathComponent("retry-audio"))
-            processing = try ProcessingCoordinator(directory: base.appendingPathComponent("dictionary"))
+            // Dictionary/ledger corruption disables only cleanup and the dictionary: dictations are then held for review in History rather than blocking all dictation.
+            do { processing = try ProcessingCoordinator(directory: base.appendingPathComponent("dictionary")) }
+            catch { processing = nil; dictionaryMessage = "The dictionary could not be read. Dictations are held in History until it is repaired." }
             if let retry {
                 for file in try FileManager.default.contentsOfDirectory(at: retry.directory, includingPropertiesForKeys: nil) where file.lastPathComponent.hasPrefix(".result-") {
                     try FileManager.default.removeItem(at: file)
