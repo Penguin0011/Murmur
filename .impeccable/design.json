@@ -1,0 +1,14 @@
+{
+  "platform": "macos",
+  "mode": "operate",
+  "direction": "Native utility with restrained glass status bubble",
+  "tokens": {
+    "typography": {"family": "system", "body": "body", "heading": "headline", "metadata": "caption"},
+    "color": {"foreground": "primary", "muted": "secondary", "surface": "windowBackgroundColor", "accent": "system"},
+    "spacing": [4, 8, 12, 18, 20],
+    "bubbleRadius": 24,
+    "bubbleMaterial": "regular glass; opaque accessibility fallback",
+    "motion": "none"
+  },
+  "surfaces": {"settings": "native grouped form and tabs", "history": "master/detail list", "bubble": "nonactivating NSPanel"}
+}
