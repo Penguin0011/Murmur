@@ -7,13 +7,17 @@ if [[ ! -x "$runner_path" ]]; then
   swift build --package-path "$project_root/module-one/models/Runner" -c release
 fi
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
-swiftc -swift-version 5 -target arm64-apple-macos26.0 \
+# -O: the model downloader verifies ~1.8 GB with pure-Swift SHA-256/SHA-1 (about 4x faster optimized).
+# No assert() runs in the app (only spike test helpers it never calls use it), so -O drops no checks;
+# precondition, overflow traps and exclusivity checks stay on. check_ui.sh and the checks stay unoptimized.
+swiftc -O -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/spike/Shortcut.swift" "$project_root/spike/Insertion.swift" \
   "$project_root/module-one/capture/Capture.swift" "$project_root/module-one/session/Session.swift" \
   "$project_root/app/History.swift" "$project_root/app/Controller.swift" \
   "$project_root/app/Cleanup.swift" "$project_root/app/Dictionary.swift" "$project_root/app/Learning.swift" \
   "$project_root/app/Retention.swift" "$project_root/app/Providers.swift" "$project_root/app/Credentials.swift" \
-  "$project_root/app/Processing.swift" \
+  "$project_root/app/Processing.swift" "$project_root/app/ModelDownload.swift" "$project_root/app/Updates.swift" \
+  "$project_root/app/AppServices.swift" \
   "$project_root/app/UI.swift" "$project_root/app/LaunchOptions.swift" "$project_root/app/main.swift" \
   -o "$app_path/Contents/MacOS/Murmur"
 cp "$project_root/app/Info.plist" "$app_path/Contents/Info.plist"
