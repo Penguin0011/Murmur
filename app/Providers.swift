@@ -396,7 +396,7 @@ struct ErrorBody {
     var retryDelay: TimeInterval?
 
     init(_ data: Data) {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let object = ErrorBody.topLevelObject(data),
               let error = object["error"] as? [String: Any] else { return }
         if let code = error["code"] as? Int { numericCode = code }
         else if let code = error["code"] as? String { codeString = code; numericCode = Int(code) }
@@ -422,6 +422,16 @@ struct ErrorBody {
 
     var searchableText: String {
         ([codeString, status, type, message].compactMap { $0 } + reasons).joined(separator: " ").lowercased()
+    }
+
+    /// The top-level JSON object. Google's front end wraps some error bodies in a one-element
+    /// array (`[{"error": {...}}]`, observed on `POST` and `GET /v1beta/interactions` on
+    /// 2026-10-03), so a single-object array is unwrapped.
+    static func topLevelObject(_ data: Data) -> [String: Any]? {
+        let parsed = try? JSONSerialization.jsonObject(with: data)
+        if let object = parsed as? [String: Any] { return object }
+        if let array = parsed as? [Any], array.count == 1, let object = array[0] as? [String: Any] { return object }
+        return nil
     }
 }
 
@@ -812,8 +822,8 @@ struct OpenRouterCleanupProvider: CleanupProvider {
 /// `malformedResponse`), safety blocks mapped to `contentBlocked`, and `answerSuspected` so the
 /// caller can hold a reply-shaped transcript for recovery instead of inserting it.
 ///
-/// Google also documents a dedicated ASR model, `gemini-3.5-transcribe`, but only through the
-/// Beta Interactions API (see PROVIDERS.md). It is not implemented here.
+/// Google's dedicated ASR model, `gemini-3.5-transcribe`, is only documented through the Beta
+/// Interactions API; it is implemented separately as `GeminiTranscribeProvider`.
 struct GeminiTranscriptionProvider: TranscriptionProvider {
     static let defaultBaseURL = GeminiCleanupProvider.defaultBaseURL
     static let defaultModel = "gemini-3.5-flash-lite"
@@ -1034,6 +1044,354 @@ enum LLMTranscriptCheck {
         // Speech recognition never produces markdown structure.
         if ["**", "```", "\n- ", "\n* ", "\n#", "\u{2022}"].contains(where: { text.contains($0) }) || trimmed.hasPrefix("#") || trimmed.hasPrefix("- ") { return true }
         return false
+    }
+}
+
+// MARK: - Gemini 3.5 Transcribe (dedicated ASR, Interactions API)
+
+/// Monotonic time and sleeping for polling, injectable so checks can run on virtual time.
+protocol PollingClock: Sendable {
+    /// Monotonic seconds; only differences are used.
+    func now() -> TimeInterval
+    /// Throws `CancellationError` when the calling Task is cancelled.
+    func sleep(seconds: TimeInterval) async throws
+}
+
+struct SystemPollingClock: PollingClock {
+    func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
+    func sleep(seconds: TimeInterval) async throws {
+        try await Task.sleep(nanoseconds: UInt64(max(seconds, 0) * 1_000_000_000))
+    }
+}
+
+/// A Gemini 3.5 Transcribe transcript plus the server-side record it created.
+struct GeminiTranscribeResult: Equatable, Sendable {
+    let text: String
+    /// The Interactions API id (as returned, e.g. `v1_Chd...` or `interactions/abc`). Nil when the
+    /// response carried none. Pass it to `deleteStored(interactionID:)` to delete the record early.
+    /// Murmur does not persist it anywhere; keeping it is the integrator's decision.
+    let interactionID: String?
+    /// Whether the request asked Google to store the interaction (`store`).
+    let stored: Bool
+}
+
+/// Speech to text with Google's dedicated ASR model `gemini-3.5-transcribe`, through the Beta
+/// Interactions API: `POST {base}/interactions` with inline base64 audio and
+/// `generation_config.transcription_config`. Facts and sources: PROVIDERS.md.
+///
+/// - Verbatim mode by default (keeps fillers and false starts; cleanup is Murmur's job).
+/// - `language_codes` from `AudioPayload.language` (or `languageCodes`), `custom_vocabulary` from
+///   `AudioPayload.vocabularyHint` (the caller passes only relevant dictionary terms).
+/// - `store` is true by default, per the user's decision of 2026-10-03: Google keeps the
+///   interaction (audio, terms, transcript) for 55 days on a paid key or 1 day on a free key, and it
+///   can be deleted earlier with `deleteStored(interactionID:)`.
+/// - Requests are synchronous unless the server answers `in_progress`/`queued`; then the stored
+///   interaction is polled with `GET` (never a second `POST`) under one overall deadline.
+struct GeminiTranscribeProvider: TranscriptionProvider {
+    static let defaultBaseURL = URL(string: "https://generativelanguage.googleapis.com/v1beta")!
+    static let defaultModel = "gemini-3.5-transcribe"
+    /// "Maximum request size is 20 MB total (including prompts and all files)" for inline audio.
+    static let requestLimitBytes = 20_000_000
+    /// Raw audio that still fits once base64-encoded, with room for the JSON around it.
+    static let maxInlineAudioBytes = (requestLimitBytes - 64_000) / 4 * 3
+    /// Documented `custom_vocabulary` cap.
+    static let maxVocabularyTerms = 1_000
+    /// Documented retention of stored interactions.
+    static let paidTierRetentionDays = 55
+    static let freeTierRetentionDays = 1
+    /// Documented Gemini 3.5 Transcribe MIME types (same list as `AudioContent.mime_type`).
+    static let supportedMIMETypes: Set<String> = GeminiTranscriptionProvider.supportedMIMETypes
+    /// Interactions "generation blocked" codes.
+    static let blockedCodes: Set<String> = [
+        "safety", "recitation", "language", "prohibited_content", "spii", "blocklist", "content_blocked",
+        "image_safety", "image_prohibited_content", "image_recitation", "image_other",
+    ]
+
+    enum Mode: Sendable, Equatable {
+        /// `{"type": "verbatim"}`: word for word, with fillers, repetitions and false starts.
+        case verbatim
+        /// `"smart"`: Google removes disfluencies, resolves self-corrections and formats lists.
+        case smart
+    }
+
+    let id = ProviderID.gemini
+    let apiKey: APIKey
+    var baseURL: URL = GeminiTranscribeProvider.defaultBaseURL
+    var model: String = GeminiTranscribeProvider.defaultModel
+    var mode: Mode = .verbatim
+    /// Sent as `store`. True per the user's decision (Google stores the interaction). False asks
+    /// Google not to store it; then a non-synchronous answer cannot be polled.
+    var store = true
+    /// Overrides the language hint. Nil derives it from `AudioPayload.language`; an empty array
+    /// omits it (automatic detection).
+    var languageCodes: [String]? = nil
+    /// Deadline for each single HTTP request.
+    var timeout: TimeInterval = 60
+    /// Deadline for the whole call, including any polling.
+    var overallDeadline: TimeInterval = 90
+    var pollInterval: TimeInterval = 1
+    var maxPollInterval: TimeInterval = 4
+    /// Upper bound on GET polls, independent of the deadline.
+    var maxPolls = 60
+    var transport: HTTPTransport = URLSessionTransport()
+    var clock: PollingClock = SystemPollingClock()
+
+    init(apiKey: APIKey) { self.apiKey = apiKey }
+
+    var disclosure: DataDisclosure {
+        let host = baseURL.host ?? "generativelanguage.googleapis.com"
+        let freeTier = "Free tier: Google may also use the audio and transcript to improve its products, and human reviewers may read them; do not use a free-tier key for sensitive dictation."
+        let retention = store
+            ? "Google stores the audio, the relevant dictionary terms and the transcript (Interactions API, store on): for \(Self.paidTierRetentionDays) days on a paid-tier key or \(Self.freeTierRetentionDays) day on a free-tier key, then deletes them automatically. Stored interactions can be deleted earlier. " + freeTier
+            : "Store is off, so Google does not keep the interaction. Paid tier: Google logs prompts for a limited time for abuse detection only. " + freeTier
+        return DataDisclosure(provider: id, stage: .transcription, destinationHost: host,
+                              leavesDevice: [store ? "the recorded audio (sent to and stored by Google)" : "the recorded audio (it leaves this Mac to Google)",
+                                             store ? "relevant dictionary terms as custom vocabulary (sent to and stored by Google, when enabled)" : "relevant dictionary terms as custom vocabulary (when enabled)"],
+                              staysOnDevice: ["history", "the rest of the dictionary", "other apps' text"],
+                              retentionNote: retention,
+                              warning: "Gemini 3.5 Transcribe uses Google's Beta Interactions API, whose formats may change.")
+    }
+
+    // MARK: Request building (pure)
+
+    private struct AudioInput: Encodable { let type = "audio"; let data: String; let mime_type: String }
+    private struct ModeValue: Encodable {
+        let mode: Mode
+        private enum Keys: String, CodingKey { case type }
+        func encode(to encoder: Encoder) throws {
+            switch mode {
+            case .verbatim:
+                var container = encoder.container(keyedBy: Keys.self)
+                try container.encode("verbatim", forKey: .type)
+            case .smart:
+                var container = encoder.singleValueContainer()
+                try container.encode("smart")
+            }
+        }
+    }
+    private struct TranscriptionConfig: Encodable { let language_codes: [String]?; let custom_vocabulary: [String]?; let mode: ModeValue }
+    private struct GenerationConfig: Encodable { let transcription_config: TranscriptionConfig }
+    private struct Body: Encodable { let model: String; let input: [AudioInput]; let generation_config: GenerationConfig; let store: Bool }
+
+    /// BCP-47 hint list. An override wins; otherwise the payload language, if it looks like a tag.
+    static func languageCodes(for audio: AudioPayload, override: [String]? = nil) -> [String]? {
+        let candidates = override ?? [audio.language ?? ""]
+        let valid = candidates.filter { tag in
+            !tag.isEmpty && tag.count <= 35 && tag.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-") }
+        }
+        return valid.isEmpty ? nil : valid
+    }
+
+    /// Splits the caller's hint into terms: one per line or comma-separated. Control characters
+    /// are dropped, duplicates removed (first kept), and at most `maxVocabularyTerms` are sent.
+    static func vocabularyTerms(from hint: String?) -> [String] {
+        guard let hint = hint else { return [] }
+        var seen = Set<String>()
+        var terms: [String] = []
+        for piece in hint.components(separatedBy: CharacterSet(charactersIn: ",\n\r")) {
+            let cleaned = String(String.UnicodeScalarView(piece.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }))
+                .trimmingCharacters(in: .whitespaces)
+            guard !cleaned.isEmpty, seen.insert(cleaned).inserted else { continue }
+            terms.append(cleaned)
+            if terms.count == maxVocabularyTerms { break }
+        }
+        return terms
+    }
+
+    static func interactionsURL(baseURL: URL) -> URL {
+        var base = baseURL.absoluteString
+        while base.hasSuffix("/") { base.removeLast() }
+        return URL(string: base + "/interactions")!
+    }
+
+    /// `{base}/interactions/{id}`. Accepts the id with or without an `interactions/` prefix;
+    /// anything but `[A-Za-z0-9_.-]` is refused, so an id cannot change the path.
+    static func interactionURL(baseURL: URL, interactionID: String) -> URL? {
+        var raw = interactionID
+        if raw.hasPrefix("interactions/") { raw.removeFirst("interactions/".count) }
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-")
+        guard !raw.isEmpty, raw.count <= 512, raw != ".", raw != "..", raw.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return nil }
+        return URL(string: interactionsURL(baseURL: baseURL).absoluteString + "/" + raw)
+    }
+
+    static func makeRequest(audio: AudioPayload, apiKey: APIKey, model: String = defaultModel, baseURL: URL = defaultBaseURL,
+                            mode: Mode = .verbatim, store: Bool = true, languageCodes: [String]? = nil) throws -> URLRequest {
+        try requireModel(model, provider: .gemini)
+        let mime = audio.mimeType.lowercased()
+        guard supportedMIMETypes.contains(mime) else { throw ProviderError.invalidConfiguration(.gemini) }
+        let vocabulary = vocabularyTerms(from: audio.vocabularyHint)
+        let body = Body(model: model,
+                        input: [AudioInput(data: audio.data.base64EncodedString(), mime_type: mime)],
+                        generation_config: GenerationConfig(transcription_config: TranscriptionConfig(
+                            language_codes: Self.languageCodes(for: audio, override: languageCodes),
+                            custom_vocabulary: vocabulary.isEmpty ? nil : vocabulary,
+                            mode: ModeValue(mode: mode))),
+                        store: store)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        var request = URLRequest(url: interactionsURL(baseURL: baseURL))
+        request.httpMethod = "POST"
+        request.setValue(apiKey.secret, forHTTPHeaderField: "x-goog-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try encoder.encode(body)
+        return request
+    }
+
+    static func makeGetRequest(interactionID: String, apiKey: APIKey, baseURL: URL = defaultBaseURL) throws -> URLRequest {
+        guard let url = interactionURL(baseURL: baseURL, interactionID: interactionID) else { throw ProviderError.malformedResponse(.gemini) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(apiKey.secret, forHTTPHeaderField: "x-goog-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return request
+    }
+
+    static func makeDeleteRequest(interactionID: String, apiKey: APIKey, baseURL: URL = defaultBaseURL) throws -> URLRequest {
+        guard let url = interactionURL(baseURL: baseURL, interactionID: interactionID) else { throw ProviderError.invalidConfiguration(.gemini) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue(apiKey.secret, forHTTPHeaderField: "x-goog-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        return request
+    }
+
+    // MARK: Response parsing (pure)
+
+    enum Outcome: Equatable, Sendable {
+        case completed(text: String, interactionID: String?)
+        /// `in_progress` or `queued`: poll `GET /interactions/{id}`.
+        case pending(interactionID: String)
+    }
+
+    /// Parses an Interaction resource. The transcript is the SDK's `output_text`: the last run of
+    /// consecutive `text` blocks across `model_output` steps. A completed interaction with a
+    /// `steps` array but no text is silence (""); a missing `steps` array is malformed.
+    static func parse(_ result: HTTPResult) throws -> Outcome {
+        guard (200..<300).contains(result.status) else { throw ProviderErrorClassifier.classify(provider: .gemini, result: result) }
+        guard let object = ErrorBody.topLevelObject(result.body) else { throw ProviderError.malformedResponse(.gemini) }
+        if object["error"] != nil { throw ProviderErrorClassifier.classify(provider: .gemini, result: result) }
+        guard let status = object["status"] as? String else { throw ProviderError.malformedResponse(.gemini) }
+        let interactionID = object["id"] as? String
+        switch status {
+        case "completed":
+            guard let steps = object["steps"] as? [[String: Any]] else { throw ProviderError.malformedResponse(.gemini) }
+            var run: [String] = []
+            for step in steps where (step["type"] as? String) == "model_output" {
+                for block in step["content"] as? [[String: Any]] ?? [] {
+                    if (block["type"] as? String) == "text", let text = block["text"] as? String { run.append(text) }
+                    else { run.removeAll() }
+                }
+            }
+            return .completed(text: run.joined(), interactionID: interactionID)
+        case "in_progress", "queued":
+            guard let pendingID = interactionID, interactionURL(baseURL: defaultBaseURL, interactionID: pendingID) != nil else { throw ProviderError.malformedResponse(.gemini) }
+            return .pending(interactionID: pendingID)
+        case "failed":
+            // `errors[].code` is documented as "a URI that identifies the error type"; the last path
+            // segment is compared with the documented blocked codes.
+            let codes = (object["errors"] as? [[String: Any]] ?? []).compactMap { $0["code"] as? String }
+            let blocked = codes.contains { code in
+                let last = code.lowercased().split(separator: "/").last.map(String.init) ?? ""
+                return blockedCodes.contains(last)
+            }
+            throw blocked ? ProviderError.contentBlocked(.gemini) : ProviderError.server(.gemini, status: nil)
+        case "cancelled":
+            throw ProviderError.server(.gemini, status: nil)
+        default:
+            // incomplete, budget_exceeded, requires_action, or an unknown status: no usable transcript.
+            throw ProviderError.malformedResponse(.gemini)
+        }
+    }
+
+    // MARK: Calls
+
+    func transcribe(_ audio: AudioPayload) async throws -> String {
+        try await transcribeDetailed(audio).text
+    }
+
+    /// One `POST`; if the server answers `in_progress`/`queued`, bounded `GET` polling of that same
+    /// interaction until `overallDeadline`. Never re-submits the audio. `onInteractionCreated` is
+    /// called once with the id as soon as it is known, so the caller can delete the record even
+    /// if polling later fails; the provider keeps no copy of it.
+    func transcribeDetailed(_ audio: AudioPayload, onInteractionCreated: (@Sendable (String) -> Void)? = nil) async throws -> GeminiTranscribeResult {
+        guard audio.data.count <= Self.maxInlineAudioBytes else { throw ProviderError.payloadTooLarge(id, limitBytes: Self.maxInlineAudioBytes) }
+        let request = try Self.makeRequest(audio: audio, apiKey: apiKey, model: model, baseURL: baseURL, mode: mode, store: store, languageCodes: languageCodes)
+        guard (request.httpBody?.count ?? 0) <= Self.requestLimitBytes else { throw ProviderError.payloadTooLarge(id, limitBytes: Self.maxInlineAudioBytes) }
+        let end = clock.now() + max(overallDeadline, 0.001)
+        let first = try await send(request, until: end)
+        switch try Self.parse(first) {
+        case .completed(let text, let interactionID):
+            if let interactionID = interactionID { onInteractionCreated?(interactionID) }
+            return GeminiTranscribeResult(text: text, interactionID: interactionID, stored: store)
+        case .pending(let interactionID):
+            onInteractionCreated?(interactionID)
+            // Without storage there is nothing to poll.
+            guard store else { throw ProviderError.malformedResponse(id) }
+            return try await poll(interactionID: interactionID, until: end)
+        }
+    }
+
+    private func send(_ request: URLRequest, until end: TimeInterval) async throws -> HTTPResult {
+        if Task.isCancelled { throw ProviderError.cancelled }
+        let remaining = end - clock.now()
+        guard remaining > 0 else { throw ProviderError.timeout(id) }
+        return try await ProviderHTTP(provider: id, transport: transport, deadline: min(timeout, remaining)).execute(request)
+    }
+
+    private func poll(interactionID: String, until end: TimeInterval) async throws -> GeminiTranscribeResult {
+        let request = try Self.makeGetRequest(interactionID: interactionID, apiKey: apiKey, baseURL: baseURL)
+        var interval = max(pollInterval, 0.05)
+        for _ in 0..<max(maxPolls, 1) {
+            if Task.isCancelled { throw ProviderError.cancelled }
+            let remaining = end - clock.now()
+            guard remaining > 0 else { throw ProviderError.timeout(id) }
+            do { try await clock.sleep(seconds: min(interval, remaining)) } catch { throw ProviderError.cancelled }
+            if Task.isCancelled { throw ProviderError.cancelled }
+            let result: HTTPResult
+            do {
+                result = try await send(request, until: end)
+            } catch let error as ProviderError {
+                // GET is idempotent: a transient failure is retried within the deadline.
+                switch error {
+                case .network, .timeout: interval = min(interval * 2, max(maxPollInterval, interval)); continue
+                default: throw error
+                }
+            }
+            if result.status == 429 || ((500..<600).contains(result.status) && result.status != 501) {
+                let error = ProviderErrorClassifier.classify(provider: id, result: result)
+                if case .rateLimited(_, let retryAfter) = error {
+                    interval = min(max(interval, retryAfter ?? interval), max(maxPollInterval, interval))
+                    continue
+                }
+                if case .server = error { interval = min(interval * 2, max(maxPollInterval, interval)); continue }
+                throw error
+            }
+            switch try Self.parse(result) {
+            case .completed(let text, let returnedID):
+                return GeminiTranscribeResult(text: text, interactionID: returnedID ?? interactionID, stored: store)
+            case .pending:
+                interval = min(interval * 1.5, max(maxPollInterval, interval))
+            }
+        }
+        throw ProviderError.timeout(id)
+    }
+
+    /// Deletes a stored interaction (`DELETE {base}/interactions/{id}`). A 404 counts as
+    /// already deleted (for example, after the retention period). Sends no audio or text.
+    func deleteStored(interactionID: String) async throws {
+        let request = try Self.makeDeleteRequest(interactionID: interactionID, apiKey: apiKey, baseURL: baseURL)
+        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15).execute(request)
+        if result.status == 404 { return }
+        try validationResult(provider: id, result)
+    }
+
+    /// `GET {base}/models?pageSize=1` (models.list): proves the key, costs no tokens. It does not
+    /// prove that this key may use `gemini-3.5-transcribe`.
+    func validate() async throws {
+        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15)
+            .execute(GeminiCleanupProvider.makeValidationRequest(apiKey: apiKey, baseURL: baseURL))
+        try validationResult(provider: id, result)
     }
 }
 
