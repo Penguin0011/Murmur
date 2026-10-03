@@ -33,11 +33,38 @@ import Darwin
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
     @Published var dictionaryEntries: [DictionaryEntry] = []
     @Published var dictionaryMessage = ""
+    // Model download (R2). modelMessage reports the last download action, never interrupting dictation.
+    @Published var modelStatus: ModelStatus = .notDownloaded
+    @Published var modelMessage = ""
+    var modelRow: ModelRowPresentation { ModelRowPresentation.make(downloader == nil ? nil : modelStatus) }
+    var modelLicense: ModelLicenseInfo? { downloader?.license }
+    var modelSummary: String { downloader.map { ModelFacts.summary(downloadSize: $0.downloadSize) } ?? "" }
+    var usesCustomModelFolder: Bool { downloader.map { URL(fileURLWithPath: modelDirectory).standardizedFileURL.path != $0.target.path } ?? false }
+    // History-off mode and the size cap (R9, §6). History-off and update checks apply on Apply Settings.
+    @Published var historyMode: HistoryMode
+    @Published var historyCapWarning: String?
+    @Published var sessionOnlyIDs: Set<String> = []
+    var historySummary: String { HistoryText.summary(mode: appliedHistoryMode, count: history.count, sessionOnly: sessionOnlyIDs.count) }
+    // Update checks (R12). Results are shown quietly in Settings only.
+    @Published var updateChecksEnabled: Bool
+    @Published var updateStatus = ""
+    @Published var availableRelease: ReleaseInfo?
+    @Published var checkingForUpdates = false
+    var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0" }
     var isBusy: Bool { phase == "Listening" || phase == "Processing" || (sessionAvailable && session.state != .idle) }
     var openSettings: (() -> Void)?
     var updateMenu: (() -> Void)?
     lazy var bubble = BubblePresenter(controller: self)
     private var store: HistoryStore?
+    /// All history reads and writes; it keeps entries in memory only when history is off.
+    private var records: HistoryRouter<HistoryEntry>?
+    private var appliedHistoryMode: HistoryMode
+    private var dataDirectory: URL?
+    private let downloader: ModelDownloader?
+    private var modelDownloadInFlight = false
+    private var lastAutomaticUpdateAttempt: Date?
+    // TODO(R12): UpdateConfiguration still defaults to Penguin0011/dictation; confirm the release repository before shipping.
+    private lazy var updateChecker: UpdateChecker? = (try? UpdateConfiguration(currentVersion: currentVersion)).map { UpdateChecker(configuration: $0) }
     private var retry: RetryAudio?
     private var processing: ProcessingCoordinator?
     private var capture: Capture?
@@ -84,7 +111,11 @@ import Darwin
 
     init(preview: Bool = false, isolatedStorage: Bool? = nil) {
         let defaults = UserDefaults.standard
-        modelDirectory = defaults.string(forKey: "modelDirectory") ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Caches/Dictation/module-one/unified-d32e972").path
+        let defaultModel = ModelFacts.defaultDirectory(home: FileManager.default.homeDirectoryForCurrentUser)
+        modelDirectory = defaults.string(forKey: "modelDirectory") ?? defaultModel.path
+        if let pins = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let manifest = try? ModelManifest(contentsOf: pins) {
+            downloader = ModelDownloader(manifest: manifest, target: defaultModel)
+        } else { downloader = nil }
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
@@ -96,12 +127,17 @@ import Darwin
         cleanupCorrections = processingSettings.options.corrections
         cleanupLists = processingSettings.options.lists
         learningEnabled = processingSettings.learningEnabled
+        historyMode = processingSettings.historyMode
+        appliedHistoryMode = processingSettings.historyMode
+        updateChecksEnabled = processingSettings.updateChecksEnabled
         self.preview = preview
         let isolatedStorage = isolatedStorage ?? preview
         do {
             let base = isolatedStorage ? FileManager.default.temporaryDirectory.appendingPathComponent("Dictation-preview-" + UUID().uuidString) : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Dictation")
             if isolatedStorage { previewDirectory = base }
+            dataDirectory = base
             store = try HistoryStore(directory: base.appendingPathComponent("history"))
+            if let store { records = HistoryRouter(disk: historyDisk(store), persists: appliedHistoryMode.persistsTranscripts) }
             retry = try RetryAudio(directory: base.appendingPathComponent("retry-audio"))
             // Dictionary/ledger corruption disables only cleanup and the dictionary: dictations are then held for review in History rather than blocking all dictation.
             do { processing = try ProcessingCoordinator(directory: base.appendingPathComponent("dictionary")) }
@@ -112,12 +148,14 @@ import Darwin
                 }
             }
             try store?.purge(retention: appliedRetention)
-            refreshHistory(); refreshRecoveryAudio(); refreshDictionary()
-        } catch { store = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
+            historySaved(); refreshRecoveryAudio(); refreshDictionary()
+        } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
+        modelStatus = downloader?.status() ?? .notDownloaded
     }
     func start() {
         refreshPermissions()
         if !preview { configureShortcut() }
+        if !preview && updateChecksEnabled { runUpdateCheck(manual: false) }
         // Returning from System Settings reactivates Murmur: re-check grants and start the shortcut once Input Monitoring is allowed.
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -130,6 +168,8 @@ import Darwin
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.voiceLevel = self.capture?.queue.sync { self.capture?.level ?? 0 } ?? 0
+                // Download progress and the verifying phase are sampled here, on the main thread.
+                if self.modelDownloadInFlight, let status = self.downloader?.status(), status != self.modelStatus { self.modelStatus = status }
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
                    !capture.engine.isRunning || capture.queue.sync(execute: { capture.writeError != nil }) { self.recordingFailed = true; self.stopRecording() }
                 if self.isBusy, let initial = self.destination {
@@ -144,11 +184,17 @@ import Darwin
         expiry = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                do { try self.retry?.purge(); try self.store?.purge(retention: self.appliedRetention); self.refreshHistory(); self.refreshRecoveryAudio() }
+                do {
+                    try self.retry?.purge(); try self.store?.purge(retention: self.appliedRetention)
+                    if let cutoff = HistoryExpiry.cutoff(HistoryRetention(rawValue: self.appliedRetention) ?? .thirtyDays) { self.records?.purgeSessionOnly(recordedAtOrBefore: cutoff) }
+                    try self.enforceHistoryCap(); self.refreshHistory(); self.refreshRecoveryAudio()
+                }
                 catch {
                     if self.isBusy { self.message = "Data expiry failed. Open History after this dictation to review saved data." }
                     else { self.setPhase("Error", "Data expiry failed. Open History to review saved data.") }
                 }
+                // Throttled to once a day by the checker's UserDefaults store; skipped checks make no request.
+                if !self.preview && self.updateChecksEnabled { self.runUpdateCheck(manual: false) }
             }
         }
     }
@@ -179,7 +225,14 @@ import Darwin
             alert.addButton(withTitle: "Apply and Delete"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { retention = appliedRetention; return }
         }
+        if historyMode == .off && appliedHistoryMode == .on {
+            let alert = NSAlert(); alert.messageText = "Turn history off?"
+            alert.informativeText = HistoryMode.offDisclosure
+            alert.addButton(withTitle: "Turn Off History"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { historyMode = appliedHistoryMode; return }
+        }
         appliedRetention = retention
+        appliedHistoryMode = historyMode; records?.persistsTranscripts = historyMode.persistsTranscripts
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion")
@@ -189,9 +242,13 @@ import Darwin
             var next = processing.settings
             next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists)
             next.learningEnabled = learningEnabled
+            next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled
             do { try processing.update(next) } catch { setPhase("Error", "Could not save cleanup and learning settings.") }
         }
-        do { try store?.purge(retention: appliedRetention); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
+        // Also saved directly, so they persist when the dictionary (and so processing) is unavailable.
+        defaults.set(historyMode.rawValue, forKey: ProcessingSettings.Key.historyMode)
+        defaults.set(updateChecksEnabled, forKey: ProcessingSettings.Key.updateChecks)
+        do { try store?.purge(retention: appliedRetention); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }; updateMenu?()
     }
     private func configureShortcut() {
@@ -220,7 +277,9 @@ import Darwin
         guard sessionAvailable else { done(); return }
         if action == .start {
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
-            guard modelFilesAvailable(), Bundle.main.url(forAuxiliaryExecutable: "ModelBench") != nil else { session.resetShortcut?(); setPhase("Error", "Choose a downloaded model folder in Settings."); done(); return }
+            if let refusal = ModelGate.startRefusal(modelAvailable: modelFilesAvailable(), runtimeAvailable: Bundle.main.url(forAuxiliaryExecutable: "ModelBench") != nil, downloadingActiveModel: modelDownloadInFlight && !usesCustomModelFolder) {
+                session.resetShortcut?(); setPhase("Error", refusal); done(); return
+            }
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }
@@ -280,7 +339,7 @@ import Darwin
     private func transcribe(_ audio: URL, done: @escaping () -> Void) {
         setPhase("Processing", "Transcribing on this Mac…")
         let token = generation; let models = URL(fileURLWithPath: activeModelDirectory)
-        guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let store else { setPhase("Error", "The model runtime is unavailable. Audio is saved for retry."); done(); return }
+        guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let store = records else { setPhase("Error", "The model runtime is unavailable. Audio is saved for retry."); done(); return }
         let timestamp = listeningStarted
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do { try verifyAppModels(models, manifest: manifest) }
@@ -292,7 +351,7 @@ import Darwin
         }
     }
     private struct NoSpeech: Error {}
-    private func launchRunner(_ helper: URL, models: URL, audio: URL, store: HistoryStore, timestamp: Date, token: UUID, done: @escaping () -> Void) {
+    private func launchRunner(_ helper: URL, models: URL, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
         let temp = audio.deletingLastPathComponent().appendingPathComponent(".result-" + UUID().uuidString)
         let fd = open(temp.path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { setPhase("Error", "Could not prepare transcription. Audio is saved for retry."); done(); return }
@@ -322,17 +381,18 @@ import Darwin
                     self.runner = nil; self.runnerOutput = nil
                     var entry = savedEntry
                     self.recoveryEntryID = entry.id
+                    let saved = HistoryText.saved(persists: !store.sessionOnlyIDs.contains(entry.id))
                     // Dictionary, then cleanup. A held result keeps only the raw transcript and is never inserted.
                     let outcome = self.processing?.process(text) ?? .heldForRecovery(raw: text, reason: .cleanerFailed)
                     guard case .insert(let processed) = outcome else {
                         entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
                         do { try store.save(entry); self.setPhase("Error", "Cleanup was held for review. The raw transcript is in History.") }
                         catch { self.setPhase("Error", "Cleanup was held for review. The raw transcript is in History; its status could not be saved.") }
-                        self.destination = nil; self.refreshHistory(); done(); return
+                        self.destination = nil; self.historySaved(); done(); return
                     }
                     if processed != text {
                         entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus)
-                        do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); self.destination = nil; self.refreshHistory(); done(); return }
+                        do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); self.destination = nil; self.historySaved(); done(); return }
                     }
                     if self.insertThisSession, self.focusStable, let destination = self.destination {
                         // Persist uncertainty before the one permitted delivery attempt.
@@ -345,12 +405,12 @@ import Darwin
                             try store.save(entry)
                             switch insertion.status {
                             case .verified: self.setPhase("Inserted", "Inserted.")
-                            case .unverified: self.setPhase("Saved", "Saved in History. Delivery could not be verified; no retry was attempted.")
-                            case .failed: self.setPhase("Saved", "Saved in History. The text could not be inserted into this field, so nothing was typed.")
+                            case .unverified: self.setPhase("Saved", "\(saved) Delivery could not be verified; no retry was attempted.")
+                            case .failed: self.setPhase("Saved", "\(saved) The text could not be inserted into this field, so nothing was typed.")
                             }
-                        } catch { self.setPhase("Saved", "Saved in History. Insertion status could not be saved.") }
-                    } else { self.setPhase("Saved", "Saved in History. The destination changed or automatic insertion is off.") }
-                    self.destination = nil; self.refreshHistory(); done()
+                        } catch { self.setPhase("Saved", "\(saved) Insertion status could not be saved.") }
+                    } else { self.setPhase("Saved", "\(saved) The destination changed or automatic insertion is off.") }
+                    self.destination = nil; self.historySaved(); done()
                 }
             } catch {
                 let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
@@ -383,7 +443,7 @@ import Darwin
         hasRecoveryAudio = ((try? FileManager.default.contentsOfDirectory(at: retry.directory, includingPropertiesForKeys: nil)) ?? []).contains { $0.pathExtension == "wav" }
     }
     func refreshHistory() {
-        do { history = try store?.entries() ?? [] }
+        do { history = try records?.entries() ?? []; sessionOnlyIDs = records?.sessionOnlyIDs ?? [] }
         catch { message = "Could not read saved history." }
     }
     func copyEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.finalText, forType: .string) }
@@ -414,12 +474,12 @@ import Darwin
     // Observation.swift is not part of the app; when it is, feed attributed corrections to
     // processing?.observe(_:) during the window and processing?.settle(sessionID:) when it closes,
     // then refreshDictionary(). Learning must stay off for fields where learningEligible is false.
-    func deleteEntry(_ entry: HistoryEntry) { do { try store?.delete(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
+    func deleteEntry(_ entry: HistoryEntry) { do { try records?.delete(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
     func clearHistory() {
         let alert = NSAlert(); alert.messageText = "Delete all saved transcripts?"; alert.informativeText = "This cannot be undone."
         alert.addButton(withTitle: "Delete All"); alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
-            do { for entry in history { try store?.delete(entry) } }
+            do { for entry in history { try records?.delete(entry) } }
             catch { message = "Could not delete all transcripts. Remaining entries are shown in History." }
             refreshHistory()
         }
@@ -440,8 +500,131 @@ import Darwin
         if let recoveryAudio, FileManager.default.fileExists(atPath: recoveryAudio.path) { NSWorkspace.shared.activateFileViewerSelecting([recoveryAudio]) }
         else if hasRecoveryAudio, let retry { NSWorkspace.shared.open(retry.directory) }
     }
+    // MARK: Model download (R2)
+
+    func downloadModel() {
+        guard let downloader else { modelMessage = ModelDownloadError.invalidManifest.userMessage; return }
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: modelDownloadInFlight) { modelMessage = refusal; return }
+        // The license and size are shown before any byte is fetched.
+        let text = ModelFacts.confirmation(downloadSize: downloader.downloadSize, license: downloader.license)
+        let alert = NSAlert(); alert.messageText = text.title; alert.informativeText = text.body
+        alert.addButton(withTitle: "Download"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // A dictation may have started while the alert was open.
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: modelDownloadInFlight) { modelMessage = refusal; return }
+        modelDownloadInFlight = true; modelMessage = ""
+        modelStatus = .downloading(ModelDownloadProgress(bytesDone: 0, totalBytes: downloader.downloadSize))
+        downloader.start { result in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.modelDownloadInFlight = false
+                self.modelStatus = downloader.status()
+                self.modelMessage = ModelFacts.completionMessage(result)
+                // Point dictation at the verified download right away (an explicit user action, like Apply).
+                if case .success = result {
+                    self.modelDirectory = downloader.target.path
+                    UserDefaults.standard.set(downloader.target.path, forKey: "modelDirectory")
+                }
+            }
+        }
+    }
+    func cancelModelDownload() { downloader?.cancel() }
+    func removeModel() {
+        guard let downloader else { return }
+        if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: modelDownloadInFlight) { modelMessage = refusal; return }
+        let alert = NSAlert(); alert.messageText = "Remove the downloaded model?"
+        alert.informativeText = "Murmur cannot dictate until you download it again (\(ModelFacts.formatBytes(downloader.downloadSize))) or choose another model folder."
+        alert.addButton(withTitle: "Remove"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: modelDownloadInFlight) { modelMessage = refusal; return }
+        do { try downloader.remove(); modelMessage = "The model was removed." }
+        catch { modelMessage = (error as? ModelDownloadError)?.userMessage ?? ModelDownloadError.fileSystem.userMessage }
+        modelStatus = downloader.status()
+    }
+    func useDefaultModelDirectory() { if let downloader { modelDirectory = downloader.target.path } }
+    func openLink(_ url: URL) { NSWorkspace.shared.open(url) }
+
+    // MARK: History cap and Delete All Data (R9, §6)
+
+    private func historyDisk(_ store: HistoryStore) -> HistoryDisk<HistoryEntry> {
+        HistoryDisk(save: store.save, entries: store.entries, delete: store.delete)
+    }
+    /// Drops oldest disk entries over the 50 MB cap for finite retention; warns for Forever.
+    private func enforceHistoryCap() throws {
+        guard let store else { historyCapWarning = nil; return }
+        let result = try HistoryCap.enforce(entries: store.entries(), directory: store.directory, retention: HistoryRetention(rawValue: appliedRetention) ?? .thirtyDays, delete: store.delete)
+        historyCapWarning = appliedRetention == HistoryRetention.forever.rawValue ? result.status.warning : nil
+    }
+    /// Called once a dictation's last history save is done.
+    private func historySaved() {
+        do { try enforceHistoryCap() } catch { historyCapWarning = "Could not check the history size limit. Open History to review saved data." }
+        refreshHistory()
+    }
+    func deleteAllData() {
+        guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
+        guard let base = dataDirectory else { return }
+        let alert = NSAlert(); alert.messageText = DeleteAllDataText.title; alert.informativeText = DeleteAllDataText.body
+        alert.addButton(withTitle: "Delete All Data"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
+        let locations = MurmurDataLocations.standard(base: base)
+        // Preview and the developer probe never touch the login Keychain.
+        let removeKeys: () throws -> [String] = preview ? { [] } : {
+            try KeychainCredentialStore(service: "Murmur").deleteAll()
+            return ProviderID.allCases.map(\.rawValue)
+        }
+        let report = DataWipe.deleteAllData(locations, removeKeychainItems: removeKeys)
+        // The old stores point at deleted directories or hold deleted data in memory: recreate them empty.
+        let failed = PostWipeStep.run { step in
+            switch step {
+            case .discardInMemoryState:
+                records?.clearSessionOnly(); records = nil; store = nil; retry = nil; processing = nil
+                recoveryEntryID = nil; recoveryAudio = nil; historyCapWarning = nil
+            case .recreateHistory:
+                let next = try HistoryStore(directory: locations.history)
+                store = next; records = HistoryRouter(disk: historyDisk(next), persists: appliedHistoryMode.persistsTranscripts)
+            case .recreateRetryAudio:
+                retry = try RetryAudio(directory: locations.retryAudio)
+            case .reloadDictionary:
+                do { processing = try ProcessingCoordinator(directory: locations.dictionary); dictionaryMessage = "" }
+                catch { dictionaryMessage = "The dictionary could not be read. Dictations are held in History until it is repaired."; throw error }
+            case .refreshViews:
+                refreshHistory(); refreshRecoveryAudio(); refreshDictionary()
+            }
+        }
+        let outcome = PostWipeStep.message(report: report, failedSteps: failed)
+        if !sessionAvailable { phase = "Error"; message = outcome.text + " Private storage is unavailable. Restart Murmur."; updateMenu?(); return }
+        setPhase(outcome.succeeded ? "Ready" : "Error", outcome.text)
+    }
+
+    // MARK: Update checks (R12)
+
+    func checkForUpdates() { runUpdateCheck(manual: true) }
+    private func runUpdateCheck(manual: Bool) {
+        guard let checker = updateChecker else { if manual { updateStatus = "Update checks are unavailable in this build." }; return }
+        guard !checkingForUpdates else { return }
+        if !manual {
+            guard UpdateSchedule.shouldAttemptAutomatic(lastAttempt: lastAutomaticUpdateAttempt) else { return }
+            lastAutomaticUpdateAttempt = Date()
+        }
+        checkingForUpdates = true
+        if manual { updateStatus = "Checking for updates…" }
+        let version = currentVersion
+        Task { @MainActor [weak self] in
+            let result = await checker.check(manual: manual)
+            guard let self else { return }
+            self.checkingForUpdates = false
+            if let text = UpdateText.status(result, manual: manual, currentVersion: version) { self.updateStatus = text }
+            self.availableRelease = UpdateText.release(result, previous: self.availableRelease)
+            self.updateMenu?()
+        }
+    }
+    /// Opens the validated GitHub release page. Murmur never downloads or installs the update.
+    func openReleasePage() { if let url = availableRelease?.pageURL { NSWorkspace.shared.open(url) } }
+
     func shutdown() {
         generation = UUID(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
+        downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.
         if sessionAvailable { session.shutdown() }
         if let runner, runner.isRunning {
             runner.terminate()
@@ -454,6 +637,8 @@ import Darwin
         if let previewDirectory { try? FileManager.default.removeItem(at: previewDirectory) }
     }
 }
+
+extension HistoryEntry: RetainedHistoryItem {}
 
 // Probe inputs belong to the caller; only the private copy follows retry cleanup.
 func copyProbeAudio(_ audio: URL, into retry: RetryAudio) throws -> URL {

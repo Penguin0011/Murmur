@@ -72,6 +72,11 @@ import AppKit
         precondition(controller.phase == "Processing" && controller.message == "busy")
         precondition(controller.history.first?.id == entry.id && manager.fileExists(atPath: recovery.path))
         controller.phase = "Saved"
+        // The check binary has no bundled artifact-pins.json: the model row offers nothing and refuses quietly, without an alert.
+        precondition(controller.modelRow.actions.isEmpty && !controller.usesCustomModelFolder)
+        controller.downloadModel()
+        precondition(controller.modelMessage == ModelDownloadError.invalidManifest.userMessage && controller.phase == "Saved")
+        precondition(controller.historySummary.hasPrefix(controller.historyMode == .on ? "Saved locally" : "History is off"))
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
     }
 }

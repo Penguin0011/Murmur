@@ -7,7 +7,7 @@ app/build.sh
 open runtime/Murmur.app
 ```
 
-The bundle uses the pinned local ModelBench helper. Model download, cloud providers in the UI, automatic correction learning, signing/notarization, and production release remain separate work. [Certain]
+The bundle uses the pinned local ModelBench helper. `build.sh` compiles the app with `-O` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)). Cloud providers in the UI, automatic correction learning, signing/notarization, and production release remain separate work. [Certain]
 
 ## Recovery and interface
 
@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 ```
 
@@ -40,7 +40,7 @@ swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/ca
 2. Cleanup runs on the selected route with the enabled options. Settings offer only the local `RuleCleaner` route. The cloud route (`CleanupProvider` via `CleanupPrompt`, with only the relevant dictionary entries) is tested but not exposed, and the app's synchronous path never calls the network: a cloud route holds rather than falling back to local.
 3. A cleaner error or a guard failure returns `.heldForRecovery(raw:reason:)`. The controller saves the raw transcript with status `held-cleanup` and shows an error. It does not insert. History offers **Copy Raw**. The reason is content-free and is not stored.
 
-Settings has three independent cleanup toggles, a Faithful Transcription button, a learning toggle, and a dictionary editor (add, delete, learned/manual badge, Reset Learned). Cleanup and learning settings take effect on Apply Settings; dictionary edits save immediately. Automatic observation of edits is not wired in, so nothing feeds learning yet. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute`, `learningEnabled`, `historyMode` and `updateChecksEnabled`; the last two are only persisted for now. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
+Settings has three independent cleanup toggles, a Faithful Transcription button, a learning toggle, and a dictionary editor (add, delete, learned/manual badge, Reset Learned). Cleanup and learning settings take effect on Apply Settings; dictionary edits save immediately. Automatic observation of edits is not wired in, so nothing feeds learning yet. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute`, `learningEnabled`, `historyMode` and `updateChecksEnabled`. The last two are wired in (see below) and are also written directly on Apply Settings, so they persist when the dictionary is unavailable. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
 
 ```sh
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/check_processing.swift -o /tmp/murmur-processing-check
@@ -49,9 +49,9 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 
 The processing check passes with Swift 6.1.2 on Linux. The Controller/UI integration has only been typechecked on Linux against hand-written AppKit/SwiftUI stubs; it has not been built or run on the Mac. [Certain]
 
-## Dictionary, learning and retention (not yet wired in)
+## Dictionary, learning and retention
 
-`Dictionary.swift`, `Learning.swift` and `Retention.swift` are Foundation-only, so their checks also run on Linux. They are compiled into the app through `Processing.swift`. The history cap, history-off mode and Delete all data are not wired into Controller/UI yet.
+`Dictionary.swift`, `Learning.swift` and `Retention.swift` are Foundation-only, so their checks also run on Linux. They are compiled into the app through `Processing.swift`. The history cap, history-off mode and Delete all data are wired in through `AppServices.swift` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)).
 
 ```sh
 swiftc app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
@@ -72,7 +72,7 @@ Known failure modes: without the lexicon, real-word swaps that look like respell
 
 ### Cloud providers, credentials, and updates
 
-`Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation. `build.sh` compiles `Providers.swift` and `Credentials.swift` because `Processing.swift` uses their types, but no provider, key or update check is reachable from the app yet; `Updates.swift` is not compiled into the app. Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. They have not yet been compiled on the macOS 26 host (Swift 6.3.3, `-swift-version 5`), and the Keychain store is compiled only on macOS. [Certain]
+`Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation. `build.sh` compiles all three. No provider or key entry is reachable from the app yet. The only Keychain call is Delete All Data's `KeychainCredentialStore(service: "Murmur").deleteAll()`. The update checker is wired in (see below). Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. They have not yet been compiled on the macOS 26 host (Swift 6.3.3, `-swift-version 5`), and the Keychain store is compiled only on macOS. [Certain]
 
 ```sh
 swiftc app/Cleanup.swift app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check
@@ -113,9 +113,9 @@ runtime/Murmur.app/Contents/MacOS/Murmur --test-audio /absolute/synthetic.wav --
 
 This explicitly performs transcription and one insertion attempt. It preserves the supplied audio, using a private retry copy, and writes durable history. It cannot be combined with preview or timed quit; malformed flags exit before storage/UI initialization. [Certain]
 
-## Model download (not yet wired in)
+## Model download
 
-`ModelDownload.swift` is Foundation-only and not in `build.sh` yet; the integration lead wires it into Controller/UI. [Certain]
+`ModelDownload.swift` is Foundation-only and compiled into the app; see the next section for the wiring. [Certain]
 
 ```sh
 swiftc -swift-version 5 app/ModelDownload.swift app/check_model_download.swift -o /tmp/cm && /tmp/cm   # run from the repository root
@@ -129,6 +129,38 @@ swiftc -swift-version 5 app/ModelDownload.swift app/check_model_download.swift -
 - `license` is read from the manifest only when the manifest records one. The current pins record none, so the downloader shows both model-card declarations and says they are unresolved: upstream NVIDIA Open Model License, conversion CC-BY-4.0.
 
 The SHA-256/SHA-1 code is pure Swift because CryptoKit is unavailable on Linux. It runs at about 56 MB/s on SHA-256 in an unoptimized build on the Linux dev box, and about 210 MB/s with `-O`. On October 3, 2026, `URLSessionModelTransport` installed four small pinned files through the real Hugging Face redirects on Linux. All four verified, and a `Range` request returned 206. The full weights were not downloaded, and the code has not been compiled on macOS yet. [Certain]
+
+## Model download, retention and updates (wired in)
+
+`AppServices.swift` is Foundation-only and holds the decisions that Controller and UI only display or act on. Controller keeps the AppKit calls (alerts, `NSWorkspace`) and the wiring. [Certain]
+
+```sh
+swiftc app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/check_app_services.swift -o /tmp/murmur-app-services-check
+/tmp/murmur-app-services-check   # run from the repository root; it reads app/Info.plist
+```
+
+**Model (R2).** Settings → Recording shows a model row: name, download size (`downloader.downloadSize`, 1.80 GB), English, Runs on this Mac, status, and Download / Retry / Cancel / Remove. Both license declarations are listed with links, and the note says the license is unresolved. Download first shows an alert with the size and the full license text, so nothing is fetched before the license is shown. The downloader targets the existing default folder `~/Library/Caches/Dictation/module-one/unified-d32e972` with the bundled `artifact-pins.json`, so a model already there shows as Downloaded. The main-thread monitor timer samples progress and the verifying phase (`status()` is lock-protected). Completion is marshaled with `DispatchQueue.main.async`. On success, `modelDirectory` is set to that folder and saved. The folder chooser remains as an advanced option, with Use Default.
+- Recording is refused with recovery text when the model or runtime is missing ("Download the model in Settings, or choose a downloaded model folder"), and while a download is replacing the folder dictation would use.
+- Download and Remove are refused while recording or processing (checked again after their confirmation alert), and in preview, which must not touch the real model cache. Remove is also refused while a download runs. Quitting cancels a download; staged files are kept and Retry resumes them.
+
+**Build speed.** `build.sh` compiles the app with `-O`. The pure-Swift SHA-256 is about 56 MB/s unoptimized and 210 MB/s with `-O` on the Linux dev box, so verifying 1.8 GB drops from about 32 s to about 9 s. No `assert()` is reachable in the app (only spike test helpers that the app never calls use it), so `-O` removes no runtime checks. `precondition`, overflow traps and exclusivity checks stay on. `check_ui.sh` and the checks stay unoptimized. [Certain]
+
+**History cap (R9, §6).** `HistoryCap.enforce` runs at launch, after each dictation's final save, on Apply Settings and in the 60-second purge. Finite retention drops the oldest entries over 50 MB but always keeps the newest. With Forever, nothing is dropped and the cap warning shows under Keep transcripts. A cap failure at launch or after a dictation only shows a warning. [Certain]
+
+**History off.** Settings → Output and history has a Transcript history picker. Choosing Off shows `HistoryMode.offDisclosure`, and Apply Settings asks for confirmation. All history reads and writes go through `HistoryRouter`:
+- With history off, entries are kept only in memory, so a held cleanup or a failed or uncertain insertion can still be copied from History until Murmur quits. Nothing is written to disk. Disk save failures still surface as errors and are not silently moved to memory.
+- Memory entries stay in memory if history is turned back on, so one dictation never splits across disk and memory. They follow the retention cutoff and are limited to the newest 100.
+- History marks them "Not saved to disk", completion messages say "Kept in History until Murmur quits", and the header says history is off.
+- Turning history off does not delete existing history.
+- Retry audio is separate: it still follows the 24-hour policy. [Certain]
+
+**Delete All Data (§6).** Settings → Output and history has a button that asks for confirmation, then runs `DataWipe.deleteAllData` on history, dictionary/ledger and retry audio. It also calls `KeychainCredentialStore(service: "Murmur").deleteAll()`, which is skipped in preview. Then it follows `PostWipeStep` in order: discard in-memory state (including memory-only history), recreate history, recreate retry audio, rebuild `ProcessingCoordinator` (it re-reads the now-empty dictionary and ledger), and refresh. Each step runs even if an earlier one fails, and failures are reported. Settings and the downloaded model are kept. Backups or snapshots may still hold copies. [Certain]
+
+**Updates (R12).** `Updates.swift` is compiled into the app. When `updateChecksEnabled` is set, outside preview, an automatic `check(manual: false)` runs at launch. The 60-second timer then attempts one at most hourly (`UpdateSchedule`). `UserDefaultsUpdateCheckStore` limits completed checks to one a day across relaunches. The hourly limit exists because offline attempts do not count toward that daily throttle. Check for Updates (Settings and the menu bar) runs `check(manual: true)`. Results only change the Updates status line in Settings and the menu item title. They never change the dictation phase or show a bubble. An available release shows its title and plain-text notes, plus Open Release Page, which opens the validated GitHub page through `NSWorkspace`. Nothing is downloaded. The toggle explains that checks use the network even though inference is local. The current version comes from `CFBundleShortVersionString` (`0.1.0`). The repository is still the `Penguin0011/dictation` default in `UpdateConfiguration`. [Certain]
+
+**Verified on Linux (Swift 6.1.2), October 3, 2026:** `check_app_services.swift` passes. It covers the model row and gates, the license and confirmation text, history-off routing (including concurrent saves), memory retention, the post-wipe order and messages against a real temporary `DataWipe`, update text, the hourly attempt rule, and the UserDefaults throttle across checker instances. Controller.swift, UI.swift and check_controller.swift typecheck under `-swift-version 5` against hand-written AppKit/SwiftUI stubs. The stubs check identifiers, types and bindings, not real SDK signatures. main.swift cannot be typechecked on Linux (`#selector`). [Certain]
+
+**Not verified until the Mac build:** the app and fixture builds with `-O`, the real SwiftUI layout of the new rows (`ProgressView` is the only view type new to UI.swift), the alerts, a real 1.8 GB download, cancel and resume in the app, Keychain deletion, a live GitHub check, and opening the release page. [Certain]
 
 ## Cleanup
 
