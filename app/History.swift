@@ -41,7 +41,14 @@ struct HistoryStore {
     func entries() throws -> [HistoryEntry] {
         try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey])
             .filter { $0.pathExtension == "json" && ((try? $0.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true) }
-            .compactMap { try? JSONDecoder().decode(HistoryEntry.self, from: Data(contentsOf: $0)) }
+            .map { file in
+                let entry = try JSONDecoder().decode(HistoryEntry.self, from: Data(contentsOf: file))
+                guard UUID(uuidString: entry.id) != nil,
+                      file.lastPathComponent == entry.id + ".json" else {
+                    throw CaptureError("History identifier does not match its file")
+                }
+                return entry
+            }
             .sorted { $0.recordedAt > $1.recordedAt }
     }
     func delete(_ entry: HistoryEntry) throws {
@@ -54,7 +61,8 @@ struct HistoryStore {
         if retention == "six-months" {
             guard let date = calendar.date(byAdding: .month, value: -6, to: now) else { throw CaptureError("Invalid retention date") }
             cutoff = date
-        } else { cutoff = now.addingTimeInterval(-30 * 86400) }
+        } else if retention == "30-days" { cutoff = now.addingTimeInterval(-30 * 86400) }
+        else { throw CaptureError("Invalid history retention policy") }
         return try entries().filter { $0.recordedAt <= cutoff }
     }
     func purge(retention: String) throws { for entry in try expired(retention: retention) { try delete(entry) } }
