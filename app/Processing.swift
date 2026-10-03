@@ -126,6 +126,7 @@ final class ProcessingCoordinator {
     /// the network and never substitutes the local cleaner: it holds, unless no cleanup option is
     /// enabled. The app calls `processAsync` whenever the route is not local rules.
     func process(_ raw: String) -> ProcessingOutcome {
+        lastProviderError = nil
         let prepared = prepare(raw)
         let options = settings.options
         switch settings.route {
