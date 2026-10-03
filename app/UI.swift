@@ -384,7 +384,9 @@ struct SettingsView: View {
                     .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
             }
             HStack(spacing: 8) {
-                SecureField("", text: text).accessibilityLabel("\(provider.displayName) API key")
+                // A visible box and prompt: an unstyled field drew nothing, so there was nowhere obvious to click or paste.
+                SecureField("", text: text, prompt: Text("Paste your \(provider.displayName) API key"))
+                    .textFieldStyle(.roundedBorder).accessibilityLabel("\(provider.displayName) API key")
                 Button("Save") { if controller.saveKey(provider, text.wrappedValue) { text.wrappedValue = "" } }
                     .disabled(text.wrappedValue.isEmpty)
                 Button("Validate") { controller.validateKey(provider) }
@@ -552,6 +554,21 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
+
+/// Text fields receive ⌘X/⌘C/⌘V/⌘A/⌘Z through the Edit menu; without it, pasting an API key does nothing.
+func standardEditMenuItem() -> NSMenuItem {
+    let edit = NSMenu(title: "Edit")
+    edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+    edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+    edit.addItem(.separator())
+    edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+    edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+    edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+    edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+    let item = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+    item.submenu = edit
+    return item
 }
 
 func showsFloatingIndicator(phase: String) -> Bool {

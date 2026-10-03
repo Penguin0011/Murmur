@@ -17,7 +17,7 @@ import SwiftUI
         application.delegate = delegate
         let menu = NSMenu(); let item = NSMenuItem(); let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Quit UI Check", action: #selector(FixtureDelegate.quit), keyEquivalent: "q").target = delegate
-        item.submenu = appMenu; menu.addItem(item); application.mainMenu = menu
+        item.submenu = appMenu; menu.addItem(item); menu.addItem(standardEditMenuItem()); application.mainMenu = menu
         application.appearance = NSAppearance(named: CommandLine.arguments.contains("--light") ? .aqua : .darkAqua)
         let controller = AppController(preview: true)
         delegate.controller = controller
