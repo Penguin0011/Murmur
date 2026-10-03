@@ -11,6 +11,7 @@ import Darwin
     @Published var message = "Hold Right Option to dictate, or tap to start and tap again to finish."
     @Published var history: [HistoryEntry] = []
     @Published var recoveryEntryID: String?
+    @Published var recoveryAudio: URL?
     @Published var modelDirectory: String
     @Published var shortcut: String
     @Published var showMenuBar: Bool
@@ -229,6 +230,8 @@ import Darwin
     func cancelRecording() { guard let listener else { return }; listener.emit(listener.machine.cancel()) }
     private func setPhase(_ phase: String, _ message: String) {
         self.phase = phase; self.message = message
+        // Errors raised while processing leave that session's audio retained for retry.
+        recoveryAudio = phase == "Error" && sessionAvailable && session.state == .processing ? session.audio : nil
         hideGeneration = UUID(); updateMenu?()
         if phase != "Ready" { bubble.show(phase: phase, message: message, screen: destinationScreen) }
         if phase == "Inserted" {
@@ -325,7 +328,7 @@ import Darwin
         if alert.runModal() == .alertFirstButtonReturn { for entry in history { try? store?.delete(entry) }; refreshHistory() }
     }
     func showSettings() { openSettings?() }
-    func revealRecoveryAudio() { if let retry { NSWorkspace.shared.open(retry.directory) } }
+    func revealRecoveryAudio() { if let recoveryAudio { NSWorkspace.shared.activateFileViewerSelecting([recoveryAudio]) } }
     func shutdown() {
         generation = UUID(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
         if sessionAvailable { session.shutdown() }

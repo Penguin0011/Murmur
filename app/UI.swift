@@ -190,7 +190,7 @@ private struct BubbleView: View {
                     controller.showSettings()
                     DispatchQueue.main.async { NotificationCenter.default.post(name: .dictationShowHistory, object: nil) }
                 }
-                if phase == "Error" { Button("Audio", action: controller.revealRecoveryAudio) }
+                if phase == "Error", controller.recoveryAudio != nil { Button("Audio", action: controller.revealRecoveryAudio) }
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 14).frame(maxWidth: 600)
