@@ -4,7 +4,7 @@ Work proceeds on `aakash-module-one`, fast-forwarded from the recorded feasibili
 
 “Module one” is interpreted as PRD milestone 1: resolve decisions, prepare model benchmarks, and validate shortcut/capture/insertion/observation feasibility. No separately named module-one plan exists in the checkout. [Certain]
 
-Current checks: Swift spike build, deterministic checks, ten CLI rejection cases, and read-only Codex field inspection passed. Historical real-app evidence is preserved separately from current verification. [Certain]
+Current checks: Swift spike build, deterministic checks, ten CLI rejection cases, read-only Codex field inspection, bounded event-tap startup, capture build/synthetic storage checks, and synthetic benchmark scoring checks passed. Microphone permission reports authorized; no speech recording or model inference is claimed. Historical real-app evidence is preserved separately from current verification. [Certain]
 
 Workers own `module-one/capture/`, `module-one/models/`, and `module-one/SAFETY_REVIEW.md`; the lead owns this handoff, PRD decisions, and `spike/FEASIBILITY.md`. Live microphone permission and M1 availability must be reported without requesting intervention or fabricating results. [Certain]
 

@@ -29,6 +29,12 @@ shortcut state=idle
 
 Right Option tap/hold and Escape cancellation therefore have live keyboard evidence on this device. Fn, configured-chord conflicts, microphone first-word capture, and the M1 baseline remain unverified. Key-repeat and processing suppression remain deterministic-check evidence. [Certain]
 
+## Milestone 1 continuation checkpoint
+
+Standalone capture now builds and passes synthetic WAV roundtrip, restrictive file/directory permissions, original-creation 24-hour expiry, and synthetic canceled-file deletion checks. The current execution context reports microphone authorization, but no speech recording or physical shortcut/audio integration has been tested. A fresh bounded two-second CGEventTap startup/teardown passed with Accessibility and Input Monitoring granted. [Certain]
+
+Model work lives in `module-one/models/`; capture work lives in `module-one/capture/`. The independent review in `module-one/SAFETY_REVIEW.md` identifies delayed AX-write duplicate delivery, non-atomic clipboard/focus races, incomplete secure-field coverage, and unresolved semantic correction promotion as production acceptance gaps. [Certain]
+
 ## Device and tools
 
 October 2, 2026: MacBook Air Mac15,12, Apple M3, 16 GB RAM, macOS 26.6.2 (25G83), Swift 6.3.3. Accessibility and Input Monitoring preflight returned true for the execution context. The M1/8 GB baseline is unavailable in this run. [Certain]
