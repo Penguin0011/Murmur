@@ -57,8 +57,9 @@ func describe(_ field: FocusSnapshot) {
     print("app=\(field.bundleID) role=\(field.role) subrole=\(field.subrole) secure=\(field.secure) valueReadable=\(field.value != nil) selectionReadable=\(field.selection != nil) learningEligible=\(field.learningEligible)")
 }
 
-func observe(_ field: FocusSnapshot, insertedText: String, insertionOffset: Int) throws {
-    guard field.learningEligible, let value = field.value else {
+func observe(_ insertion: InsertionResult, insertedText: String, insertionOffset: Int) throws {
+    // learningEligible is only a pre-insertion check; a stub field (VS Code) passes it, so verified read-back is required too.
+    guard insertion.status == .verified, let field = insertion.snapshot, field.learningEligible, let value = field.value else {
         throw InsertionError.unavailable("Field is ineligible for observation")
     }
     let length = (insertedText as NSString).length
@@ -109,9 +110,8 @@ do {
         }
         let result = insertText(text, into: destination)
         print("insertion=\(result.status.rawValue) detail=\(result.detail)")
-        if arguments.contains("--observe"), result.status == .verified, let snapshot = result.snapshot,
-           let selection = destination.selection {
-            try observe(snapshot, insertedText: text, insertionOffset: selection.location)
+        if arguments.contains("--observe"), result.status == .verified, let selection = destination.selection {
+            try observe(result, insertedText: text, insertionOffset: selection.location)
         }
     } else {
         throw InsertionError.unavailable("Use --check, --inspect [--delay 3], --listen [--binding right-option|fn|ctrl-option-space], or --insert-test --expected-app BUNDLE_ID [--observe] [--delay 3]")

@@ -174,7 +174,7 @@ A screenshot afterwards showed `Code probe: Acme dictation probe` (Ln 1, Col 33)
 Product findings: [Certain]
 
 - Insertion into VS Code works in its default configuration via the paste fallback, which meets the no-user-setup requirement for delivery.
-- `learningEligible=true` is wrong for this field: the role and readable attributes pass, but the value is a stub. A learning gate should also require read-back to have verified the inserted text; here it did not, so no observation ran.
+- `learningEligible=true` is only a pre-insertion check, and this stub field passes it. Learning was already blocked here: observation starts only after verified read-back, and the inserted text must sit at the anchored range. `observe()` now requires a verified insertion itself rather than relying on its caller; checks and a live TextEdit regression (replace, Undo, append) still pass.
 - Correction learning in VS Code would need screen reader mode or an editor extension, both setup the user has ruled out for launch.
 
 ## Rich-text synthetic test evidence
