@@ -181,3 +181,12 @@ Physical shortcut/microphone first-word behavior, real speech quality, clipboard
 ## Leading space
 
 Enable **Intelligently add a leading space** and apply settings to separate inserted dictation from existing text. The option defaults off. It uses the original field value and UTF-16 cursor position, and only inserts a space when preceding text needs separation. It skips existing whitespace, opening delimiters, punctuation-led output, selected-text replacement, word interiors, and unavailable/invalid context. The insertion safety check still rejects changed destinations. Raw transcription stays unchanged; History final text records the attempted insertion including its added space. Copy-only output remains unchanged. [Certain]
+
+## Gemini transcription and local cleanup servers (not yet wired in)
+
+`Providers.swift` adds `GeminiTranscriptionProvider` and `OpenAICompatibleCleanupProvider`. Neither is wired into the controller or settings yet. Both are covered by `check_providers.swift`, which uses no network and no keys. [Certain]
+
+- **Gemini transcription** is a language model asked to transcribe, not a speech recognizer. Before sending, call `GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel:durationSeconds:)` and skip silent recordings. Use `transcribeChecked(_:)` and hold the result for recovery when `answerSuspected` is true. Its disclosure says that audio leaves this Mac to Google, and that free-tier keys allow human review. [Certain]
+- **Local cleanup** sends the cleanup prompt to `{base}/v1/chat/completions` on a server the user runs. Documented defaults: Ollama `http://localhost:11434`, LM Studio `http://localhost:1234`, llama-server `http://127.0.0.1:8080`, vLLM `http://localhost:8000`. `discoverModels()` lists the server's models. Only loopback addresses count as on this Mac; any other host is disclosed as leaving it. If nothing is listening, the error reads "No local model server is running at host:port". [Certain]
+
+No real Gemini key or local model server has been used yet; see [PROVIDERS.md](PROVIDERS.md). [Certain]

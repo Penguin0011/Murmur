@@ -98,7 +98,19 @@ Validation deliverable for the selected default:
 
 Cloud providers (user-named candidates): **Fireworks API**, **Gemini API**, and **OpenRouter**. [Certain]
 
-**Proposed decision, pending user approval — October 3, 2026.** Fireworks' changelog deprecated audio inference on 2026-06-10; its transcription guide and API reference now return 404, and audio pricing is gone from its pricing page. [Certain] ([app/PROVIDERS.md](app/PROVIDERS.md)) Fireworks is therefore not a launch STT candidate. The proposed launch STT route is OpenRouter `POST https://openrouter.ai/api/v1/audio/transcriptions` (OpenAI-style multipart, 25 MB upload limit, default model `openai/whisper-large-v3-turbo`). [Certain about the documented endpoint; the choice is a proposal] The proposed cleanup routes are Gemini `generateContent` (default `gemini-3.5-flash-lite`) and OpenRouter chat completions. [Certain about the documented endpoints; the choice is a proposal] No provider call has been made with a real API key; each route needs a live key test before it is offered in settings. [Certain] Gemini audio-in prompting stays an unimplemented alternative, since it has no dedicated transcription endpoint and its output can paraphrase. [Certain] A free-tier Gemini key exposes input to human review, so the cloud disclosure must say so. [Certain]
+**Proposed decision, pending user approval — October 3, 2026 (revised).** Everything in this paragraph is a proposal. No route has had a live test with a real key or a real local server. [Certain] Sources: [app/PROVIDERS.md](app/PROVIDERS.md).
+
+- **Fireworks STT is dead.** Its audio inference was deprecated on 2026-06-10. [Certain]
+- **Cloud STT options:**
+  - **OpenRouter Whisper**, `POST /api/v1/audio/transcriptions` with default `openai/whisper-large-v3-turbo` and a 25 MB limit. Recommended, because it is true ASR. [Certain about the endpoint; the recommendation is a proposal]
+  - **Gemini audio** through `generateContent` with inline audio (20 MB total request, 32 tokens per second). It is an LLM transcriber, not ASR. Risks: it may follow or answer spoken instructions, hallucinate text on silence, or tidy wording. There is no raw transcript to guard it against. Mitigations are implemented: temperature 0, a `{"transcript"}` schema, strict parsing, a silence pre-check, and an `answerSuspected` hold for recovery. They reduce these risks but do not remove them. [Certain about the documented limits; Likely about the risks]
+  - Google also documents a dedicated ASR model, `gemini-3.5-transcribe`, but only through the Beta Interactions API. It is not implemented and needs a decision. [Certain]
+- **Cleanup routes:**
+  - The built-in RuleCleaner, the local default.
+  - A user-run local OpenAI-compatible server (Ollama, LM Studio, llama-server or vLLM) at `{base}/v1/chat/completions`. It counts as local only for loopback hosts (`localhost`, 127.0.0.0/8, `::1`). Any other host is disclosed as "the transcript leaves this Mac to <host>", with an extra warning for plain http.
+  - Gemini `generateContent`, default `gemini-3.5-flash-lite`.
+  - OpenRouter chat completions.
+- **Rules for every route:** no silent fallback, and a free-tier Gemini key's human-review exposure is disclosed. [Certain]
 
 *Superseded on October 3, 2026 by the proposed decision above (kept for history):* Proposed split, pending verification: Fireworks as the first speech-to-text provider if its hosted Whisper transcription endpoint is confirmed; Gemini and OpenRouter as cleanup providers (OpenRouter also covers OpenAI/Anthropic models through one key), with Gemini audio transcription evaluated as an alternative STT route. Verify before implementation: exact model IDs, current pricing, audio format and size limits, whether each exposes a true transcription endpoint or only audio-in chat, data-retention terms, and error/rate-limit behavior. Launch needs one verified STT provider and at least one cleanup provider; do not assume the others.
 

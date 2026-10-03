@@ -3,17 +3,21 @@ import Foundation
 import Security
 #endif
 
-/// Cloud providers that can hold a user-supplied API key. The raw value is the Keychain account name.
+/// Providers that can hold a user-supplied API key. The raw value is the Keychain account name.
+/// `localServer` is a user-run OpenAI-compatible server (Ollama, LM Studio, llama-server, vLLM);
+/// its key is optional and it is on-device only when its address is loopback (see Providers.swift).
 enum ProviderID: String, CaseIterable, Codable, Sendable {
     case fireworks
     case gemini
     case openrouter
+    case localServer
 
     var displayName: String {
         switch self {
         case .fireworks: return "Fireworks"
         case .gemini: return "Gemini"
         case .openrouter: return "OpenRouter"
+        case .localServer: return "Local model server"
         }
     }
 }
