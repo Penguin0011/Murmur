@@ -25,3 +25,13 @@ Run checks and build the integrated spike, then complete real keyboard and five-
 All three workers handed off their owned Swift files. The lead compiled the integrated harness and ran `spike/.build/dictation-spike --check` successfully after fixing a surrogate-boundary assertion failure. Read-only focus inspection had no accessible field; no live insertion or keyboard coverage is claimed. [Certain]
 
 Runnable inputs/outputs and safety limits are documented in `spike/README.md`; current acceptance evidence is in `spike/FEASIBILITY.md`. Next session should begin with the live synthetic-field matrix, not an app skeleton or model download. [Certain]
+
+## Live continuation
+
+TextEdit 1.20 on the M3 host passed verified native AX insertion, observable spelling replacement, Undo evidence removal, and stop on unrelated cursor movement. The live test exposed caret anchoring and foreground capture bugs; both are fixed with integrated checks. [Certain]
+
+Arc 1.166.0's local textarea exposed AXWebArea to native capture; AX write reported success but the visible textarea did not change. Unverified delivery correctly stopped without paste retry or learning. Browser enhanced accessibility remains a setup investigation, not an assumed fix. No settings or permission grants were changed. [Certain]
+
+Bounded CGEventTap startup/teardown passed. User-operated Right Option hold-release and tap-stop passed a labeled live trace; Escape cancellation appeared in the earlier live trace. Fn, additional native observation cases, rich/chat/code-editor coverage, and the M1/8 GB baseline remain pending. `--insert-test` now requires `--expected-app` and malformed/mixed CLI modes are rejected before UI access, checked by `python3 spike/check_cli.py`. [Certain]
+
+Independent review found and fixed a clipboard ownership gap. The paste fallback now requires its staged unique token and stable change count before paste/restoration; regression checks pass. AXWebArea/document roles are rejected for insertion and learning, even if a native API reports readable value/selection. [Certain]
