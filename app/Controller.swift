@@ -902,8 +902,11 @@ final class PreStart: @unchecked Sendable {
     // Explicit developer check of the production pipeline, using a synthetic file
     // and an exact disposable destination. Never enabled during ordinary launch.
     func checkSavedAudio(_ audio: URL, expectedApp: String, completion: @escaping () -> Void) {
-        guard sessionAvailable, modelFilesAvailable(), let focused = try? captureFocus(),
-              focused.bundleID == expectedApp, focused.pid != getpid(), !focused.secure else {
+        // Canvas editors (Google Docs) expose no focused field; the frontmost app must still match.
+        let focused = try? captureFocus()
+        guard sessionAvailable, modelFilesAvailable(), let front = NSWorkspace.shared.frontmostApplication,
+              front.bundleIdentifier == expectedApp, front.processIdentifier != getpid(), focused?.secure != true,
+              focused == nil || focused?.pid == front.processIdentifier else {
             fputs("app-check=refused destination-or-model-unavailable\n", stderr); completion(); return
         }
         guard !isBusy, let retry else { completion(); return }
