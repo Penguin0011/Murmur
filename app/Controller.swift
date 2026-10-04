@@ -67,6 +67,71 @@ final class WarmRunner: @unchecked Sendable {
     }
 }
 
+/// One local recording's chunk transcripts, made while it records (see Chunker), so release waits
+/// only for the last chunk. Chunks go to the helper one at a time; the first failure drops the
+/// rest, so the full-WAV fallback never queues behind them.
+final class ChunkJob: @unchecked Sendable {
+    private let lock = NSLock()
+    private var texts: [String?] = [], sentenceEnds: [Bool] = []
+    private var queued: [(index: Int, url: URL)] = [], inFlight = false
+    private var failed = false, ended = false, discarded = false
+    private var waiter: ((String?) -> Void)?
+    private let transcribe: (URL, @escaping (Data?) -> Void) -> Void
+
+    init(transcribe: @escaping (URL, @escaping (Data?) -> Void) -> Void) { self.transcribe = transcribe }
+
+    /// Called on the capture queue, in order.
+    func receive(_ event: Chunker.Event) {
+        switch event {
+        case .failed: lock.withLock { failed = true }; settle()
+        case .end: lock.withLock { ended = true }; settle()
+        case .chunk(let url, let last, let sentenceEnd):
+            let accepted: Bool = lock.withLock {
+                guard !discarded, !failed else { return false }
+                texts.append(nil); sentenceEnds.append(sentenceEnd); if last { ended = true }
+                queued.append((texts.count - 1, url)); return true
+            }
+            guard accepted else { try? FileManager.default.removeItem(at: url); return }
+            pump()
+        }
+    }
+    private func pump() {
+        let next: (index: Int, url: URL)? = lock.withLock {
+            guard !inFlight, !queued.isEmpty else { return nil }
+            inFlight = true; return queued.removeFirst()
+        }
+        guard let next else { return }
+        transcribe(next.url) { [self] line in
+            try? FileManager.default.removeItem(at: next.url)
+            let text = line.flatMap { (try? JSONSerialization.jsonObject(with: $0) as? [String: Any])?["text"] as? String }
+            let dropped: [URL] = lock.withLock {
+                inFlight = false
+                if let text { texts[next.index] = text; return [] }
+                failed = true; defer { queued = [] }; return queued.map(\.url)
+            }
+            dropped.forEach { try? FileManager.default.removeItem(at: $0) }
+            settle(); pump()
+        }
+    }
+    /// Whether the last chunk arrived (or chunking failed), so `result` will answer.
+    var isEnded: Bool { lock.withLock { ended || failed } }
+    /// Answers once: the joined transcript, or nil on any failure.
+    func result(_ completion: @escaping (String?) -> Void) { lock.withLock { waiter = completion }; settle() }
+    /// A canceled or abandoned recording: later chunks are deleted unread.
+    func discard() {
+        let dropped: [URL] = lock.withLock { discarded = true; waiter = nil; defer { queued = [] }; return queued.map(\.url) }
+        dropped.forEach { try? FileManager.default.removeItem(at: $0) }
+    }
+    private func settle() {
+        let answer: (((String?) -> Void), String?)? = lock.withLock {
+            guard let waiter, failed || (ended && !texts.contains(where: { $0 == nil })) else { return nil }
+            self.waiter = nil
+            return (waiter, failed ? nil : Chunker.join(texts.map { $0! }, sentenceEnds: sentenceEnds))
+        }
+        if let (waiter, text) = answer { waiter(text) }
+    }
+}
+
 /// Starts capture on a dedicated queue as soon as the tap thread sees a shortcut press, so a slow
 /// main thread does not delay the microphone. The session adopts it; anything unclaimed is deleted.
 final class PreStart: @unchecked Sendable {
@@ -109,11 +174,14 @@ final class PreStart: @unchecked Sendable {
     var modelAvailable: Bool { modelFilesAvailable() }
     @Published var intelligentLeadingSpace: Bool
     @Published var automaticInsertion: Bool
+    /// One press starts recording and the next press stops it, instead of hold-to-record.
+    @Published var pressToToggle: Bool
     @Published var retention: String
     // Cleanup and learning settings, applied as soon as they change like the others.
     @Published var cleanupFillers: Bool
     @Published var cleanupCorrections: Bool
     @Published var cleanupLists: Bool
+    @Published var cleanupPunctuation: Bool
     @Published var learningEnabled: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
     @Published var dictionaryEntries: [DictionaryEntry] = []
@@ -193,6 +261,8 @@ final class PreStart: @unchecked Sendable {
     /// Recording continues this long after release so the last word survives.
     nonisolated static let releaseTail: TimeInterval = 0.4
     private let warm = WarmRunner()
+    /// Chunk transcripts of local recordings, keyed by each recording's audio file.
+    private var chunkJobs: [URL: ChunkJob] = [:]
     private var noNap: NSObjectProtocol?
     private var monitor: Timer?
     private var expiry: Timer?
@@ -214,7 +284,7 @@ final class PreStart: @unchecked Sendable {
             guard let self else { throw CaptureError("Application stopped") }
             let recording = Capture(); self.capture = recording
             try recording.start(url: url)
-            self.setPhase("Listening", "Listening… Release to finish, or press Escape to cancel.")
+            self.setPhase("Listening", self.listeningMessage)
         }, stop: { [weak self] in
             guard let self else { return false }
             self.capture?.stop()
@@ -225,6 +295,7 @@ final class PreStart: @unchecked Sendable {
         }, process: { [weak self] url, done in
             guard let self else { done(); return }
             if self.recordingFailed {
+                self.chunkJobs.removeValue(forKey: url)?.discard()
                 self.setPhase("Error", "Recording was interrupted. Partial audio is saved for retry.")
                 done()
             } else { self.transcribe(url, done: done) }
@@ -242,12 +313,14 @@ final class PreStart: @unchecked Sendable {
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
+        pressToToggle = defaults.bool(forKey: "pressToToggle")
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
         let processingSettings = ProcessingSettings.load(from: defaults)
         cleanupFillers = processingSettings.options.fillers
         cleanupCorrections = processingSettings.options.corrections
         cleanupLists = processingSettings.options.lists
+        cleanupPunctuation = processingSettings.options.punctuation
         learningEnabled = processingSettings.learningEnabled
         historyMode = processingSettings.historyMode
         appliedHistoryMode = processingSettings.historyMode
@@ -264,6 +337,10 @@ final class PreStart: @unchecked Sendable {
             store = try HistoryStore(directory: base.appendingPathComponent("history"))
             if let store { records = HistoryRouter(disk: historyDisk(store), persists: appliedHistoryMode.persistsTranscripts) }
             retry = try RetryAudio(directory: base.appendingPathComponent("retry-audio"))
+            // Chunk files live only while their recording is transcribed; any left by a crash go now.
+            let chunks = base.appendingPathComponent("chunks", isDirectory: true)
+            try? FileManager.default.removeItem(at: chunks)
+            if (try? FileManager.default.createDirectory(at: chunks, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])) != nil { Chunker.directory = chunks }
             // Dictionary/ledger corruption disables only cleanup and the dictionary: dictations are then held for review in History rather than blocking all dictation.
             do { processing = try ProcessingCoordinator(directory: base.appendingPathComponent("dictionary"), isCommonWord: isCommonEnglishWord) }
             catch { processing = nil; dictionaryMessage = "The dictionary could not be read. Dictations are held in History until it is repaired." }
@@ -283,6 +360,7 @@ final class PreStart: @unchecked Sendable {
         // Choose Folder, Use Default and a finished download all change the folder, even with
         // Settings closed; apply each so the folder survives a relaunch.
         folderWatch = $modelDirectory.dropFirst().removeDuplicates().sink { [weak self] _ in self?.settingsChanged() }
+        if phase == "Ready" { message = idleMessage }
     }
     func start() {
         // Writing to a warm helper that died must fail with EPIPE, not kill Murmur.
@@ -315,6 +393,8 @@ final class PreStart: @unchecked Sendable {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.voiceLevel = self.capture?.queue.sync { self.capture?.level ?? 0 } ?? 0
+                // A canceled or empty recording's audio is gone; drop its chunk transcripts.
+                for (audio, job) in self.chunkJobs where !FileManager.default.fileExists(atPath: audio.path) { job.discard(); self.chunkJobs[audio] = nil }
                 // Download progress and the verifying phase are sampled here, on the main thread.
                 if self.modelDownloadInFlight, let status = self.downloader?.status(), status != self.modelStatus { self.modelStatus = status }
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
@@ -405,7 +485,7 @@ final class PreStart: @unchecked Sendable {
         }
         // R4: confirm what leaves this Mac before the first use of a route, provider or endpoint.
         let routes = routeSettings
-        let plan = routePlan(routes, cleanupSendsText: cleanupFillers || cleanupCorrections || cleanupLists)
+        let plan = routePlan(routes, cleanupSendsText: cleanupFillers || cleanupCorrections || cleanupLists || cleanupPunctuation)
         let pending = DisclosureAcknowledgement.pending(plan, acknowledged: DisclosureAcknowledgement.acknowledged(.standard))
         if !pending.isEmpty {
             let text = DisclosureText.alert(pending)
@@ -418,12 +498,12 @@ final class PreStart: @unchecked Sendable {
         appliedHistoryMode = historyMode; records?.persistsTranscripts = historyMode.persistsTranscripts
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
-        defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion")
+        defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(retention, forKey: "retention")
         if let processing {
             var next = processing.settings
-            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists)
+            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation)
             next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
             next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled
             do { try processing.update(next) } catch { setPhase("Error", "Could not save cleanup and learning settings.") }
@@ -432,7 +512,9 @@ final class PreStart: @unchecked Sendable {
         defaults.set(historyMode.rawValue, forKey: ProcessingSettings.Key.historyMode)
         defaults.set(updateChecksEnabled, forKey: ProcessingSettings.Key.updateChecks)
         do { try store?.purge(retention: appliedRetention); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
-        refreshPermissions(); if !preview { configureShortcut() }; updateMenu?()
+        refreshPermissions(); if !preview { configureShortcut() }
+        if phase == "Ready" { message = idleMessage }
+        updateMenu?()
     }
     private func revertRoutes() {
         transcriptionRoute = appliedRoutes.transcription; cloudTranscriber = appliedRoutes.cloudTranscriber; cleanupChoice = appliedRoutes.cleanup
@@ -453,6 +535,8 @@ final class PreStart: @unchecked Sendable {
         })
         guard let tap = next.createTap(), let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = "The shortcut could not start. Check Input Monitoring and Accessibility."; return }
         next.onEscapeWhileProcessing = { [weak self] in self?.cancelCloudRequest() }
+        next.onCopyChord = { [weak self] in self?.copyLatestRawTranscript() }
+        next.pressToToggle = pressToToggle
         // A press while the previous dictation processes records right away; its events replay
         // into the machine when that dictation finishes, which adopts this capture.
         next.onQueuedPress = { [weak self] in
@@ -481,10 +565,12 @@ final class PreStart: @unchecked Sendable {
             guard let self, let (capture, url) = self.prestart.take() else { return nil }
             self.capture = capture; return url
         }
-        session.resumeCapture = { [weak self] in self?.setPhase("Listening", "Listening… Release to finish, or press Escape to cancel.") }
+        session.resumeCapture = { [weak self] in guard let self else { return }; self.setPhase("Listening", self.listeningMessage) }
         session.finishRecording = { [weak self] in timingLog.notice("capture-cap reached"); guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
+    private var idleMessage: String { pressToToggle ? "Press your shortcut to dictate, and press it again to finish." : "Hold your shortcut to dictate, or double-press it to dictate until you press it again." }
+    private var listeningMessage: String { "Listening… \(listener?.pressToToggle == true ? "Press the shortcut again" : "Release") to finish, or press Escape to cancel." }
     private func removeShortcut() {
         shortcutGeneration = UUID()
         tapThread?.stop(); tapThread = nil
@@ -515,11 +601,26 @@ final class PreStart: @unchecked Sendable {
             destinationScreen = screenForDestination(destination)
         }
         session.receive(action, completed: done)
+        if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
         if action == .cancel { destination = nil; setPhase("Ready", "Recording canceled."); bubble.hide() }
         else if action == .start && session.state == .idle { setPhase("Error", "The microphone could not start. Check the selected input device.") }
         else if action == .finish && session.state == .idle && phase == "Listening" {
             destination = nil; setPhase("Error", "No audio was captured. Check your microphone and try again.")
         }
+    }
+    /// Local route: transcribe this recording's chunks on the warm helper while it records.
+    private func attachChunks(_ capture: Capture, audio: URL) {
+        let models = URL(fileURLWithPath: activeModelDirectory)
+        guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"),
+              let fingerprint = try? ModelVerificationCache.fingerprint(models, manifest: manifest) else { return }
+        let key = models.path + "|" + fingerprint.joined(separator: ","), warm = warm
+        let job = ChunkJob { url, done in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil else { done(nil); return }
+                warm.transcribe(url, helper: helper, models: models, key: key, completion: done)
+            }
+        }
+        if capture.attachChunks({ job.receive($0) }) { chunkJobs[audio] = job }
     }
     private func modelFilesAvailable() -> Bool {
         guard let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"),
@@ -606,6 +707,24 @@ final class PreStart: @unchecked Sendable {
     private struct NoSpeech: Error {}
     /// Warm helper first; if it cannot answer, the one-shot helper transcribes the same audio.
     private func runTranscription(_ helper: URL, models: URL, manifest: URL, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
+        // Chunks transcribed during recording; if any failed, the full WAV goes through below.
+        if let job = chunkJobs.removeValue(forKey: audio) {
+            if job.isEnded {
+                let began = ProcessInfo.processInfo.systemUptime
+                job.result { [weak self] text in
+                    timingLog.notice("chunks took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3)) answered=\(text != nil, privacy: .public)")
+                    if let text, let line = try? JSONSerialization.data(withJSONObject: ["text": text]) {
+                        self?.handleTranscript(.success(line), audio: audio, store: store, timestamp: timestamp, token: token, done: done); return
+                    }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.generation == token else { return }
+                        self.runTranscription(helper, models: models, manifest: manifest, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+                    }
+                }
+                return
+            }
+            job.discard()
+        }
         let key = models.path + "|" + ((try? ModelVerificationCache.fingerprint(models, manifest: manifest))?.joined(separator: ",") ?? "")
         let began = ProcessInfo.processInfo.systemUptime
         warm.transcribe(audio, helper: helper, models: models, key: key) { [weak self] line in
@@ -720,7 +839,7 @@ final class PreStart: @unchecked Sendable {
                 timingLog.notice("cleanup-held reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError != nil, privacy: .public)")
             }
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
-            do { try store.save(entry); setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History.") }
+            do { try store.save(entry); setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History. Press ⌃⌘C to copy it.") }
             catch { setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History; its status could not be saved.") }
             destination = nil; historySaved(); done(); return
         }
@@ -805,9 +924,16 @@ final class PreStart: @unchecked Sendable {
     }
     func copyEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.finalText, forType: .string) }
     /// The explicit raw-text action for held cleanup (and any entry whose final text differs).
+    /// ⌃⌘C anywhere: the latest dictation's raw transcript, so a held or uninserted one needs no
+    /// trip to History. Does nothing when this launch has no transcript yet.
+    func copyLatestRawTranscript() {
+        guard let id = recoveryEntryID, let entry = history.first(where: { $0.id == id }) else { return }
+        copyRawEntry(entry)
+        if !isBusy { setPhase("Ready", "Raw transcript copied.") }
+    }
     func copyRawEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.rawText, forType: .string) }
     /// Turns all three cleanup options off. Like other settings, it takes effect at once.
-    func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false }
+    func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false; cleanupPunctuation = false }
     func refreshDictionary() { dictionaryEntries = processing?.dictionary.entries ?? [] }
     @discardableResult
     func addDictionaryEntry(preferred: String, variants: String) -> Bool {
@@ -844,7 +970,7 @@ final class PreStart: @unchecked Sendable {
     func dismissStatus() {
         guard !isBusy else { return }
         if sessionAvailable {
-            setPhase("Ready", "Hold your shortcut to dictate, or double-press it to dictate until you press it again.")
+            setPhase("Ready", idleMessage)
         } else {
             phase = "Error"; message = "Private storage is unavailable. Murmur cannot start."
             updateMenu?()

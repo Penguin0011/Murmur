@@ -63,7 +63,9 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try settingsChecks(defaults)
         try localChecks(ProcessingCoordinator(directory: root.appendingPathComponent("local"), defaults: defaults))
         try await cloudChecks(ProcessingCoordinator(directory: root.appendingPathComponent("cloud"), defaults: defaults))
+        try punctuationChecks()
         try learningChecks(root.appendingPathComponent("learn"), defaults)
+        try await sectionChecks(ProcessingCoordinator(directory: root.appendingPathComponent("sections"), defaults: defaults))
         try editorChecks(ProcessingCoordinator(directory: root.appendingPathComponent("editor"), defaults: defaults))
         print("\(passes) checks passed, \(failures) failed")
         if failures > 0 { exit(1) }
@@ -212,6 +214,20 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(idle.messages.isEmpty, "local route never calls the provider")
     }
 
+    /// Punctuation: local capitals only; the guard allows an added "?" only with the option on; old saved options decode with it off.
+    static func punctuationChecks() throws {
+        let on = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
+        check(RuleCleaner.capitalizeSentences("hello we went. then i'm sure i said hi? yes") == "Hello we went. Then I'm sure I said hi? Yes", "local capitals")
+        check(RuleCleaner.capitalizeSentences("it is 3.5 percent") == "It is 3.5 percent", "decimals are not sentence ends")
+        check(CleanupGuard.check(raw: "hello we are building it is that right", cleaned: "Hello, we are building it. Is that right?", options: on) == .pass, "punctuation-only edit passes")
+        check(CleanupGuard.check(raw: "is that right", cleaned: "Is that right?", options: CleanupOptions(fillers: false, corrections: false, lists: false)) != .pass, "an added ? needs the option")
+        check(CleanupGuard.check(raw: "hello we are here", cleaned: "Hello, we are not here.", options: on) != .pass, "punctuation never covers word changes")
+        check(CleanupPrompt.build(transcript: "x", options: on).system.contains("punctuation and capitalization"), "prompt names the operation")
+        check(!CleanupPrompt.build(transcript: "x", options: .faithful).system.contains("punctuation"), "faithful omits it")
+        let old = try JSONDecoder().decode(CleanupOptions.self, from: Data(#"{"fillers":true,"corrections":true,"lists":true}"#.utf8))
+        check(!old.punctuation && CleanupOptions.standard.punctuation && !CleanupOptions.faithful.punctuation, "defaults and old saved options")
+    }
+
     static func learningChecks(_ dir: URL, _ defaults: UserDefaults) throws {
         // Learning on: two settled sessions promote.
         let on = try ProcessingCoordinator(directory: dir.appendingPathComponent("on"), defaults: defaults)
@@ -222,7 +238,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
             try on.settle(sessionID: session)
         }
         check(on.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" }, "promoted after two sessions")
-        check(on.process("call acme") == .insert("call Akme"), "learned entry applies")
+        check(on.process("call acme") == .insert("Call Akme"), "learned entry applies (punctuation capitalizes)")
 
         // Learning off: nothing recorded, nothing promoted.
         let off = try ProcessingCoordinator(directory: dir.appendingPathComponent("off"), defaults: defaults)
@@ -275,5 +291,51 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(p.dictionary.entries.contains { $0.id == entry.id }, "reset keeps manual entries")
         try p.deleteEntry(id: entry.id)
         check(p.dictionary.entries.isEmpty, "manual entry deleted")
+    }
+}
+
+/// Answers a Gemini request with its own transcript minus "um, ", counting requests and models.
+private final class EchoGemini: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _models: [String] = []
+    var models: [String] { lock.withLock { _models } }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        lock.withLock { _models.append(request.url!.lastPathComponent) }
+        let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+        let user = ((body["contents"] as! [[String: Any]])[0]["parts"] as! [[String: Any]])[0]["text"] as! String
+        let text = user.split(separator: "\n").dropFirst().dropLast().joined(separator: "\n").replacingOccurrences(of: "um, ", with: "")
+        let reply = ["candidates": [["content": ["parts": [["text": text]], "role": "model"], "finishReason": "STOP"]]]
+        return HTTPResult(status: 200, body: try JSONSerialization.data(withJSONObject: reply))
+    }
+}
+
+extension ProcessingChecks {
+    /// Long text on the Gemma fallback is cleaned in parallel sections; the primary model sends it whole.
+    static func sectionChecks(_ p: ProcessingCoordinator) async throws {
+        let sentence = "We should um, ship the build on Friday after the review."   // 11 words
+        let long = Array(repeating: sentence, count: 30).joined(separator: " ")
+        let sections = CleanupSections.split(long)
+        check(sections.count == 3 && sections.joined(separator: " ") == long, "330 words split into 3 sentence-aligned sections: \(sections.count)")
+        check(sections.allSatisfy { $0.hasSuffix(".") }, "sections end at sentence ends")
+        check(CleanupSections.split(Array(repeating: sentence, count: 10).joined(separator: " ")).count == 1, "short text stays whole")
+        let list = "First, " + long + " Second, call Sam."
+        check(CleanupSections.split(list).count == 1, "a spoken list stays whole")
+        check(CleanupSections.split(Array(repeating: sentence, count: 21).joined(separator: " ")).count == 2, "a short tail joins the last section")
+
+        var settings = p.settings
+        settings.route = .cloud; settings.options = .standard
+        try p.update(settings)
+        let expected = long.replacingOccurrences(of: "um, ", with: "")
+        let limits = GeminiModelLimits(), echo = EchoGemini()
+        var gemini = GeminiCleanupProvider(apiKey: APIKey("test-key-123")!)
+        gemini.transport = echo; gemini.limits = limits
+        p.cloudCleaner = gemini
+        let whole = await p.processAsync(long)
+        check(whole == .insert(expected), "primary model: one whole request")
+        check(echo.models.count == 1 && echo.models[0].hasPrefix(GeminiCleanupProvider.defaultModel), "primary sent once: \(echo.models)")
+        limits.markLimited(GeminiCleanupProvider.defaultModel, until: Date().addingTimeInterval(60))
+        let sectioned = await p.processAsync(long)
+        check(sectioned == .insert(expected), "fallback: sections rejoin in order")
+        check(echo.models.count == 4 && echo.models.dropFirst().allSatisfy { $0.hasPrefix(GeminiCleanupProvider.fallbackModel) }, "fallback sent 3 sections to Gemma: \(echo.models)")
     }
 }

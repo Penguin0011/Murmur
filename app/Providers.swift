@@ -675,6 +675,9 @@ struct GeminiCleanupProvider: CleanupProvider {
 
     init(apiKey: APIKey) { self.apiKey = apiKey }
 
+    /// The next request goes to the slower fallback model because the primary is rate limited.
+    var onFallback: Bool { fallback != nil && fallback != model && limits.isLimited(model) }
+
     var disclosure: DataDisclosure {
         DataDisclosure(provider: id, stage: .cleanup, destinationHost: baseURL.host ?? "generativelanguage.googleapis.com",
                        leavesDevice: ["the transcript text", "relevant dictionary terms included in the cleanup prompt"],
