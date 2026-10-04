@@ -68,11 +68,12 @@ final class WarmRunner: @unchecked Sendable {
 }
 
 /// One local recording's chunk transcripts, made while it records (see Chunker), so release waits
-/// only for the last chunk. Any failed chunk makes `result` answer nil, and the caller transcribes
-/// the full WAV as before.
+/// only for the last chunk. Chunks go to the helper one at a time; the first failure drops the
+/// rest, so the full-WAV fallback never queues behind them.
 final class ChunkJob: @unchecked Sendable {
     private let lock = NSLock()
-    private var texts: [String?] = []
+    private var texts: [String?] = [], sentenceEnds: [Bool] = []
+    private var queued: [(index: Int, url: URL)] = [], inFlight = false
     private var failed = false, ended = false, discarded = false
     private var waiter: ((String?) -> Void)?
     private let transcribe: (URL, @escaping (Data?) -> Void) -> Void
@@ -84,19 +85,32 @@ final class ChunkJob: @unchecked Sendable {
         switch event {
         case .failed: lock.withLock { failed = true }; settle()
         case .end: lock.withLock { ended = true }; settle()
-        case .chunk(let url, let last):
-            let index: Int? = lock.withLock {
-                if discarded { return nil }
-                texts.append(nil); if last { ended = true }
-                return texts.count - 1
+        case .chunk(let url, let last, let sentenceEnd):
+            let accepted: Bool = lock.withLock {
+                guard !discarded, !failed else { return false }
+                texts.append(nil); sentenceEnds.append(sentenceEnd); if last { ended = true }
+                queued.append((texts.count - 1, url)); return true
             }
-            guard let index else { try? FileManager.default.removeItem(at: url); return }
-            transcribe(url) { [self] line in
-                try? FileManager.default.removeItem(at: url)
-                let text = line.flatMap { (try? JSONSerialization.jsonObject(with: $0) as? [String: Any])?["text"] as? String }
-                lock.withLock { if let text { texts[index] = text } else { failed = true } }
-                settle()
+            guard accepted else { try? FileManager.default.removeItem(at: url); return }
+            pump()
+        }
+    }
+    private func pump() {
+        let next: (index: Int, url: URL)? = lock.withLock {
+            guard !inFlight, !queued.isEmpty else { return nil }
+            inFlight = true; return queued.removeFirst()
+        }
+        guard let next else { return }
+        transcribe(next.url) { [self] line in
+            try? FileManager.default.removeItem(at: next.url)
+            let text = line.flatMap { (try? JSONSerialization.jsonObject(with: $0) as? [String: Any])?["text"] as? String }
+            let dropped: [URL] = lock.withLock {
+                inFlight = false
+                if let text { texts[next.index] = text; return [] }
+                failed = true; defer { queued = [] }; return queued.map(\.url)
             }
+            dropped.forEach { try? FileManager.default.removeItem(at: $0) }
+            settle(); pump()
         }
     }
     /// Whether the last chunk arrived (or chunking failed), so `result` will answer.
@@ -104,12 +118,15 @@ final class ChunkJob: @unchecked Sendable {
     /// Answers once: the joined transcript, or nil on any failure.
     func result(_ completion: @escaping (String?) -> Void) { lock.withLock { waiter = completion }; settle() }
     /// A canceled or abandoned recording: later chunks are deleted unread.
-    func discard() { lock.withLock { discarded = true; waiter = nil } }
+    func discard() {
+        let dropped: [URL] = lock.withLock { discarded = true; waiter = nil; defer { queued = [] }; return queued.map(\.url) }
+        dropped.forEach { try? FileManager.default.removeItem(at: $0) }
+    }
     private func settle() {
         let answer: (((String?) -> Void), String?)? = lock.withLock {
             guard let waiter, failed || (ended && !texts.contains(where: { $0 == nil })) else { return nil }
             self.waiter = nil
-            return (waiter, failed ? nil : Chunker.join(texts.map { $0! }))
+            return (waiter, failed ? nil : Chunker.join(texts.map { $0! }, sentenceEnds: sentenceEnds))
         }
         if let (waiter, text) = answer { waiter(text) }
     }

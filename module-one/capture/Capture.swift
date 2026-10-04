@@ -118,7 +118,10 @@ final class Chunker {
     private let format: AVAudioFormat
     private var buffers: [(buffer: AVAudioPCMBuffer, energy: Double)] = []
     private var frames = 0
-    enum Event { case chunk(URL, last: Bool), end, failed }
+    /// `sentenceEnd`: the pause at this chunk's cut was long enough to end a sentence.
+    enum Event { case chunk(URL, last: Bool, sentenceEnd: Bool), end, failed }
+    /// ponytail: fixed threshold; measured on `say` speech (comma pauses 0.2–0.3 s, sentence pauses 0.5–0.7 s). Tune on real voices.
+    static let sentencePause: TimeInterval = 0.45
     private var pending: [Event] = []
     private var handler: ((Event) -> Void)?
     private var failed = false, finished = false
@@ -139,8 +142,9 @@ final class Chunker {
         for i in 0..<Int(buffer.frameLength) { energy += Double(samples[0][i]) * Double(samples[0][i]) }
         buffers.append((buffer, energy)); frames += Int(buffer.frameLength)
         guard Double(frames) >= (Self.target + Self.slack) * format.sampleRate else { return }
-        let cut = Self.quietestCut(buffers.map { (Int($0.buffer.frameLength), $0.energy) }, rate: format.sampleRate)
-        emit(Array(buffers[..<cut].map(\.buffer)), final: false)
+        let shape = buffers.map { (Int($0.buffer.frameLength), $0.energy) }
+        let cut = Self.quietestCut(shape, rate: format.sampleRate)
+        emit(Array(buffers[..<cut].map(\.buffer)), final: false, sentenceEnd: Self.pauseLength(shape, at: cut, rate: format.sampleRate) >= Self.sentencePause)
         buffers.removeFirst(cut); frames = buffers.reduce(0) { $0 + Int($1.buffer.frameLength) }
     }
 
@@ -148,12 +152,12 @@ final class Chunker {
         guard !finished else { return }
         finished = true
         if failed { return }
-        emit(buffers.map(\.buffer), final: true); buffers = []
+        emit(buffers.map(\.buffer), final: true, sentenceEnd: false); buffers = []
     }
 
     /// Unclaimed chunk files (a cloud-route or canceled recording) are deleted.
     func discardUnclaimed() {
-        for case .chunk(let url, _) in pending { try? FileManager.default.removeItem(at: url) }
+        for case .chunk(let url, _, _) in pending { try? FileManager.default.removeItem(at: url) }
         pending = []
     }
 
@@ -175,7 +179,17 @@ final class Chunker {
         return max(1, best?.cut ?? buffers.count)
     }
 
-    private func emit(_ chunk: [AVAudioPCMBuffer], final: Bool) {
+    /// Seconds of near-silence (under 1% of the median buffer energy) around `cut`.
+    static func pauseLength(_ buffers: [(Int, Double)], at cut: Int, rate: Double) -> Double {
+        guard !buffers.isEmpty else { return 0 }
+        let quiet = buffers.map(\.1).sorted()[buffers.count / 2] * 0.01
+        var lo = cut, hi = cut
+        while lo > 0, buffers[lo - 1].1 <= quiet { lo -= 1 }
+        while hi < buffers.count, buffers[hi].1 <= quiet { hi += 1 }
+        return Double(buffers[lo..<hi].reduce(0) { $0 + $1.0 }) / rate
+    }
+
+    private func emit(_ chunk: [AVAudioPCMBuffer], final: Bool, sentenceEnd: Bool) {
         guard !chunk.isEmpty else { send(.end); return }
         guard let directory = Self.directory else { failed = true; send(.failed); return }
         let url = directory.appendingPathComponent("\(UUID().uuidString).wav")
@@ -185,21 +199,24 @@ final class Chunker {
             close(fd)
             let file = try AVAudioFile(forWriting: url, settings: format.settings)
             for buffer in chunk { try file.write(from: buffer) }
-            send(.chunk(url, last: final))
+            send(.chunk(url, last: final, sentenceEnd: sentenceEnd))
         } catch { try? FileManager.default.removeItem(at: url); failed = true; send(.failed) }
     }
 
     private func send(_ event: Event) { if let handler { handler(event) } else { pending.append(event) } }
 
-    /// Joins chunk transcripts. A chunk that starts a capitalized word after one that ended
-    /// without terminal punctuation was cut at a sentence pause, so it gets a period.
-    static func join(_ texts: [String]) -> String {
-        var out = ""
-        for raw in texts {
+    /// Joins chunk transcripts. A chunk cut at a sentence-length pause (`sentenceEnds[i]`) that
+    /// the model left unpunctuated gets a period; capitalization is not evidence, since every
+    /// chunk's first word comes back capitalized.
+    static func join(_ texts: [String], sentenceEnds: [Bool]) -> String {
+        var out = "", breakBefore = false
+        for (i, raw) in texts.enumerated() {
             let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
-            if let last = out.last, !".?!".contains(last), text.first?.isUppercase == true { out += "." }
-            out += out.isEmpty ? text : " " + text
+            if !text.isEmpty {
+                if breakBefore, let last = out.last, !".?!".contains(last) { out += "." }
+                out += out.isEmpty ? text : " " + text
+            }
+            breakBefore = i < sentenceEnds.count && sentenceEnds[i]
         }
         return out
     }
