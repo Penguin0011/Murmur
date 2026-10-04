@@ -525,7 +525,7 @@ struct SettingsView: View {
     private var dictionary: some View {
         VStack(alignment: .leading, spacing: 0) {
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur learns it after the same fix twice. Works in native Mac text fields; not in browsers, VS Code or Electron apps. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
+            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur learns it after the same fix twice. Where an app hides its text, Murmur follows the keys you type in that app for that minute; they are never saved. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred)
                 field("Heard as, comma-separated", text: $newVariants).layoutPriority(1)
