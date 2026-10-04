@@ -40,7 +40,7 @@ swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/ca
 2. Cleanup runs on the selected route with the enabled options. Local rules (`RuleCleaner`) run synchronously through `process`. Any other route (Gemini, OpenRouter or a local model server) goes through `processAsync`: one `CleanupProvider` call via `CleanupPrompt`, with only the relevant dictionary entries, on the main actor except for the request itself. An unconfigured provider or a provider error holds; nothing falls back to local rules. The synchronous path still never calls the network.
 3. A cleaner error or a guard failure returns `.heldForRecovery(raw:reason:)`. The controller saves the raw transcript with status `held-cleanup` and shows an error. It does not insert. History offers **Copy Raw**. The reason is content-free and is not stored.
 
-Settings has three independent cleanup toggles, a Faithful Transcription button, a learning toggle, and a dictionary editor (add, delete, learned/manual badge, Reset Learned). Cleanup and learning settings take effect on Apply Settings; dictionary edits save immediately. Automatic observation of edits is not wired in, so nothing feeds learning yet. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute` (derived from `cleanupChoice`, see below), `learningEnabled`, `historyMode` and `updateChecksEnabled`. The last two are wired in (see below) and are also written directly on Apply Settings, so they persist when the dictionary is unavailable. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
+Settings has three independent cleanup toggles, a Faithful Transcription button, a learning toggle, and a dictionary editor (add, edit in place, per-entry on/off, delete, learned/manual badge, Reset Learned). Cleanup and learning settings take effect on Apply Settings; dictionary edits save immediately. Automatic observation of edits is not wired in, so nothing feeds learning yet. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute` (derived from `cleanupChoice`, see below), `learningEnabled`, `historyMode` and `updateChecksEnabled`. The last two are wired in (see below) and are also written directly on Apply Settings, so they persist when the dictionary is unavailable. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
 
 ```sh
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/check_processing.swift -o /tmp/murmur-processing-check
@@ -57,7 +57,7 @@ The processing check passes with Swift 6.1.2 on Linux. The Controller/UI integra
 swiftc app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
 ```
 
-- `DictionaryStore` keeps `dictionary.json` (0600, directory 0700). `apply(to:)` replaces exact variants as whole words and space-separated phrases (case-insensitive, longest match, never fuzzy). It inserts the preferred spelling as stored, and capitalizes its first letter only at a sentence start when the spelling is all lowercase. `relevantEntries(for:)` returns only the entries present in the text, which is what a cloud stage may receive.
+- `DictionaryStore` keeps `dictionary.json` (0600, directory 0700). `apply(to:)` replaces exact variants as whole words and space-separated phrases (case-insensitive, longest match, never fuzzy). It inserts the preferred spelling as stored, and capitalizes its first letter only at a sentence start when the spelling is all lowercase. `relevantEntries(for:)` returns the entries present in the text, plus up to 10 whose preferred spelling sounds like a 1–3 word span (`DictionaryStore.soundsLike`: matching phonetic keys and similarity ≥ 0.5, or similarity ≥ 0.75 for terms of 6+ letters). That is what a cloud stage may receive. Near matches only feed the cleanup prompt and the guard, which then accepts the term in place of 1–3 sound-alike words; `apply` never uses them.
 - `CorrectionLedger` keeps `ledger.json` with short source/target strings only. The flow per session is `record` (provisional) while the window is open, then `settle` when it closes; `revert` undoes. It promotes after two settled, consistent sessions (case-folded). A conflicting target suppresses the source until `reset()`. A deleted learned entry is tombstoned and its evidence cleared. With learning off, nothing is recorded.
 - `Retention.swift` covers the 50 MB history cap (drop oldest first; Forever warns via `HistoryCapStatus`), the history-off disclosure, and `DataWipe.deleteAllData`. Six-month and 30-day expiry stay in `HistoryStore`.
 
@@ -101,9 +101,10 @@ app/check_ui.sh --bubble-only
 app/check_ui.sh --listening --bubble-only
 app/check_ui.sh --processing --bubble-only
 app/check_ui.sh --saved --bubble-only
+app/check_ui.sh --light --dictionary
 ```
 
-The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
+`--dictionary` seeds three sample entries (one turned off); open Settings → Dictionary to see them. The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
 
 The developer audio probe requires both flags and must target a disposable field:
 
