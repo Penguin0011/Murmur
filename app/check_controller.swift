@@ -3,6 +3,17 @@ import AppKit
 
 @main struct ControllerChecks {
     static func main() throws {
+        // Keys the correction watch follows: shifted letters keep their case even when a synthetic
+        // event carries only the Shift flag; Cmd chords are not edits it can follow.
+        func key(_ code: CGKeyCode, _ text: String, _ flags: CGEventFlags) -> KeystrokeSpan.Key {
+            let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true)!
+            event.flags = flags
+            let units = Array(text.utf16); event.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+            return AppController.watchedKey(event)
+        }
+        precondition(key(0, "a", .maskShift) == .text("A") && key(0, "A", .maskShift) == .text("A") && key(0, "a", []) == .text("a"))
+        precondition(key(18, "!", .maskShift) == .text("!") && key(0, "a", .maskCommand) == .other)
+        precondition(key(123, "", [.maskAlternate, .maskShift]) == .left(word: true, extend: true) && key(51, "", .maskAlternate) == .backspace(word: true))
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }

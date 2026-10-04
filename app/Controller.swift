@@ -1074,7 +1074,10 @@ final class PreStart: @unchecked Sendable {
             var length = 0
             var units = [UniChar](repeating: 0, count: 8)
             event.keyboardGetUnicodeString(maxStringLength: 8, actualStringLength: &length, unicodeString: &units)
-            return .text(String(utf16CodeUnits: units, count: length))
+            let text = String(utf16CodeUnits: units, count: length)
+            // Hardware events carry the shifted character; synthetic ones may carry only the Shift flag.
+            let shifted = extend || flags.contains(.maskAlphaShift)
+            return .text(shifted && text.allSatisfy(\.isLetter) ? text.uppercased() : text)
         }
     }
     func deleteEntry(_ entry: HistoryEntry) { do { try records?.delete(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
