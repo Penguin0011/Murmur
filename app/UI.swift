@@ -285,7 +285,7 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var banners: some View {
-        if controller.phase != "Ready" && !controller.isBusy {
+        if controller.hasStatusToShow && !controller.isBusy {
             HStack(alignment: .top, spacing: 12) {
                 if controller.phase == "Error" { mono("Error", color: Palette.paper).padding(.top, 2) }
                 Text(controller.message).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
@@ -671,10 +671,13 @@ struct SettingsView: View {
     private var historyGroups: [(day: String, entries: [HistoryEntry])] {
         var groups: [(day: String, entries: [HistoryEntry])] = []
         for entry in visibleHistory {
-            let day = Calendar.current.isDateInToday(entry.recordedAt) ? "Today"
-                : Calendar.current.isDateInYesterday(entry.recordedAt) ? "Yesterday"
-                : entry.recordedAt.formatted(.dateTime.month(.abbreviated).day())
-            if groups.last?.day == day { groups[groups.count - 1].entries.append(entry) } else { groups.append((day, [entry])) }
+            let calendar = Calendar.current, date = entry.recordedAt
+            // Grouped by the full date; the year shows only when it is not this year.
+            let day = calendar.isDateInToday(date) ? "Today"
+                : calendar.isDateInYesterday(date) ? "Yesterday"
+                : calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? date.formatted(.dateTime.month(.abbreviated).day())
+                : date.formatted(.dateTime.month(.abbreviated).day().year())
+            if let last = groups.last?.entries.first, calendar.isDate(last.recordedAt, inSameDayAs: date) { groups[groups.count - 1].entries.append(entry) } else { groups.append((day, [entry])) }
         }
         return groups
     }
