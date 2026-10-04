@@ -231,6 +231,11 @@ private func read(_ url: URL) -> Data? { try? Data(contentsOf: url) }
         check(license.declarations.allSatisfy { $0.url.scheme == "https" }, "license links are https")
         let downloader = ModelDownloader(manifest: manifest, target: URL(fileURLWithPath: "/tmp/never-used/model"), transport: FakeTransport())
         check(downloader.downloadSize == 1_801_783_964 && downloader.license == license, "downloader exposes size and license before download")
+        // Dictionary support: the CTC model, with its CC-BY-4.0 license recorded in the pins.
+        let ctc = try ModelManifest(contentsOf: url, repository: "FluidInference/parakeet-ctc-110m-coreml")
+        check(ctc.revision == "accdafd8cf8a2ff1cabe3c11e54416b405d409aa" && ctc.files.count == 12 && ctc.totalBytes == 102_802_455, "CTC pins: revision, 12 files, 102,802,455 bytes")
+        check(ctc.license.isPinned && ctc.license.declarations.map(\.name) == ["CC-BY-4.0"], "CTC license pinned")
+        check(Set(ctc.files.map(\.rfilename)).isSuperset(of: ["tokenizer.json", "vocab.json", "AudioEncoder.mlmodelc/weights/weight.bin", "MelSpectrogram.mlmodelc/weights/weight.bin"]), "CTC files FluidAudio loads are pinned")
     }
 
     static func installChecks(_ dir: URL) throws {

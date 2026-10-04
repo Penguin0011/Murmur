@@ -526,8 +526,40 @@ struct SettingsView: View {
         }
     }
 
+    /// Download row for dictionary support in on-device transcription (the CTC model).
+    private var dictionaryModel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(DictionaryModelFacts.displayName).font(.system(size: 18, weight: .semibold))
+                    if !controller.dictionaryModelSummary.isEmpty { help(controller.dictionaryModelSummary) }
+                    Group {
+                        if controller.dictionaryModelRow.isReady && !controller.dictionarySupportFailed { mono("Ready ✓", color: Palette.accentInk) }
+                        else if !controller.dictionaryModelRow.isReady { Text(controller.dictionaryModelRow.statusText).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    .padding(.top, 5)
+                }
+                Spacer()
+                let row = controller.dictionaryModelRow
+                if row.actions.contains(.download) { Button("Download…", action: controller.downloadDictionaryModel).buttonStyle(InkButtonStyle()).fixedSize() }
+                if row.actions.contains(.retry) { Button("Retry…", action: controller.downloadDictionaryModel).buttonStyle(InkButtonStyle()).fixedSize() }
+                if row.actions.contains(.cancel) { Button("Cancel", action: controller.cancelDictionaryModelDownload).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+                if row.actions.contains(.remove) { Button("Remove…", role: .destructive, action: controller.removeDictionaryModel).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+            }
+            help(DictionaryModelFacts.explanation)
+            if let progress = controller.dictionaryModelRow.progress { progressBar(progress) }
+            if controller.dictionarySupportFailed { Text(DictionaryModelFacts.unavailableMessage).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
+            if !controller.dictionaryModelMessage.isEmpty { help(controller.dictionaryModelMessage) }
+            if let license = controller.dictionaryModelLicense, let declaration = license.declarations.first {
+                help("License: \(declaration.name) (\(declaration.url.absoluteString))", color: Palette.ink64)
+            }
+        }
+        .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 20)
+    }
+
     private var dictionary: some View {
         VStack(alignment: .leading, spacing: 0) {
+            dictionaryModel
             rule.padding(.top, 20)
             toggleRow("Learn from my corrections", "Automatic learning from edits is not available in this build yet. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {

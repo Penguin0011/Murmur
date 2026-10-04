@@ -4,25 +4,53 @@ import ApplicationServices
 import AVFoundation
 import os
 import Combine
+import CryptoKit
 import Darwin
 @preconcurrency import Dispatch
 
 /// Content-free timing and stop reasons, alongside the capture and shortcut timing.
 private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
 
+/// What the transcription helper loads: the model folder plus, when dictionary support is
+/// installed and verified and the dictionary has enabled entries, `--ctc DIR --vocabulary FILE`.
+/// `key` changes whenever any of those change, which restarts the warm helper. Built only by
+/// `make`, so the warm helper, chunks and the one-shot fallback always agree.
+struct HelperLaunch: Equatable {
+    let models: URL
+    let dictionaryArguments: [String]
+    let key: String
+
+    /// Off the main thread: verifying the dictionary model hashes it once per change.
+    static func make(models: URL, manifest: URL, vocabulary: URL?, dictionaryModel: URL) -> HelperLaunch? {
+        guard let fingerprint = try? ModelVerificationCache.fingerprint(models, manifest: manifest) else { return nil }
+        var key = models.path + "|" + fingerprint.joined(separator: ",")
+        var arguments: [String] = []
+        if let vocabulary, let terms = try? Data(contentsOf: vocabulary), !terms.isEmpty,
+           (try? ModelVerificationCache.shared.verify(dictionaryModel, manifest: manifest, repository: dictionaryModelRepository)) != nil,
+           let ctc = try? ModelVerificationCache.fingerprint(dictionaryModel, manifest: manifest, repository: dictionaryModelRepository) {
+            arguments = ["--ctc", dictionaryModel.path, "--vocabulary", vocabulary.path]
+            key += "|" + ctc.joined(separator: ",") + "|" + SHA256.hash(data: terms).map { String(format: "%02x", $0) }.joined()
+        }
+        return HelperLaunch(models: models, dictionaryArguments: arguments, key: key)
+    }
+}
+
 /// Keeps `ModelBench MODEL_DIRECTORY --serve` running with the model loaded, so a dictation skips
 /// process launch and model load (about 0.4 s). One request at a time on a private queue. Any
 /// failure (not ready, died, timed out) answers nil so the caller falls back to a one-shot helper;
-/// the warm process restarts on the next request. A changed model fingerprint restarts it.
+/// the warm process restarts on the next request. A changed launch key restarts it.
 final class WarmRunner: @unchecked Sendable {
     private let queue = DispatchQueue(label: "murmur.warm-runner", qos: .userInitiated)
     private var task: Process?, input: FileHandle?, output: FileHandle?, key: String?
     private var buffered = Data()
+    /// Called on the runner's queue after each start with dictionary arguments: true when the
+    /// helper could not load dictionary support (it then transcribes without it).
+    var onDictionaryStatus: ((Bool) -> Void)?
 
-    func prepare(helper: URL, models: URL, key: String) { queue.async { [self] in _ = start(helper, models, key) } }
-    func transcribe(_ audio: URL, helper: URL, models: URL, key: String, completion: @escaping (Data?) -> Void) {
+    func prepare(helper: URL, launch: HelperLaunch) { queue.async { [self] in _ = start(helper, launch) } }
+    func transcribe(_ audio: URL, helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
         queue.async { [self] in
-            guard !audio.path.contains("\n"), start(helper, models, key), let input,
+            guard !audio.path.contains("\n"), start(helper, launch), let input,
                   (try? input.write(contentsOf: Data((audio.path + "\n").utf8))) != nil,
                   let line = readLine(timeout: 300) else { stopLocked(); completion(nil); return }
             completion(line)
@@ -31,16 +59,19 @@ final class WarmRunner: @unchecked Sendable {
     func stop() { queue.async { [self] in stopLocked() } }
     func stopNow() { queue.sync { stopLocked() } }
 
-    private func start(_ helper: URL, _ models: URL, _ key: String) -> Bool {
-        if let task, task.isRunning, self.key == key { return true }
+    private func start(_ helper: URL, _ launch: HelperLaunch) -> Bool {
+        if let task, task.isRunning, self.key == launch.key { return true }
         stopLocked()
         let next = Process(), toChild = Pipe(), fromChild = Pipe()
-        next.executableURL = helper; next.arguments = [models.path, "--serve"]
+        next.executableURL = helper; next.arguments = [launch.models.path, "--serve"] + launch.dictionaryArguments
         next.standardInput = toChild; next.standardOutput = fromChild; next.standardError = FileHandle.nullDevice
         do { try next.run() } catch { return false }
-        task = next; input = toChild.fileHandleForWriting; output = fromChild.fileHandleForReading; self.key = key; buffered = Data()
-        guard let ready = readLine(timeout: 60),
-              (try? JSONSerialization.jsonObject(with: ready) as? [String: Any])?["ready"] as? Bool == true else { stopLocked(); return false }
+        task = next; input = toChild.fileHandleForWriting; output = fromChild.fileHandleForReading; self.key = launch.key; buffered = Data()
+        // The first load of dictionary support compiles its Core ML model (about 15 s).
+        guard let ready = readLine(timeout: launch.dictionaryArguments.isEmpty ? 60 : 120),
+              let status = try? JSONSerialization.jsonObject(with: ready) as? [String: Any],
+              status["ready"] as? Bool == true else { stopLocked(); return false }
+        if !launch.dictionaryArguments.isEmpty { onDictionaryStatus?(status["vocabulary_error"] as? Bool ?? false) }
         timingLog.notice("warm-runner ready pid=\(next.processIdentifier)")
         return true
     }
@@ -192,6 +223,13 @@ final class PreStart: @unchecked Sendable {
     var modelRow: ModelRowPresentation { ModelRowPresentation.make(downloader == nil ? nil : modelStatus) }
     var modelLicense: ModelLicenseInfo? { downloader?.license }
     var modelSummary: String { downloader.map { ModelFacts.summary(downloadSize: $0.downloadSize) } ?? "" }
+    @Published var dictionaryModelStatus: ModelStatus = .notDownloaded
+    @Published var dictionaryModelMessage = ""
+    /// The helper could not start dictionary support and is transcribing without it.
+    @Published var dictionarySupportFailed = false
+    var dictionaryModelRow: ModelRowPresentation { ModelRowPresentation.make(dictionaryDownloader == nil ? nil : dictionaryModelStatus) }
+    var dictionaryModelLicense: ModelLicenseInfo? { dictionaryDownloader?.license }
+    var dictionaryModelSummary: String { dictionaryDownloader.map { DictionaryModelFacts.summary(downloadSize: $0.downloadSize) } ?? "" }
     var usesCustomModelFolder: Bool { downloader.map { URL(fileURLWithPath: modelDirectory).standardizedFileURL.path != $0.target.path } ?? false }
     // History-off mode and the size cap (R9, §6). History-off and update checks apply as soon as they change.
     @Published var historyMode: HistoryMode
@@ -234,6 +272,12 @@ final class PreStart: @unchecked Sendable {
     private var dataDirectory: URL?
     private let downloader: ModelDownloader?
     private var modelDownloadInFlight = false
+    /// Dictionary support for on-device transcription (the pinned CTC model) and the private
+    /// vocabulary file the helper reads; see DictionaryModelFacts.
+    private let dictionaryDownloader: ModelDownloader?
+    private var dictionaryDownloadInFlight = false
+    private var vocabularyFile: URL?
+    private let dictionaryModelDirectory = DictionaryModelFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser)
     private var lastAutomaticUpdateAttempt: Date?
     // TODO(R12): UpdateConfiguration still defaults to Penguin0011/dictation; confirm the release repository before shipping.
     private lazy var updateChecker: UpdateChecker? = (try? UpdateConfiguration(currentVersion: currentVersion)).map { UpdateChecker(configuration: $0) }
@@ -308,6 +352,10 @@ final class PreStart: @unchecked Sendable {
         if let pins = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let manifest = try? ModelManifest(contentsOf: pins) {
             downloader = ModelDownloader(manifest: manifest, target: defaultModel)
         } else { downloader = nil }
+        if let pins = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"),
+           let manifest = try? ModelManifest(contentsOf: pins, repository: dictionaryModelRepository) {
+            dictionaryDownloader = ModelDownloader(manifest: manifest, target: dictionaryModelDirectory)
+        } else { dictionaryDownloader = nil }
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
@@ -341,6 +389,7 @@ final class PreStart: @unchecked Sendable {
             try? FileManager.default.removeItem(at: chunks)
             if (try? FileManager.default.createDirectory(at: chunks, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])) != nil { Chunker.directory = chunks }
             // Dictionary/ledger corruption disables only cleanup and the dictionary: dictations are then held for review in History rather than blocking all dictation.
+            vocabularyFile = base.appendingPathComponent("dictionary").appendingPathComponent("parakeet-vocabulary.json")
             do { processing = try ProcessingCoordinator(directory: base.appendingPathComponent("dictionary"), isCommonWord: isCommonEnglishWord) }
             catch { processing = nil; dictionaryMessage = "The dictionary could not be read. Dictations are held in History until it is repaired." }
             if let processing, processing.settings.route != routes.cleanup.processingRoute {
@@ -355,6 +404,8 @@ final class PreStart: @unchecked Sendable {
             historySaved(); refreshRecoveryAudio(); refreshDictionary()
         } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
         modelStatus = downloader?.status() ?? .notDownloaded
+        dictionaryModelStatus = dictionaryDownloader?.status() ?? .notDownloaded
+        warm.onDictionaryStatus = { [weak self] failed in DispatchQueue.main.async { self?.dictionarySupportFailed = failed } }
         refreshKeys()
         // Choose Folder, Use Default and a finished download all change the folder, even with
         // Settings closed; apply each so the folder survives a relaunch.
@@ -366,16 +417,7 @@ final class PreStart: @unchecked Sendable {
         signal(SIGPIPE, SIG_IGN)
         // App Nap would delay the shortcut; idle system sleep stays allowed.
         // Verify the model now so the first dictation does not hash 1.8 GB.
-        if !preview, let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") {
-            let directory = URL(fileURLWithPath: modelDirectory)
-            let warm = warm
-            DispatchQueue.global(qos: .utility).async {
-                guard (try? ModelVerificationCache.shared.verify(directory, manifest: manifest)) != nil,
-                      let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"),
-                      let fingerprint = try? ModelVerificationCache.fingerprint(directory, manifest: manifest) else { return }
-                warm.prepare(helper: helper, models: directory, key: directory.path + "|" + fingerprint.joined(separator: ","))
-            }
-        }
+        prewarm()
         noNap = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Respond to the dictation shortcut without delay")
         refreshPermissions()
         if !preview { configureShortcut() }
@@ -396,6 +438,7 @@ final class PreStart: @unchecked Sendable {
                 for (audio, job) in self.chunkJobs where !FileManager.default.fileExists(atPath: audio.path) { job.discard(); self.chunkJobs[audio] = nil }
                 // Download progress and the verifying phase are sampled here, on the main thread.
                 if self.modelDownloadInFlight, let status = self.downloader?.status(), status != self.modelStatus { self.modelStatus = status }
+                if self.dictionaryDownloadInFlight, let status = self.dictionaryDownloader?.status(), status != self.dictionaryModelStatus { self.dictionaryModelStatus = status }
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
                    !capture.engine.isRunning || capture.queue.sync(execute: { capture.writeError != nil }) {
                     let running = capture.engine.isRunning, writeFailed = capture.queue.sync { capture.writeError != nil }
@@ -604,13 +647,13 @@ final class PreStart: @unchecked Sendable {
     /// Local route: transcribe this recording's chunks on the warm helper while it records.
     private func attachChunks(_ capture: Capture, audio: URL) {
         let models = URL(fileURLWithPath: activeModelDirectory)
-        guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"),
-              let fingerprint = try? ModelVerificationCache.fingerprint(models, manifest: manifest) else { return }
-        let key = models.path + "|" + fingerprint.joined(separator: ","), warm = warm
+        guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
+        let warm = warm, vocabulary = vocabularyFile, dictionaryModel = dictionaryModelDirectory
         let job = ChunkJob { url, done in
             DispatchQueue.global(qos: .userInitiated).async {
-                guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil else { done(nil); return }
-                warm.transcribe(url, helper: helper, models: models, key: key, completion: done)
+                guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
+                      let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel) else { done(nil); return }
+                warm.transcribe(url, helper: helper, launch: launch, completion: done)
             }
         }
         if capture.attachChunks({ job.receive($0) }) { chunkJobs[audio] = job }
@@ -692,19 +735,21 @@ final class PreStart: @unchecked Sendable {
         guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let store = records else { setPhase("Error", "The model runtime is unavailable. Audio is saved for retry."); done(); return }
         let timestamp = listeningStarted
         let began = ProcessInfo.processInfo.systemUptime
+        let vocabulary = vocabularyFile, dictionaryModel = dictionaryModelDirectory
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             defer { timingLog.notice("model-verify took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3))") }
-            do { try ModelVerificationCache.shared.verify(models, manifest: manifest) }
-            catch { DispatchQueue.main.async { guard let self, self.generation == token else { return }; self.setPhase("Error", "Model verification failed. Choose the pinned model folder. Audio is saved for retry."); done() }; return }
+            guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
+                  let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel)
+            else { DispatchQueue.main.async { guard let self, self.generation == token else { return }; self.setPhase("Error", "Model verification failed. Choose the pinned model folder. Audio is saved for retry."); done() }; return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
-                self.runTranscription(helper, models: models, manifest: manifest, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+                self.runTranscription(helper, launch: launch, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
             }
         }
     }
     private struct NoSpeech: Error {}
     /// Warm helper first; if it cannot answer, the one-shot helper transcribes the same audio.
-    private func runTranscription(_ helper: URL, models: URL, manifest: URL, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
+    private func runTranscription(_ helper: URL, launch: HelperLaunch, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
         // Chunks transcribed during recording; if any failed, the full WAV goes through below.
         if let job = chunkJobs.removeValue(forKey: audio) {
             if job.isEnded {
@@ -716,30 +761,29 @@ final class PreStart: @unchecked Sendable {
                     }
                     DispatchQueue.main.async { [weak self] in
                         guard let self, self.generation == token else { return }
-                        self.runTranscription(helper, models: models, manifest: manifest, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+                        self.runTranscription(helper, launch: launch, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
                     }
                 }
                 return
             }
             job.discard()
         }
-        let key = models.path + "|" + ((try? ModelVerificationCache.fingerprint(models, manifest: manifest))?.joined(separator: ",") ?? "")
         let began = ProcessInfo.processInfo.systemUptime
-        warm.transcribe(audio, helper: helper, models: models, key: key) { [weak self] line in
+        warm.transcribe(audio, helper: helper, launch: launch) { [weak self] line in
             timingLog.notice("warm-runner took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3)) answered=\(line != nil, privacy: .public)")
             if let line { self?.handleTranscript(.success(line), audio: audio, store: store, timestamp: timestamp, token: token, done: done); return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
-                self.launchRunner(helper, models: models, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+                self.launchRunner(helper, launch: launch, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
             }
         }
     }
-    private func launchRunner(_ helper: URL, models: URL, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
+    private func launchRunner(_ helper: URL, launch: HelperLaunch, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
         let temp = audio.deletingLastPathComponent().appendingPathComponent(".result-" + UUID().uuidString)
         let fd = open(temp.path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { setPhase("Error", "Could not prepare transcription. Audio is saved for retry."); done(); return }
         let output = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        let task = Process(); task.executableURL = helper; task.arguments = [models.path, audio.path, "--single"]
+        let task = Process(); task.executableURL = helper; task.arguments = [launch.models.path, audio.path, "--single"] + launch.dictionaryArguments
         task.standardOutput = output; task.standardError = FileHandle.nullDevice
         do { try task.run(); runner = task; runnerOutput = temp } catch { try? output.close(); try? FileManager.default.removeItem(at: temp); setPhase("Error", "Transcription could not start. Audio is saved for retry."); done(); return }
         let timeout = DispatchWorkItem { if task.isRunning { task.terminate(); DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if task.isRunning { kill(task.processIdentifier, SIGKILL) } } } }
@@ -939,7 +983,35 @@ final class PreStart: @unchecked Sendable {
     func copyRawEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.rawText, forType: .string) }
     /// Turns all three cleanup options off. Like other settings, it takes effect at once.
     func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false; cleanupPunctuation = false }
-    func refreshDictionary() { dictionaryEntries = processing?.dictionary.entries ?? [] }
+    /// Every dictionary change ends here: it rewrites the helper's vocabulary file and restarts
+    /// the warm helper with it, so a wipe or edit never leaves old terms loaded.
+    func refreshDictionary() {
+        dictionaryEntries = processing?.dictionary.entries ?? []
+        writeHelperVocabulary(); prewarm()
+    }
+    /// FluidAudio's vocabulary JSON: enabled entries, preferred spelling plus "heard as" aliases.
+    /// Owner-only, beside dictionary.json; absent when nothing is enabled.
+    private func writeHelperVocabulary() {
+        guard let vocabularyFile else { return }
+        let terms: [[String: Any]] = dictionaryEntries.filter(\.enabled).map { entry in
+            entry.variants.isEmpty ? ["text": entry.preferred] : ["text": entry.preferred, "aliases": entry.variants]
+        }
+        if terms.isEmpty { try? FileManager.default.removeItem(at: vocabularyFile); return }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["terms": terms], options: [.sortedKeys]) else { return }
+        try? PrivateFiles.write(data, to: vocabularyFile)
+    }
+    /// Starts (or restarts, when what it loads changed) the warm helper in the background, so the
+    /// next dictation does not wait for a model load.
+    private func prewarm() {
+        guard !preview, let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"),
+              let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
+        let models = URL(fileURLWithPath: modelDirectory), vocabulary = vocabularyFile, dictionaryModel = dictionaryModelDirectory, warm = warm
+        DispatchQueue.global(qos: .utility).async {
+            guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
+                  let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel) else { return }
+            warm.prepare(helper: helper, launch: launch)
+        }
+    }
     @discardableResult
     func addDictionaryEntry(preferred: String, variants: String) -> Bool {
         guard let processing else { dictionaryMessage = "The dictionary is unavailable."; return false }
@@ -1036,6 +1108,42 @@ final class PreStart: @unchecked Sendable {
         do { try downloader.remove(); modelMessage = "The model was removed." }
         catch { modelMessage = (error as? ModelDownloadError)?.userMessage ?? ModelDownloadError.fileSystem.userMessage }
         modelStatus = downloader.status()
+    }
+    func downloadDictionaryModel() {
+        guard let dictionaryDownloader else { dictionaryModelMessage = ModelDownloadError.invalidManifest.userMessage; return }
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: dictionaryDownloadInFlight) { dictionaryModelMessage = refusal; return }
+        let text = DictionaryModelFacts.confirmation(downloadSize: dictionaryDownloader.downloadSize, license: dictionaryDownloader.license, folder: dictionaryDownloader.target)
+        let alert = NSAlert(); alert.messageText = text.title; alert.informativeText = text.body
+        alert.addButton(withTitle: "Download"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: dictionaryDownloadInFlight) { dictionaryModelMessage = refusal; return }
+        warm.stopNow() // The helper may hold the folder's model files open.
+        dictionaryDownloadInFlight = true; dictionaryModelMessage = ""; dictionarySupportFailed = false
+        dictionaryModelStatus = .downloading(ModelDownloadProgress(bytesDone: 0, totalBytes: dictionaryDownloader.downloadSize))
+        dictionaryDownloader.start { result in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.dictionaryDownloadInFlight = false
+                self.dictionaryModelStatus = dictionaryDownloader.status()
+                self.dictionaryModelMessage = DictionaryModelFacts.completionMessage(result)
+                self.prewarm() // Compiles the new model now, not on the next dictation.
+            }
+        }
+    }
+    func cancelDictionaryModelDownload() { dictionaryDownloader?.cancel() }
+    func removeDictionaryModel() {
+        guard let dictionaryDownloader else { return }
+        if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: dictionaryDownloadInFlight) { dictionaryModelMessage = refusal; return }
+        let alert = NSAlert(); alert.messageText = DictionaryModelFacts.removeTitle
+        alert.informativeText = DictionaryModelFacts.removeBody(folder: dictionaryDownloader.target)
+        alert.addButton(withTitle: "Remove"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: dictionaryDownloadInFlight) { dictionaryModelMessage = refusal; return }
+        warm.stopNow()
+        do { try dictionaryDownloader.remove(); dictionaryModelMessage = "Dictionary support was removed." }
+        catch { dictionaryModelMessage = (error as? ModelDownloadError)?.userMessage ?? ModelDownloadError.fileSystem.userMessage }
+        dictionaryModelStatus = dictionaryDownloader.status(); dictionarySupportFailed = false
+        prewarm()
     }
     func useDefaultModelDirectory() { if let downloader { modelDirectory = downloader.target.path } }
     func openLink(_ url: URL) { NSWorkspace.shared.open(url) }
@@ -1164,6 +1272,7 @@ final class PreStart: @unchecked Sendable {
     func shutdown() {
         generation = UUID(); cloudRequest.cancel(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
         downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.
+        dictionaryDownloader?.cancel()
         if sessionAvailable { session.shutdown() }
         if let runner, runner.isRunning {
             runner.terminate()

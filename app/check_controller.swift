@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import AppKit
 
@@ -115,13 +116,15 @@ import AppKit
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let helper = dir.appendingPathComponent("helper"), starts = dir.appendingPathComponent("starts")
-        try "#!/bin/sh\necho start >> '\(starts.path)'\necho '{\"ready\":true}'\nwhile read p; do [ \"$p\" = \"$(dirname \"$p\")/die\" ] && exit 1; echo \"{\\\"text\\\":\\\"$(basename \"$p\")\\\"}\"; done\n"
+        try "#!/bin/sh\necho \"start $*\" >> '\(starts.path)'\ncase \"$*\" in *--ctc*) echo '{\"ready\":true,\"vocabulary_error\":true}';; *) echo '{\"ready\":true}';; esac\nwhile read p; do [ \"$p\" = \"$(dirname \"$p\")/die\" ] && exit 1; echo \"{\\\"text\\\":\\\"$(basename \"$p\")\\\"}\"; done\n"
             .write(to: helper, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
         let runner = WarmRunner(), models = dir
-        func ask(_ name: String, key: String = "k1") -> String? {
+        var dictionaryStatus: Bool?
+        runner.onDictionaryStatus = { dictionaryStatus = $0 }
+        func ask(_ name: String, key: String = "k1", dictionary: [String] = []) -> String? {
             let done = DispatchSemaphore(value: 0); var answer: String?
-            runner.transcribe(dir.appendingPathComponent(name), helper: helper, models: models, key: key) { line in
+            runner.transcribe(dir.appendingPathComponent(name), helper: helper, launch: HelperLaunch(models: models, dictionaryArguments: dictionary, key: key)) { line in
                 answer = line.flatMap { (try? JSONSerialization.jsonObject(with: $0) as? [String: Any])?["text"] as? String }; done.signal()
             }
             done.wait(); return answer
@@ -131,8 +134,39 @@ import AppKit
         precondition(ask("die") == nil, "a helper that dies answers nil so the caller falls back")
         precondition(ask("c.wav") == "c.wav" && launches() == 2, "the next request restarts the helper")
         precondition(ask("d.wav", key: "k2") == "d.wav" && launches() == 3, "a new model fingerprint restarts the helper")
+        precondition(dictionaryStatus == nil, "no dictionary status without dictionary arguments")
+        precondition(ask("e.wav", key: "k3", dictionary: ["--ctc", "/c", "--vocabulary", "/v"]) == "e.wav" && launches() == 4, "dictionary arguments restart the helper")
+        let lastStart = ((try? String(contentsOf: starts, encoding: .utf8)) ?? "").split(separator: "\n").last ?? ""
+        precondition(lastStart == "start \(models.path) --serve --ctc /c --vocabulary /v", "helper receives the dictionary arguments")
+        precondition(dictionaryStatus == true, "a helper that could not load dictionary support is reported")
         runner.stopNow()
+        try helperLaunchChecks(dir)
         print("Warm runner checks passed (one launch, fallback on death, restart, model change).")
+    }
+
+    /// HelperLaunch.make: dictionary arguments only with a verified dictionary model and a vocabulary.
+    static func helperLaunchChecks(_ dir: URL) throws {
+        let models = dir.appendingPathComponent("unified"), ctc = dir.appendingPathComponent("ctc")
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: ctc, withIntermediateDirectories: true)
+        let weights = Data("weights".utf8), encoder = Data("encoder".utf8)
+        try weights.write(to: models.appendingPathComponent("w")); try encoder.write(to: ctc.appendingPathComponent("e"))
+        func sha(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
+        let manifest = dir.appendingPathComponent("pins.json")
+        try JSONSerialization.data(withJSONObject: ["models": [
+            unifiedRepository: ["files": [["rfilename": "w", "size": weights.count, "lfs": ["sha256": sha(weights)]]], "batch_files": ["w"]],
+            dictionaryModelRepository: ["files": [["rfilename": "e", "size": encoder.count, "lfs": ["sha256": sha(encoder)]]], "batch_files": ["e"]]]]).write(to: manifest)
+        let vocabulary = dir.appendingPathComponent("vocabulary.json")
+        let plain = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: ctc)
+        precondition(plain?.dictionaryArguments == [], "no vocabulary file: no dictionary arguments")
+        try Data(#"{"terms":[{"text":"Kubernetes"}]}"#.utf8).write(to: vocabulary)
+        let boosted = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: ctc)
+        precondition(boosted?.dictionaryArguments == ["--ctc", ctc.path, "--vocabulary", vocabulary.path] && boosted?.key != plain?.key, "verified model and vocabulary: dictionary arguments and a new key")
+        try Data(#"{"terms":[{"text":"Kubectl"}]}"#.utf8).write(to: vocabulary)
+        precondition(HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: ctc)?.key != boosted?.key, "a dictionary edit changes the key")
+        try Data("tampered".utf8).write(to: ctc.appendingPathComponent("e"))
+        precondition(HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: ctc)?.dictionaryArguments == [], "an unverified dictionary model is not used, and transcription still runs")
+        print("Helper launch checks passed (dictionary arguments only when verified, key follows the dictionary).")
     }
 
     /// Cut picker, join rule, ⌃⌘C match and ChunkJob, without audio hardware or the model.

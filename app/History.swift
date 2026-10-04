@@ -75,18 +75,19 @@ struct HistoryStore {
 final class ModelVerificationCache: @unchecked Sendable {
     static let shared = ModelVerificationCache()
     private let lock = NSLock()
-    private var verified: (directory: String, fingerprint: [String])?
-    func verify(_ directory: URL, manifest: URL) throws {
-        let fingerprint = try Self.fingerprint(directory, manifest: manifest)
-        lock.lock(); let hit = verified?.directory == directory.path && verified?.fingerprint == fingerprint; lock.unlock()
+    /// Verified fingerprint per folder (the transcription model and the dictionary model).
+    private var verified: [String: [String]] = [:]
+    func verify(_ directory: URL, manifest: URL, repository: String = unifiedRepository) throws {
+        let fingerprint = try Self.fingerprint(directory, manifest: manifest, repository: repository)
+        lock.lock(); let hit = verified[directory.path] == fingerprint; lock.unlock()
         if hit { return }
-        try verifyAppModels(directory, manifest: manifest)
-        lock.lock(); verified = (directory.path, fingerprint); lock.unlock()
+        try verifyAppModels(directory, manifest: manifest, repository: repository)
+        lock.lock(); verified[directory.path] = fingerprint; lock.unlock()
     }
-    static func fingerprint(_ directory: URL, manifest: URL) throws -> [String] {
+    static func fingerprint(_ directory: URL, manifest: URL, repository: String = unifiedRepository) throws -> [String] {
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
         guard let models = object?["models"] as? [String: Any],
-              let model = models["FluidInference/parakeet-unified-en-0.6b-coreml"] as? [String: Any],
+              let model = models[repository] as? [String: Any],
               let batch = model["batch_files"] as? [String] else { throw CaptureError("Invalid model manifest") }
         return try batch.map { name in
             var info = stat()
@@ -96,10 +97,14 @@ final class ModelVerificationCache: @unchecked Sendable {
     }
 }
 
-func verifyAppModels(_ directory: URL, manifest: URL) throws {
+let unifiedRepository = "FluidInference/parakeet-unified-en-0.6b-coreml"
+/// The CTC model that rescores local transcripts toward the dictionary.
+let dictionaryModelRepository = "FluidInference/parakeet-ctc-110m-coreml"
+
+func verifyAppModels(_ directory: URL, manifest: URL, repository: String = unifiedRepository) throws {
     let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
     guard let models = object?["models"] as? [String: Any],
-          let model = models["FluidInference/parakeet-unified-en-0.6b-coreml"] as? [String: Any],
+          let model = models[repository] as? [String: Any],
           let files = model["files"] as? [[String: Any]], let batch = model["batch_files"] as? [String] else {
         throw CaptureError("Invalid model manifest")
     }
