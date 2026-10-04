@@ -11,6 +11,8 @@ Current checkout: `main` at `f077b53`; working tree was clean at start. The inst
 - Settings at checkpoint: Gemini 3.5 Transcribe selected; Gemini cleanup with all four options enabled; original Fn shortcut restored. Added temporary manual Shelfmate with `shelf mate, shelf made, shelf-made` variants. The user began another recording while results were being inspected, so cloud transcription and the test entry were left in place to avoid disrupting active use. Original transcription route was Local; no original dictionary entries existed. Cleanup was already Gemini. [Certain]
 - Native automated shortcut input typed a space without starting recording, and modifier-only input was rejected by the tool. The physical-user test above resolves the full-path gate; automated shortcut input is not evidence of a production shortcut defect. [Certain]
 
+- User clarified that transcription will usually run locally. Restored **On this Mac (Parakeet)** in the installed app and verified the selected control and LOCAL TRANSCRIPTION status. Gemini cleanup remains selected as before testing; dictionary replacements apply after either transcription route. Treat local transcription as the normal route and cloud transcription as an explicit alternative. [Certain]
+
 Ignored diagnostics are under `runtime/cloud-live/`; no credentials were written there. [Certain]
 
 ---
