@@ -260,6 +260,17 @@ private func read(_ url: URL) -> Data? { try? Data(contentsOf: url) }
         check(progress.allSatisfy { $0.totalBytes == fixture.total }, "progress total is manifest total")
         check(seen.first == .notDownloaded && seen.contains(.verifying) && seen.contains { if case .downloading = $0 { return true }; return false },
               "status passes notDownloaded -> downloading -> verifying")
+        // A target whose path standardizes differently once it exists (macOS drops "/private") keeps
+        // every downloaded file instead of pruning them all as unexpected.
+        // (Foundation's own symlink resolution also drops "/private", so the prefix is added by hand.)
+        let realDir = URL(fileURLWithPath: dir.path.hasPrefix("/private/") ? dir.path : "/private" + dir.path)
+        if FileManager.default.fileExists(atPath: realDir.path) {
+            let privateTarget = realDir.appendingPathComponent("private-models/parakeet")
+            let privateFetch = FakeTransport(); fixture.serve(privateFetch)
+            let privateDownloader = ModelDownloader(manifest: try fixture.manifest(), target: privateTarget, transport: privateFetch, freeSpace: { _ in 1 << 40 })
+            try privateDownloader.install()
+            check(fixture.contents.allSatisfy { read(privateTarget.appendingPathComponent($0.0)) == $0.1 }, "a /private target keeps its files")
+        }
         check(hasher.calls.count == 3, "each file hashed once")
         check(downloader.verifyInstalled() == .ready, "full verification passes")
         let siblings = (try? FileManager.default.contentsOfDirectory(atPath: target.deletingLastPathComponent().path)) ?? []

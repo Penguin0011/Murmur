@@ -714,7 +714,7 @@ final class ModelDownloader {
         }
         try checkCancelled()
         setActive(.verifying)
-        try pruneUnexpected(in: staging, keeping: Set(plan.map { $0.1.path }))
+        try pruneUnexpected(in: staging, keeping: Set(plan.map { $0.0.rfilename }))
         try checkCancelled()
         try swapIntoPlace(staging)
     }
@@ -782,8 +782,10 @@ final class ModelDownloader {
 
     /// Deletes anything in staging that is not a pinned file (or a directory leading to one), so no
     /// stray or substituted file can be installed alongside the model.
+    /// `expected` holds paths relative to `staging` (the pinned rfilenames). Relative paths, because
+    /// standardizing an existing path can drop a "/private" prefix that a not-yet-created one keeps.
     private func pruneUnexpected(in staging: URL, keeping expected: Set<String>) throws {
-        let root = staging.standardizedFileURL.path
+        let root = staging.path
         guard let enumerator = fileManager.enumerator(atPath: root) else { throw ModelDownloadError.fileSystem }
         var extras: [String] = []
         while let relative = enumerator.nextObject() as? String {
@@ -791,8 +793,8 @@ final class ModelDownloader {
             var isDirectory: ObjCBool = false
             _ = fileManager.fileExists(atPath: full, isDirectory: &isDirectory)
             if isDirectory.boolValue && !isSymlink(URL(fileURLWithPath: full)) {
-                if !expected.contains(where: { $0.hasPrefix(full + "/") }) { extras.append(full); enumerator.skipDescendants() }
-            } else if !expected.contains(full) { extras.append(full) }
+                if !expected.contains(where: { $0.hasPrefix(relative + "/") }) { extras.append(full); enumerator.skipDescendants() }
+            } else if !expected.contains(relative) { extras.append(full) }
         }
         for path in extras { do { try fileManager.removeItem(atPath: path) } catch { throw ModelDownloadError.fileSystem } }
     }
