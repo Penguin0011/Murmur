@@ -65,7 +65,7 @@ Learning in non-standard fields (October 4, 2026, user request): live probe runs
 | VS Code, default settings | paste, unverified | keystrokes |
 | Google Docs in Chrome, default settings (a new doc from docs.new, left in the user's Drive) | paste, unverified | keystrokes |
 
-The first keystroke run recorded `akme`: System Events' synthetic keys carry only the Shift flag, not the shifted character. Shift and Caps Lock are now applied to letters. Untested: autocorrect in the target app, IME input, right-click spelling fixes, Slack/Discord. [Certain]
+The first keystroke run recorded `akme`: System Events' synthetic keys carry only the Shift flag, not the shifted character. Shift and Caps Lock are now applied to letters; a rerun in Chrome and VS Code then recorded `Akme`. Untested: autocorrect in the target app, IME input, right-click spelling fixes, Slack/Discord. [Certain]
 
 **Mac-side next steps**
 1. Pull this branch, run `app/build.sh` and every check in `app/README.md` (including `check_ui.sh`) on the macOS 26 host. Fix anything that fails under Swift 6.3.3 and `-swift-version 5`. [Certain]
