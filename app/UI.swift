@@ -368,11 +368,11 @@ struct SettingsView: View {
             eyebrow("Shortcut").padding(.top, 20)
             VStack(alignment: .leading, spacing: 12) {
                 segmented([("right-option", "Right Option"), ("fn", "Fn / Globe"), ("ctrl-option-space", "Control–Option–Space")], $controller.shortcut)
-                help(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
+                help(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop, or hold it and release. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
             }
             .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
-            toggleRow("Press once to start, again to stop", "Off means hold to record.", isOn: $controller.pressToToggle)
-            toggleRow("Insert into the original text field", "Saved before insertion. If the destination changes or delivery is uncertain, copy the text from History. Murmur never sends a message.", isOn: $controller.automaticInsertion)
+            toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
+            toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. If it cannot, press ⌃⌘V to paste the dictation where your cursor is. Your clipboard is always put back. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
 
@@ -1035,7 +1035,7 @@ private struct BubbleView: View {
             }
             // These keep only the pop-up; saved audio stays reachable from Murmur's window.
             if controller.recoveryAudio != nil || controller.hasRecoveryAudio,
-               !["No speech was detected", "No audio was captured", "Transcription failed"].contains(where: message.hasPrefix) {
+               !["No speech was detected", "No audio was captured", "Transcription failed", "Cleanup was held"].contains(where: message.hasPrefix) {
                 Button("Audio…", action: controller.revealRecoveryAudio)
                     .buttonStyle(.bordered).controlSize(.small)
             }

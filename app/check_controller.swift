@@ -148,6 +148,13 @@ import AppKit
         precondition(Chunker.join(["Hello there", "General Kenobi."], sentenceEnds: [true, false]) == "Hello there. General Kenobi.", "a sentence pause adds a period")
         precondition(Chunker.join(["we were going", "I think to the store."], sentenceEnds: [false, false]) == "we were going I think to the store.", "a capital without a sentence pause adds nothing")
         precondition(Chunker.join(["Done.", " ", "Next one?", "Yes"], sentenceEnds: [true, true, true, false]) == "Done. Next one? Yes")
+        precondition(Chunker.join(["It works.", "The next one."], sentenceEnds: [false, false]) == "It works. The next one.", "a model period survives a short pause")
+        precondition(Chunker.join(["appears in the.", "Windows and doors."], sentenceEnds: [true, false]) == "appears in the Windows and doors.", "no sentence ends on 'the', even at a long pause; names keep capitals")
+        precondition(Chunker.join(["to value", "The mysterious qualities"], sentenceEnds: [false, false]) == "to value the mysterious qualities")
+        precondition(Chunker.join(["It works.", "The next one."], sentenceEnds: [true, false]) == "It works. The next one.", "a sentence pause keeps the period and capital")
+        precondition(Chunker.join(["It works.", "Finally done."], sentenceEnds: [false, false]) == "It works. Finally done.", "a period stays unless the next word is lowercased")
+        precondition(Chunker.join(["I think so.", "The plan works."], sentenceEnds: [true, false]) == "I think so. The plan works.", "'so' can end a sentence")
+        precondition(Chunker.join(["Wait...", "So what?"], sentenceEnds: [false, false]) == "Wait... so what?", "an ellipsis stays")
         // Pause length: 10 frames at rate 10 per buffer; quiet run of 5 buffers around the cut.
         let shape = (0..<20).map { (10, (8...12).contains($0) ? 0.0 : 1.0) }
         precondition(abs(Chunker.pauseLength(shape, at: 10, rate: 10) - 5) < 1e-9, "pause spans the whole quiet run")
@@ -157,6 +164,8 @@ import AppKit
         precondition(!ShortcutListener.isCopyChord(keyCode: 8, flags: [.maskCommand]))
         precondition(!ShortcutListener.isCopyChord(keyCode: 8, flags: [.maskControl, .maskCommand, .maskShift]))
         precondition(!ShortcutListener.isCopyChord(keyCode: 9, flags: [.maskControl, .maskCommand]))
+        precondition(ShortcutListener.isPasteChord(keyCode: 9, flags: [.maskControl, .maskCommand]))
+        precondition(!ShortcutListener.isPasteChord(keyCode: 9, flags: [.maskCommand]), "plain ⌘V is never taken")
 
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("chunks-\(UUID())")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
