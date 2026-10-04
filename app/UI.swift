@@ -287,7 +287,7 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("Insert at the cursor", isOn: $controller.automaticInsertion)
-                    Text("Types into whichever field has the cursor when dictation finishes. Saved first; if a field cannot take the text, it goes to the clipboard. Murmur never sends a message.")
+                    Text("Types into whichever field has the cursor when dictation finishes. If it cannot, press ⌃⌘V to paste the dictation where your cursor is. Your clipboard is always put back. Murmur never sends a message.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     Toggle("Intelligently add a leading space", isOn: $controller.intelligentLeadingSpace)
                     Text("Separate dictation from existing text at the cursor. Existing whitespace, punctuation, and selected text are left alone.")

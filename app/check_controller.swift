@@ -164,6 +164,8 @@ import AppKit
         precondition(!ShortcutListener.isCopyChord(keyCode: 8, flags: [.maskCommand]))
         precondition(!ShortcutListener.isCopyChord(keyCode: 8, flags: [.maskControl, .maskCommand, .maskShift]))
         precondition(!ShortcutListener.isCopyChord(keyCode: 9, flags: [.maskControl, .maskCommand]))
+        precondition(ShortcutListener.isPasteChord(keyCode: 9, flags: [.maskControl, .maskCommand]))
+        precondition(!ShortcutListener.isPasteChord(keyCode: 9, flags: [.maskCommand]), "plain ⌘V is never taken")
 
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("chunks-\(UUID())")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

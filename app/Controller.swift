@@ -525,6 +525,7 @@ final class PreStart: @unchecked Sendable {
         guard let tap = next.createTap(), let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = "The shortcut could not start. Check Input Monitoring and Accessibility."; return }
         next.onEscapeWhileProcessing = { [weak self] in self?.cancelCloudRequest() }
         next.onCopyChord = { [weak self] in self?.copyLatestRawTranscript() }
+        next.onPasteChord = { [weak self] in self?.pasteUninserted() }
         next.pressToToggle = pressToToggle
         // A press while the previous dictation processes records right away; its events replay
         // into the machine when that dictation finishes, which adopts this capture.
@@ -585,7 +586,7 @@ final class PreStart: @unchecked Sendable {
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }
-            insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
+            uninserted = nil; insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
             listeningStarted = Date(); generation = UUID(); recoveryEntryID = nil; recordingFailed = false
             destinationScreen = screenForDestination(destination)
         }
@@ -872,22 +873,25 @@ final class PreStart: @unchecked Sendable {
                 try store.save(entry)
                 switch insertion.status {
                 case .verified: setPhase("Inserted", "Inserted.")
-                case .unverified: setPhase("Saved", readable ? "\(saved) Delivery could not be verified; no retry was attempted." : "Pasted. The text is also on the clipboard.")
-                case .failed:
-                    entry.insertionStatus = copyToClipboard(processed) ? "copied" : entry.insertionStatus; try? store.save(entry)
-                    setPhase("Saved", entry.insertionStatus == "copied" ? "This field could not take the text, so it was copied to the clipboard." : "\(saved) The text could not be inserted into this field, so nothing was typed.")
+                case .unverified: setPhase("Saved", "\(saved) Delivery could not be verified. Press ⌃⌘V to paste it if it is missing.")
+                case .failed: uninserted = processed; setPhase("Saved", "This field could not take the text. Press ⌃⌘V to paste it where your cursor is.")
                 }
+                if insertion.status == .unverified { uninserted = processed }
             } catch { setPhase("Saved", "\(saved) Insertion status could not be saved.") }
         } else {
-            setPhase("Saved", "\(saved) Automatic insertion is off.")
+            uninserted = processed
+            setPhase("Saved", "\(saved) Press ⌃⌘V to paste it where your cursor is.")
         }
         destination = nil; historySaved(); done()
     }
-    /// Leaves the dictation on the clipboard for the user to paste; replaces what was there.
-    private func copyToClipboard(_ text: String) -> Bool {
-        let board = NSPasteboard.general
-        board.clearContents()
-        return board.setString(text, forType: .string)
+    /// The latest dictation Murmur did not (or may not have) typed, kept in memory for ⌃⌘V.
+    private var uninserted: String?
+    /// ⌃⌘V anywhere: pastes that dictation at the cursor, then restores the clipboard. It stays
+    /// available until the next dictation starts.
+    func pasteUninserted() {
+        guard let text = uninserted, !isBusy else { return }
+        let result = pasteIntoFrontmostApp(text)
+        timingLog.notice("paste-chord status=\(result.status.rawValue, privacy: .public) detail=\(result.detail, privacy: .public)")
     }
     // Explicit developer check of the production pipeline, using a synthetic file
     // and an exact disposable destination. Never enabled during ordinary launch.
