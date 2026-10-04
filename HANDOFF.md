@@ -1,4 +1,4 @@
-# Dictionary feature — October 4, 2026 (in progress)
+# Dictionary feature — October 4, 2026
 
 Branch `aakash/dictionary-feature-523123`. Goal: make the custom dictionary matter on the main route (local transcription, then Gemini cleanup) and finish the editor. [Certain]
 
@@ -6,12 +6,13 @@ Done:
 - `7a4e865` Sound-alike terms reach cleanup. `DictionaryStore.relevantEntries` now adds up to 10 enabled entries whose preferred spelling sounds like a 1–3 word span of the transcript (matching phonetic keys and similarity ≥ 0.5, or similarity ≥ 0.75 for terms of 6+ letters). `apply()` stays exact. The cleanup prompt says the dictionary respelling overrides "never respell". The guard lets one term join 2–3 raw words that spell it exactly ("cloud dev" → "clouddev"). [Certain]
 - Measured with a 20-term sample dictionary over the 425-utterance corpus: 9/425 transcripts pulled in a term, all genuine; 0 false positives after the 6-letter rule (before it, "I mean" pulled in "Sean" 20 times). Recall probe: shawn/seen→Sean, coopernetties→Kubernetes, a cash→Aakash, jiminy→Gemini, para keet→Parakeet matched; figment→Figma, germany→Gemini, shivon→Siobhan did not. [Certain]
 
-Known limits: a misheard *and* split term ("cube cuddle" → kubectl) reaches the prompt but the guard holds the result (`unexplainedDeletion`); add a "heard as" variant for those. "seen" sends "Sean" to the cleanup provider; the prompt tells it to respell only where the term is clearly meant. Not yet tested against a live Gemini call. [Certain]
+Known limits: "seen" sends "Sean" to the cleanup provider; the prompt tells it to respell only where the term is clearly meant. Not yet tested against a live Gemini call. [Certain]
 
 - `01f9fc3` Settings → Dictionary: Edit turns a row into fields with Save and Cancel (Return saves, Escape cancels). Each row has an on/off toggle; entries that are off are dimmed and no longer apply. A conflicting variant shows its error message. Return in the Add fields adds. There's an empty state, and the help text explains exact versus sound-alike matching. `ProcessingCoordinator.updateEntry` keeps an entry's source; learned promotions are keyed by entry ID, so editing a learned entry can't re-promote the old spelling. Checks pass: dictionary 140, processing 95, routes 89, providers, cleanup corpus, and the controller compile. [Certain]
-- UI fixture: `app/check_ui.sh --light --dictionary` seeds sample entries. It builds and launches, but the Dictionary section was **not inspected in pixels**: the session hit its usage limit. Open it and click Dictionary to check the row layout (toggle width with `.labelsHidden().fixedSize()`, the Edit button). [Certain]
+- Merged the live Gemini validation notes from local `main` (section below). That run found Gemini writing "shelf made"/"shelf-made" for Shelfmate. With this branch, a Shelfmate entry that has no variants reaches the cleanup prompt for both forms. `2135bac` lets the guard accept a term that replaces 2–3 words that sound like it, on the cloud path only ("shelf made" → "Shelfmate"; this also covers "cube cuddle" → kubectl). Checks: processing 96, routes 89, dictionary 140, providers, cleanup corpus. [Certain]
+- UI fixture (`app/check_ui.sh --light --dictionary`), inspected in pixels: found and fixed squeezed Add-row fields and a visible "Use <term>" label beside each toggle. After the fix: rows show the badge, toggle, Edit and ×; the disabled entry is dimmed; Edit → change variants → Save updated the row; the toggles carry VoiceOver labels ("Use Kubernetes"). Dark mode was not inspected. [Certain]
 
-Next: visual check of the Dictionary section; one live Gemini cleanup run with a preferred-only term (for example Kubernetes said aloud); then the decisions below.
+Not done: a live Gemini call through this branch's sound-alike path; the earlier live run used exact variants on `main`. Next live check: remove Shelfmate's variants and say "Send the Shelfmate report". [Certain]
 
 Decisions for the user:
 - Cloud transcription vocabulary hint is unwired (`CloudAudio.prepare` never sets `vocabularyHint`), though provider disclosures mention it. Wiring it means sending the dictionary's preferred spellings with every cloud transcription, since nothing can be filtered before the transcript exists. Not done without approval. [Certain]
