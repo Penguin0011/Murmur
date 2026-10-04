@@ -1,3 +1,17 @@
+# Live Gemini and dictionary validation — October 4, 2026
+
+Current checkout: `main` at `f077b53`; working tree was clean at start. The installed `~/Applications/Murmur.app` executable and `runtime/Murmur.app` executable have the same SHA-256 (`4d032d274013ab8abecb69a6468b1ab2873adc4b5c7a8069c8f18b2db5347fc6`). Older sections below are historical; their uncompiled/unwired/no-real-key claims do not describe this checkpoint. [Certain]
+
+- Real Gemini calls succeeded using the saved key, without printing it: Gemini 3.5 Transcribe returned `Send the shelf-made report to Acme Robotics. Um, the total is $42.`; Gemini audio returned `Send a shelf made report to Acme Robotics. Um, the total is $42.` Synthetic Samantha speech was uploaded through the production `CloudTranscription` and provider code. This proves real network behavior, not human speech quality. [Certain]
+- Production `ProcessingCoordinator.processAsync` with Gemini cleanup preserved `ACME Robotics`, removed the filler, and retained the amount. A control with the configured variant `shelf mate` produced `Shelfmate`. Both audio cases missed `Shelfmate` because only `shelf mate`/`shelfmate` were registered, while Gemini returned `shelf-made`/`shelf made`. Dictionary replacement uses explicit whole-word variants, not fuzzy matching. [Certain]
+- The app currently passes no dictionary vocabulary hint to cloud transcription (`Controller.transcribeInCloud` → `CloudTranscription.run`). Dictionary replacement and relevant-term cloud cleanup run after transcription. Do not claim dictionary bias at recognition time. OpenRouter STT ignores prompts by design. [Certain]
+- `check_processing.swift`: 88 checks passed, zero failed. Live OpenRouter remains untested because no OpenRouter key is saved. [Certain]
+- Full installed-app microphone → Gemini → dictionary → Gemini cleanup → TextEdit insertion is in progress. Temporary test changes: transcription Local → Gemini 3.5 Transcribe; shortcut Fn → Control–Option–Space; added manual Shelfmate with variants `shelf mate, shelf made, shelf-made`. Cleanup was already Gemini. Restore test settings and remove the temporary entry after validation. [Certain]
+
+Ignored diagnostics are under `runtime/cloud-live/`; no credentials were written there. [Certain]
+
+---
+
 # Session checkpoint — October 3, 2026
 
 Branch `aakash/stoic-pascal-2p0zyt`. Since the merge commit `027c1bf`, these landed first (through `fecee29`): [Certain]
