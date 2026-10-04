@@ -8,7 +8,10 @@ Done:
 
 Known limits: a misheard *and* split term ("cube cuddle" → kubectl) reaches the prompt but the guard holds the result (`unexplainedDeletion`); add a "heard as" variant for those. "seen" sends "Sean" to the cleanup provider; the prompt tells it to respell only where the term is clearly meant. Not yet tested against a live Gemini call. [Certain]
 
-Next: edit-in-place and per-entry enable in Settings; then decisions below.
+- `01f9fc3` Settings → Dictionary: Edit turns a row into fields with Save and Cancel (Return saves, Escape cancels). Each row has an on/off toggle; entries that are off are dimmed and no longer apply. A conflicting variant shows its error message. Return in the Add fields adds. There's an empty state, and the help text explains exact versus sound-alike matching. `ProcessingCoordinator.updateEntry` keeps an entry's source; learned promotions are keyed by entry ID, so editing a learned entry can't re-promote the old spelling. Checks pass: dictionary 140, processing 95, routes 89, providers, cleanup corpus, and the controller compile. [Certain]
+- UI fixture: `app/check_ui.sh --light --dictionary` seeds sample entries. It builds and launches, but the Dictionary section was **not inspected in pixels**: the session hit its usage limit. Open it and click Dictionary to check the row layout (toggle width with `.labelsHidden().fixedSize()`, the Edit button). [Certain]
+
+Next: visual check of the Dictionary section; one live Gemini cleanup run with a preferred-only term (for example Kubernetes said aloud); then the decisions below.
 
 Decisions for the user:
 - Cloud transcription vocabulary hint is unwired (`CloudAudio.prepare` never sets `vocabularyHint`), though provider disclosures mention it. Wiring it means sending the dictionary's preferred spellings with every cloud transcription, since nothing can be filtered before the transcript exists. Not done without approval. [Certain]
