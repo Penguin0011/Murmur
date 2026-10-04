@@ -18,8 +18,8 @@ struct ShortcutMachine {
     /// The press that latched or finished a toggle owns its release, which must do nothing.
     private var ignoreRelease = false
     let holdThreshold: TimeInterval
-    /// Press-to-toggle setting: every press from idle latches like a double press, so releases do
-    /// nothing and the next press finishes.
+    /// Press-to-toggle setting: a short tap latches (the next press finishes), while a hold still
+    /// finishes on release, so both gestures work in either mode.
     var pressToToggle = false
     // ponytail: fixed window; make it a setting if people double-press slower or faster.
     let doublePressWindow: TimeInterval
@@ -38,7 +38,7 @@ struct ShortcutMachine {
         switch state {
         case .processing: return nil
         case .idle:
-            state = .listening; mode = pressToToggle ? .toggled : .holding; ignoreRelease = false
+            state = .listening; mode = .holding; ignoreRelease = false
             return .start
         case .listening:
             ignoreRelease = true
@@ -57,7 +57,7 @@ struct ShortcutMachine {
             state = .processing
             return .finish
         }
-        mode = .awaitingSecondPress(releasedAt: time)
+        mode = pressToToggle ? .toggled : .awaitingSecondPress(releasedAt: time)
         return nil
     }
 
@@ -153,7 +153,7 @@ final class ShortcutListener {
     /// Tap thread only: when the current press from idle went down.
     private var tapThreadPressAt: TimeInterval?
     private let tapHoldThreshold = ShortcutMachine().holdThreshold
-    /// Set before the tap starts and read on the tap thread; a toggled recording has no hold release to cut at.
+    /// Set before the tap starts and read on the tap thread.
     var pressToToggle = false { didSet { machine.pressToToggle = pressToToggle } }
     /// The machine state as last published by the main thread; the tap thread reads only this.
     private let mirrorLock = NSLock()
@@ -202,7 +202,7 @@ final class ShortcutListener {
     /// A lone short tap queued during processing must not keep its early capture recording until
     /// the replay: expire it at its own deadline. A second press in time makes it a double press.
     private func scheduleQueuedTapExpiry() {
-        guard queued.count == 2, queued[1].at - queued[0].at < machine.holdThreshold else { return }
+        guard !machine.pressToToggle, queued.count == 2, queued[1].at - queued[0].at < machine.holdThreshold else { return }
         let pressedAt = queued[0].at
         DispatchQueue.main.asyncAfter(deadline: .now() + machine.doublePressWindow + 0.02) { [self] in
             guard queued.count == 2, queued[0].at == pressedAt else { return }
@@ -256,7 +256,7 @@ final class ShortcutListener {
               event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
         let time = Double(event.timestamp) / 1_000_000_000
         if type == .keyUp || (type == .flagsChanged && !binding.isDown(event)) {
-            if !pressToToggle, let pressed = tapThreadPressAt, time - pressed >= tapHoldThreshold { onHoldRelease?(time) }
+            if let pressed = tapThreadPressAt, time - pressed >= tapHoldThreshold { onHoldRelease?(time) }
             tapThreadPressAt = nil
             return
         }

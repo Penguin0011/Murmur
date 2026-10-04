@@ -250,7 +250,6 @@ final class PreStart: @unchecked Sendable {
     private var capture: Capture?
     private var destination: FocusSnapshot?
     private var destinationScreen: NSScreen?
-    private var focusStable = true
     private var insertThisSession = true
     private var leadingSpaceThisSession = false
     private var shortcutGeneration = UUID()
@@ -402,16 +401,6 @@ final class PreStart: @unchecked Sendable {
                     let running = capture.engine.isRunning, writeFailed = capture.queue.sync { capture.writeError != nil }
                     timingLog.notice("capture-interrupted engine-running=\(running, privacy: .public) write-error=\(writeFailed, privacy: .public)")
                     self.recordingFailed = true; self.stopRecording()
-                }
-                if self.isBusy, self.focusStable, let initial = self.destination {
-                    let current = try? captureFocus()
-                    let reason = current == nil ? "no-focus" : current!.pid != initial.pid ? "app" : !CFEqual(current!.element, initial.element) ? "element"
-                        : current!.secure ? "secure" : current!.value != initial.value ? "value"
-                        : current!.selection?.location != initial.selection?.location || current!.selection?.length != initial.selection?.length ? "selection" : nil
-                    if let reason {
-                        timingLog.notice("focus-unstable reason=\(reason, privacy: .public) app=\(initial.bundleID, privacy: .public)")
-                        self.focusStable = false; return
-                    }
                 }
             }
         }
@@ -569,8 +558,8 @@ final class PreStart: @unchecked Sendable {
         session.finishRecording = { [weak self] in timingLog.notice("capture-cap reached"); guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
-    private var idleMessage: String { pressToToggle ? "Press your shortcut to dictate, and press it again to finish." : "Hold your shortcut to dictate, or double-press it to dictate until you press it again." }
-    private var listeningMessage: String { "Listening… \(listener?.pressToToggle == true ? "Press the shortcut again" : "Release") to finish, or press Escape to cancel." }
+    private var idleMessage: String { pressToToggle ? "Press your shortcut to dictate and press it again to finish, or hold it and release." : "Hold your shortcut to dictate, or double-press it to dictate until you press it again." }
+    private var listeningMessage: String { "Listening… \(listener?.pressToToggle == true ? "Release or press the shortcut again" : "Release") to finish, or press Escape to cancel." }
     private func removeShortcut() {
         shortcutGeneration = UUID()
         tapThread?.stop(); tapThread = nil
@@ -596,7 +585,7 @@ final class PreStart: @unchecked Sendable {
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }
-            focusStable = true; insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
+            insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
             listeningStarted = Date(); generation = UUID(); recoveryEntryID = nil; recordingFailed = false
             destinationScreen = screenForDestination(destination)
         }
@@ -859,9 +848,14 @@ final class PreStart: @unchecked Sendable {
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus)
             do { try store.save(entry) } catch { setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); destination = nil; historySaved(); done(); return }
         }
-        if insertThisSession, focusStable, let destination {
+        if insertThisSession {
+            // Insert where the cursor is now, even if focus moved while recording or processing.
+            let target = (try? captureFocus()).flatMap { $0.pid == getpid() ? nil : $0 }
+            if target?.secure == true {
+                setPhase("Saved", "\(saved) Password fields cannot receive dictation."); destination = nil; historySaved(); done(); return
+            }
             // Persist uncertainty before the one permitted delivery attempt.
-            let insertionText = textWithLeadingSpace(processed, value: destination.value, selection: destination.selection, enabled: leadingSpaceThisSession)
+            let insertionText = textWithLeadingSpace(processed, value: target?.value, selection: target?.selection, enabled: leadingSpaceThisSession)
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
             do {
                 try store.save(entry)
@@ -869,25 +863,23 @@ final class PreStart: @unchecked Sendable {
                 // thread, so take the indicator down first instead of freezing it.
                 bubble.hide()
                 let inserting = ProcessInfo.processInfo.systemUptime
-                let insertion = insertText(entry.finalText, into: destination, policy: .singleAttempt)
-                timingLog.notice("insert app=\(destination.bundleID, privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
+                // A readable text field is written and read back; anything else (a web editor, a
+                // custom text view, no accessible focus) gets a plain paste.
+                let readable = target.map { insertionTextRole($0.role) && $0.value != nil && $0.selection != nil } ?? false
+                let insertion = readable ? insertText(entry.finalText, into: target!, policy: .singleAttempt) : pasteIntoFrontmostApp(entry.finalText)
+                timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
                 switch insertion.status {
                 case .verified: setPhase("Inserted", "Inserted.")
-                case .unverified: setPhase("Saved", "\(saved) Delivery could not be verified; no retry was attempted.")
+                case .unverified: setPhase("Saved", readable ? "\(saved) Delivery could not be verified; no retry was attempted." : "Pasted. The text is also on the clipboard.")
                 case .failed:
                     entry.insertionStatus = copyToClipboard(processed) ? "copied" : entry.insertionStatus; try? store.save(entry)
                     setPhase("Saved", entry.insertionStatus == "copied" ? "This field could not take the text, so it was copied to the clipboard." : "\(saved) The text could not be inserted into this field, so nothing was typed.")
                 }
             } catch { setPhase("Saved", "\(saved) Insertion status could not be saved.") }
         } else {
-            timingLog.notice("insert skipped auto=\(self.insertThisSession, privacy: .public) focus-stable=\(self.focusStable, privacy: .public) destination=\(self.destination?.bundleID ?? "none", privacy: .public)")
-            // No usable text field (none focused, or focus moved): the text goes to the clipboard instead.
-            if insertThisSession, copyToClipboard(processed) {
-                entry.insertionStatus = "copied"; try? store.save(entry)
-                setPhase("Saved", "No text field was ready, so the text was copied to the clipboard.")
-            } else { setPhase("Saved", "\(saved) The destination changed or automatic insertion is off.") }
+            setPhase("Saved", "\(saved) Automatic insertion is off.")
         }
         destination = nil; historySaved(); done()
     }
@@ -911,7 +903,7 @@ final class PreStart: @unchecked Sendable {
         }
         // The probe is local only: it never sends audio or text to a provider.
         sessionTranscriber = nil; processing?.cloudCleaner = nil
-        destination = focused; focusStable = true; insertThisSession = true; leadingSpaceThisSession = intelligentLeadingSpace
+        destination = focused; insertThisSession = true; leadingSpaceThisSession = intelligentLeadingSpace
         activeModelDirectory = modelDirectory; listeningStarted = Date(); generation = UUID()
         destinationScreen = screenForDestination(focused); recoveryEntryID = nil
         transcribe(ownedAudio) { [weak self] in

@@ -125,7 +125,7 @@ struct SettingsView: View {
                         Text("Control–Option–Space").tag("ctrl-option-space")
                     }
                     Toggle("Press once to start, again to stop", isOn: $controller.pressToToggle)
-                    Text(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
+                    Text(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop, or hold it and release. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top, spacing: 16) {
@@ -286,8 +286,8 @@ struct SettingsView: View {
                 } header: { Text("Dictionary and learning") }
 
                 Section {
-                    Toggle("Insert into the original text field", isOn: $controller.automaticInsertion)
-                    Text("Saved before insertion. If the destination changes or delivery is uncertain, copy the text from History. Murmur never sends a message.")
+                    Toggle("Insert at the cursor", isOn: $controller.automaticInsertion)
+                    Text("Types into whichever field has the cursor when dictation finishes. Saved first; if a field cannot take the text, it goes to the clipboard. Murmur never sends a message.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     Toggle("Intelligently add a leading space", isOn: $controller.intelligentLeadingSpace)
                     Text("Separate dictation from existing text at the cursor. Existing whitespace, punctuation, and selected text are left alone.")

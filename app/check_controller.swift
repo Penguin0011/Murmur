@@ -148,6 +148,11 @@ import AppKit
         precondition(Chunker.join(["Hello there", "General Kenobi."], sentenceEnds: [true, false]) == "Hello there. General Kenobi.", "a sentence pause adds a period")
         precondition(Chunker.join(["we were going", "I think to the store."], sentenceEnds: [false, false]) == "we were going I think to the store.", "a capital without a sentence pause adds nothing")
         precondition(Chunker.join(["Done.", " ", "Next one?", "Yes"], sentenceEnds: [true, true, true, false]) == "Done. Next one? Yes")
+        precondition(Chunker.join(["made a medieval past look.", "More stable."], sentenceEnds: [false, false]) == "made a medieval past look more stable.", "a mid-sentence cut drops the model's period and capital")
+        precondition(Chunker.join(["appears in the.", "Windows and doors."], sentenceEnds: [true, false]) == "appears in the Windows and doors.", "no sentence ends on 'the', even at a long pause; names keep capitals")
+        precondition(Chunker.join(["to value", "The mysterious qualities"], sentenceEnds: [false, false]) == "to value the mysterious qualities")
+        precondition(Chunker.join(["It works.", "The next one."], sentenceEnds: [true, false]) == "It works. The next one.", "a sentence pause keeps the period and capital")
+        precondition(Chunker.join(["Wait...", "So what?"], sentenceEnds: [false, false]) == "Wait... so what?", "an ellipsis stays")
         // Pause length: 10 frames at rate 10 per buffer; quiet run of 5 buffers around the cut.
         let shape = (0..<20).map { (10, (8...12).contains($0) ? 0.0 : 1.0) }
         precondition(abs(Chunker.pauseLength(shape, at: 10, rate: 10) - 5) < 1e-9, "pause spans the whole quiet run")

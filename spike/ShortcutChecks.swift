@@ -29,11 +29,11 @@ func runShortcutChecks() throws {
 
     var toggle = ShortcutMachine(); toggle.pressToToggle = true
     try check(toggle.press(at: 0) == .start, "press-to-toggle: a press starts")
-    try check(toggle.release(at: 3) == nil && toggle.state == .listening, "press-to-toggle: even a long hold's release keeps recording")
+    try check(toggle.release(at: 0.1) == nil && toggle.state == .listening, "press-to-toggle: a quick tap latches")
     try check(toggle.doublePressExpired(at: 9) == nil, "press-to-toggle: no lone-tap expiry")
     try check(toggle.press(at: 10) == .finish && toggle.release(at: 10.1) == nil, "press-to-toggle: the next press finishes")
     toggle.processingFinished()
-    try check(toggle.press(at: 11) == .start && toggle.release(at: 11.05) == nil && toggle.state == .listening, "press-to-toggle: a quick tap also latches")
+    try check(toggle.press(at: 11) == .start && toggle.release(at: 14) == .finish, "press-to-toggle: a hold still finishes on release")
 
     var hold = ShortcutMachine()
     try check(hold.press(at: 0) == .start && hold.release(at: 0.5) == .finish, "hold release finishes")

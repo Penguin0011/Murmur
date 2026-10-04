@@ -205,21 +205,39 @@ final class Chunker {
 
     private func send(_ event: Event) { if let handler { handler(event) } else { pending.append(event) } }
 
-    /// Joins chunk transcripts. A chunk cut at a sentence-length pause (`sentenceEnds[i]`) that
-    /// the model left unpunctuated gets a period; capitalization is not evidence, since every
-    /// chunk's first word comes back capitalized.
+    /// Joins chunk transcripts. The model punctuates every chunk as if the speaker stopped there:
+    /// it ends each with a period and capitalizes each first word. A cut at a sentence-length
+    /// pause (`sentenceEnds[i]`) keeps or adds the period; any other cut is mid-sentence, so the
+    /// period goes and the next word drops its capital. A sentence never ends on a word like
+    /// "the" or "and", whatever the pause. Only words in `lowercaseStarts` lose a capital, so names
+    /// and "I" keep theirs.
     static func join(_ texts: [String], sentenceEnds: [Bool]) -> String {
-        var out = "", breakBefore = false
+        var out = "", sentenceBreak = false
         for (i, raw) in texts.enumerated() {
-            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty {
-                if breakBefore, let last = out.last, !".?!".contains(last) { out += "." }
-                out += out.isEmpty ? text : " " + text
+                if !out.isEmpty {
+                    let lastWord = String(out.split(separator: " ").last ?? "").lowercased().trimmingCharacters(in: .punctuationCharacters)
+                    let firstWord = String(text.prefix { $0.isLetter || $0 == "'" || $0 == "’" })
+                    let midSentence = !sentenceBreak || danglingWords.contains(lastWord)
+                    if midSentence {
+                        if out.last == "." && !out.hasSuffix("..") { out.removeLast() }
+                        if lowercaseStarts.contains(firstWord.lowercased()), firstWord.first?.isUppercase == true {
+                            text = firstWord.lowercased() + text.dropFirst(firstWord.count)
+                        }
+                    } else if let last = out.last, !".?!".contains(last) { out += "." }
+                    out += " "
+                }
+                out += text
             }
-            breakBefore = i < sentenceEnds.count && sentenceEnds[i]
+            sentenceBreak = i < sentenceEnds.count && sentenceEnds[i]
         }
         return out
     }
+    /// Words a sentence cannot end on.
+    static let danglingWords: Set<String> = ["a", "an", "the", "and", "or", "but", "nor", "of", "to", "in", "on", "at", "for", "with", "from", "by", "into", "onto", "as", "than", "that", "which", "who", "whose", "my", "your", "our", "their", "his", "her", "its", "this", "these", "those", "is", "are", "was", "were", "be", "been", "am", "will", "would", "could", "should", "can", "may", "might", "must", "shall", "do", "does", "did", "have", "has", "had", "very", "so", "because", "if", "when", "while", "where", "like", "about", "some", "any", "every", "each", "no", "not"]
+    /// Common words that start a chunk only because the model capitalized it.
+    static let lowercaseStarts: Set<String> = danglingWords.union(["it", "it's", "we", "you", "they", "he", "she", "there", "here", "then", "more", "most", "less", "also", "just", "all", "one", "two", "what", "how", "why", "now", "even", "only", "still", "other", "another", "such", "make", "made", "get", "got", "go", "going", "see", "use", "used", "new", "same", "up", "out", "over", "after", "before", "between", "through", "during", "without", "within", "instead", "rather", "well", "really", "much", "many", "few", "things", "thing", "way", "people"])
 }
 
 struct RetryAudio {
