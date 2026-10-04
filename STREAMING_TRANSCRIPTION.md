@@ -115,3 +115,11 @@ Pressing ⌃⌘C anywhere copies the raw transcript of the latest dictation sinc
 
 - **Gemma:** reports 0 thinking tokens with `thinkingLevel: minimal`; it is simply slow, at about 44 output tokens per second. [Certain]
 - **Middle tier:** Flash 3.5 or 3.6 between Flash-Lite and Gemma would usually take about 2 s instead of 8 s. Failover today triggers only on quota and rate limits, not on 503, so an overloaded middle model would hold a cleanup rather than fail over. Free-tier daily limits per model are shown only in AI Studio. Not built. [Likely]
+
+## Built: parallel sections on the Gemma fallback (October 4, 2026)
+
+When Flash-Lite is rate limited and cleanup goes to Gemma 4, text of 150 words or more is split at sentence ends into sections of about 100 words (`CleanupSections`), cleaned in parallel, and each section is checked by the guard on its own. Spoken lists ("first … second …") stay whole. Flash-Lite still gets the whole text. [Certain]
+
+- **Measured** on a 300-word transcript (the 2-minute cap), two rounds: whole Gemma 7.7–8.0 s, sectioned Gemma 3.2 s. [Certain]
+- **Quality:** the sectioned output kept a few fillers and repeats ("like", "the the", "let's, let's") that whole-text Gemma removed. Nothing was added or reworded, and every section passed the guard. [Certain]
+- **Rate limits:** about 3 requests per dictation instead of 1. [Certain]

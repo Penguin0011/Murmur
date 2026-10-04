@@ -64,6 +64,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try localChecks(ProcessingCoordinator(directory: root.appendingPathComponent("local"), defaults: defaults))
         try await cloudChecks(ProcessingCoordinator(directory: root.appendingPathComponent("cloud"), defaults: defaults))
         try learningChecks(root.appendingPathComponent("learn"), defaults)
+        try await sectionChecks(ProcessingCoordinator(directory: root.appendingPathComponent("sections"), defaults: defaults))
         try editorChecks(ProcessingCoordinator(directory: root.appendingPathComponent("editor"), defaults: defaults))
         print("\(passes) checks passed, \(failures) failed")
         if failures > 0 { exit(1) }
@@ -275,5 +276,51 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(p.dictionary.entries.contains { $0.id == entry.id }, "reset keeps manual entries")
         try p.deleteEntry(id: entry.id)
         check(p.dictionary.entries.isEmpty, "manual entry deleted")
+    }
+}
+
+/// Answers a Gemini request with its own transcript minus "um, ", counting requests and models.
+private final class EchoGemini: HTTPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _models: [String] = []
+    var models: [String] { lock.withLock { _models } }
+    func send(_ request: URLRequest) async throws -> HTTPResult {
+        lock.withLock { _models.append(request.url!.lastPathComponent) }
+        let body = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+        let user = ((body["contents"] as! [[String: Any]])[0]["parts"] as! [[String: Any]])[0]["text"] as! String
+        let text = user.split(separator: "\n").dropFirst().dropLast().joined(separator: "\n").replacingOccurrences(of: "um, ", with: "")
+        let reply = ["candidates": [["content": ["parts": [["text": text]], "role": "model"], "finishReason": "STOP"]]]
+        return HTTPResult(status: 200, body: try JSONSerialization.data(withJSONObject: reply))
+    }
+}
+
+extension ProcessingChecks {
+    /// Long text on the Gemma fallback is cleaned in parallel sections; the primary model sends it whole.
+    static func sectionChecks(_ p: ProcessingCoordinator) async throws {
+        let sentence = "We should um, ship the build on Friday after the review."   // 11 words
+        let long = Array(repeating: sentence, count: 30).joined(separator: " ")
+        let sections = CleanupSections.split(long)
+        check(sections.count == 3 && sections.joined(separator: " ") == long, "330 words split into 3 sentence-aligned sections: \(sections.count)")
+        check(sections.allSatisfy { $0.hasSuffix(".") }, "sections end at sentence ends")
+        check(CleanupSections.split(Array(repeating: sentence, count: 10).joined(separator: " ")).count == 1, "short text stays whole")
+        let list = "First, " + long + " Second, call Sam."
+        check(CleanupSections.split(list).count == 1, "a spoken list stays whole")
+        check(CleanupSections.split(Array(repeating: sentence, count: 21).joined(separator: " ")).count == 2, "a short tail joins the last section")
+
+        var settings = p.settings
+        settings.route = .cloud; settings.options = .standard
+        try p.update(settings)
+        let expected = long.replacingOccurrences(of: "um, ", with: "")
+        let limits = GeminiModelLimits(), echo = EchoGemini()
+        var gemini = GeminiCleanupProvider(apiKey: APIKey("test-key-123")!)
+        gemini.transport = echo; gemini.limits = limits
+        p.cloudCleaner = gemini
+        let whole = await p.processAsync(long)
+        check(whole == .insert(expected), "primary model: one whole request")
+        check(echo.models.count == 1 && echo.models[0].hasPrefix(GeminiCleanupProvider.defaultModel), "primary sent once: \(echo.models)")
+        limits.markLimited(GeminiCleanupProvider.defaultModel, until: Date().addingTimeInterval(60))
+        let sectioned = await p.processAsync(long)
+        check(sectioned == .insert(expected), "fallback: sections rejoin in order")
+        check(echo.models.count == 4 && echo.models.dropFirst().allSatisfy { $0.hasPrefix(GeminiCleanupProvider.fallbackModel) }, "fallback sent 3 sections to Gemma: \(echo.models)")
     }
 }

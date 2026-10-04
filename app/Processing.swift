@@ -147,13 +147,31 @@ final class ProcessingCoordinator {
         let options = settings.options
         if !options.anyEnabled || prepared.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .insert(prepared.text) }
         guard let provider = cloudCleaner else { return .heldForRecovery(raw: raw, reason: .cleanerFailed) }
-        let messages = CleanupPrompt.build(transcript: prepared.text, options: options, dictionaryTerms: prepared.terms)
-        let cleaned: String
-        do { cleaned = try await provider.cleanup(messages) } catch {
+        // On the slow Gemma fallback, long text is cleaned in parallel sections, each guarded on its own.
+        let sections = (provider as? GeminiCleanupProvider)?.onFallback == true ? CleanupSections.split(prepared.text) : [prepared.text]
+        let terms = prepared.terms
+        let cleaned: [String]
+        do {
+            cleaned = try await withThrowingTaskGroup(of: (Int, String).self) { group in
+                for (index, section) in sections.enumerated() {
+                    group.addTask { (index, try await provider.cleanup(CleanupPrompt.build(transcript: section, options: options, dictionaryTerms: terms))) }
+                }
+                var out = Array(repeating: "", count: sections.count)
+                for try await (index, text) in group { out[index] = text }
+                return out
+            }
+        } catch {
             lastProviderError = error as? ProviderError
             return .heldForRecovery(raw: raw, reason: .cleanerFailed)
         }
-        return Self.outcome(CleanupPipeline.judge(raw: prepared.text, cleaned: cleaned, options: options, allowedTerms: prepared.terms), raw: raw)
+        var parts: [String] = []
+        for (section, text) in zip(sections, cleaned) {
+            switch CleanupPipeline.judge(raw: section, cleaned: text, options: options, allowedTerms: terms) {
+            case .cleaned(let part), .unchanged(let part): if !part.isEmpty { parts.append(part) }
+            case .heldForRecovery(_, let reason): return .heldForRecovery(raw: raw, reason: reason)
+            }
+        }
+        return .insert(parts.joined(separator: " "))
     }
 
     // MARK: Learning

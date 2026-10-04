@@ -626,6 +626,32 @@ protocol AsyncCleaner: Sendable {
 
 // MARK: - Pipeline
 
+/// Splits a long transcript at sentence ends into sections of about `target` words, so a slow
+/// cleanup model (Gemma 4, about 44 tokens per second) can clean them in parallel. Short text and
+/// spoken lists ("first … second …", which must be formatted as one) stay whole.
+enum CleanupSections {
+    static func split(_ text: String, target: Int = 100) -> [String] {
+        let words = text.split(whereSeparator: \.isWhitespace).count
+        guard words >= target * 3 / 2,
+              text.range(of: #"\bfirst\b[\s\S]*\bsecond\b"#, options: [.regularExpression, .caseInsensitive]) == nil else { return [text] }
+        var sections: [String] = [], current = "", count = 0
+        // ponytail: sentence end = terminal punctuation then space; a cut inside "e.g. this" only costs context.
+        for sentence in text.split(separator: " ", omittingEmptySubsequences: false).reduce(into: [""], { parts, word in
+            parts[parts.count - 1] += (parts[parts.count - 1].isEmpty ? "" : " ") + word
+            if let last = word.last, ".?!".contains(last) { parts.append("") }
+        }) where !sentence.isEmpty {
+            current += (current.isEmpty ? "" : " ") + sentence
+            count += sentence.split(whereSeparator: \.isWhitespace).count
+            if count >= target { sections.append(current); current = ""; count = 0 }
+        }
+        if !current.isEmpty {
+            // A short tail joins the previous section rather than going out alone.
+            if count < target / 2, let last = sections.popLast() { sections.append(last + " " + current) } else { sections.append(current) }
+        }
+        return sections
+    }
+}
+
 enum CleanupOutcome: Equatable, Sendable {
     /// Cleanup ran and passed the guard; insert this text.
     case cleaned(String)
