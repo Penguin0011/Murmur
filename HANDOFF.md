@@ -54,6 +54,19 @@ Still not wired: onboarding, VoiceOver announcements, launch at login, input-dev
 
 Learning from corrections is wired in (October 4, 2026): verified insertions into learning-eligible fields are watched with `spike/Observation.swift`, and the ledger receives the original-case span so the approved filter decides. Live probe into TextEdit: "Please call ACME about the invoice" was inserted and edited to "Akme" by AX in two sessions. A further run that selected the word and typed over it with keystrokes also settled evidence. That promoted a learned `Akme` ← `ACME` entry, and the third dictation inserted "Akme". Test data, settings and documents were restored afterwards. Typing after the dictated span or editing outside it still drops that session's evidence. Fixing a word through a right-click spelling suggestion is untested (the menu may move AX focus and end the window early). `refreshDictionary()` runs after every settle, so the Parakeet vocabulary writer on `aakash/dictionary-feature-523123` will pick up learned entries once both are merged. [Certain]
 
+Learning in non-standard fields (October 4, 2026, user request): live probe runs, each dictating "Please call ACME about the invoice" and then fixing the word with System Events keystrokes (Option-Left ×4, Shift-Option-Right, type "Akme"), then activating Finder. Every case settled one `ACME` → `Akme` correction in the ledger. Settings, dictionary and test History were restored afterwards. [Certain]
+
+| App and field | Delivery | Observation route |
+|---|---|---|
+| Chrome, plain textarea | paste, unverified | keystrokes |
+| Chrome, contenteditable | paste, unverified | keystrokes |
+| Safari, textarea | unverified | AX read-back |
+| Arc, textarea | unverified | AX read-back |
+| VS Code, default settings | paste, unverified | keystrokes |
+| Google Docs in Chrome, default settings (a new doc from docs.new, left in the user's Drive) | paste, unverified | keystrokes |
+
+The first keystroke run recorded `akme`: System Events' synthetic keys carry only the Shift flag, not the shifted character. Shift and Caps Lock are now applied to letters. Untested: autocorrect in the target app, IME input, right-click spelling fixes, Slack/Discord. [Certain]
+
 **Mac-side next steps**
 1. Pull this branch, run `app/build.sh` and every check in `app/README.md` (including `check_ui.sh`) on the macOS 26 host. Fix anything that fails under Swift 6.3.3 and `-swift-version 5`. [Certain]
 2. Run a live key test per provider: OpenRouter STT, OpenRouter chat, Gemini `generateContent`, and the Fireworks turbo host only if it is to be offered. Record status codes and error shapes; do not offer a route in settings until its test passes. [Certain]
