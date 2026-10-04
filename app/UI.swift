@@ -684,8 +684,9 @@ private struct BubbleView: View {
                 Button(action: controller.dismissStatus) { Image(systemName: "xmark").font(.system(size: 11)) }
                     .buttonStyle(.plain).help("Dismiss error").accessibilityLabel("Dismiss error")
             }
-            // "No speech" and "No audio" need no action: they keep only the pop-up.
-            if controller.recoveryAudio != nil || controller.hasRecoveryAudio, !message.hasPrefix("No speech was detected"), !message.hasPrefix("No audio was captured") {
+            // These keep only the pop-up; saved audio stays reachable from Murmur's window.
+            if controller.recoveryAudio != nil || controller.hasRecoveryAudio,
+               !["No speech was detected", "No audio was captured", "Transcription failed"].contains(where: message.hasPrefix) {
                 Button("Audio…", action: controller.revealRecoveryAudio)
                     .buttonStyle(.bordered).controlSize(.small)
             }
