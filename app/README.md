@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 ```
 
@@ -43,7 +43,7 @@ swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift module-one/ca
 Settings has three independent cleanup toggles, a Faithful Transcription button, a learning toggle, and a dictionary editor (add, delete, learned/manual badge, Reset Learned). Cleanup and learning settings take effect on Apply Settings; dictionary edits save immediately. Automatic observation of edits is not wired in, so nothing feeds learning yet. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute` (derived from `cleanupChoice`, see below), `learningEnabled`, `historyMode` and `updateChecksEnabled`. The last two are wired in (see below) and are also written directly on Apply Settings, so they persist when the dictionary is unavailable. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
 
 ```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/check_processing.swift -o /tmp/murmur-processing-check
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_processing.swift -o /tmp/murmur-processing-check
 /tmp/murmur-processing-check
 ```
 

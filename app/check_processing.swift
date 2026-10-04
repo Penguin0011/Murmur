@@ -240,6 +240,27 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(on.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" }, "promoted after two sessions")
         check(on.process("call acme") == .insert("Call Akme"), "learned entry applies (punctuation capitalizes)")
 
+        // Watched spans (AppController's loop without AX): undo drops evidence; two corrected
+        // dictations promote with the user's casing, not the tracker's lowercased candidate.
+        let watched = try ProcessingCoordinator(directory: dir.appendingPathComponent("watch"), defaults: defaults)
+        func dictate(_ snapshots: [String]) throws {
+            var o = DictationObservation(value: "Call Acme today", insertedRange: NSRange(location: 0, length: 15), now: 0)!
+            var last = o.initial
+            for (i, value) in snapshots.enumerated() {
+                _ = o.observe(value: value, selection: NSRange(location: 0, length: 0), now: Double(i + 1), sameFocusedField: true, readableNonsecure: true)
+                let current = o.edited ?? o.initial
+                if current != last { try watched.observeSpan(sessionID: o.sessionID, original: o.initial, current: current); last = current }
+            }
+            o.finish(); try watched.settle(sessionID: o.sessionID)
+        }
+        try dictate(["Call Akme today", "Call Acme today"])
+        try dictate(["Call Akme today", "Call Akme today and more"])
+        check(watched.ledger.evidence.isEmpty, "undo and appended text leave no evidence")
+        try dictate(["Call Akme today"])
+        check(watched.dictionary.entries.isEmpty, "one session does not promote")
+        try dictate(["Call Akme today"])
+        check(watched.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "watched corrections promote with casing")
+
         // Learning off: nothing recorded, nothing promoted.
         let off = try ProcessingCoordinator(directory: dir.appendingPathComponent("off"), defaults: defaults)
         var settings = off.settings

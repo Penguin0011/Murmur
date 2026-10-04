@@ -178,10 +178,16 @@ final class ProcessingCoordinator {
 
     // MARK: Learning
 
+    /// One change to a watched dictated span (AppController polls `DictationObservation`).
+    /// An edit becomes provisional evidence; back to the original (undo) or lost attribution
+    /// (pass `original`) drops this session's evidence. Call `settle` when the window closes.
+    func observeSpan(sessionID: UUID, original: String, current: String) throws {
+        if current == original { try ledger.revert(sessionID: sessionID) }
+        else { try observe(ObservedCorrection(sessionID: sessionID, source: original, target: current, observedAt: Date())) }
+    }
+
     /// Feeds one attributed correction while its observation window is open. With learning off
     /// nothing is recorded.
-    /// TODO(observation): nothing calls this yet. The spike's Observation.swift is not in the app;
-    /// wire post-insertion observation here, then call `settle` when the window closes.
     @discardableResult
     func observe(_ correction: ObservedCorrection) throws -> CorrectionLedger.RecordOutcome {
         guard settings.learningEnabled else { return .learningDisabled }

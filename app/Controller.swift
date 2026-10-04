@@ -853,6 +853,7 @@ final class PreStart: @unchecked Sendable {
             do { try store.save(entry) } catch { setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); destination = nil; historySaved(); done(); return }
         }
         if insertThisSession {
+            watchTick(ending: true)
             // Insert where the cursor is now, even if focus moved while recording or processing.
             let target = (try? captureFocus()).flatMap { $0.pid == getpid() ? nil : $0 }
             if target?.secure == true {
@@ -874,6 +875,7 @@ final class PreStart: @unchecked Sendable {
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
+                watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location)
                 switch insertion.status {
                 case .verified: setPhase("Inserted", "Inserted.")
                 case .unverified: setPhase("Saved", "\(saved) Delivery could not be verified. Press ⌃⌘V to paste it if it is missing.")
@@ -957,10 +959,45 @@ final class PreStart: @unchecked Sendable {
         do { try processing?.resetLearned(); dictionaryMessage = "" } catch { dictionaryMessage = "Could not reset learned entries." }
         refreshDictionary()
     }
-    // TODO(observation): automatic post-insertion observation is not wired in. The spike's
-    // Observation.swift is not part of the app; when it is, feed attributed corrections to
-    // processing?.observe(_:) during the window and processing?.settle(sessionID:) when it closes,
-    // then refreshDictionary(). Learning must stay off for fields where learningEligible is false.
+    // Learning from corrections (PRD R10): after a verified insertion into a learning-eligible
+    // field, poll the dictated span until focus leaves, 60 seconds pass, attribution is lost or
+    // the next insertion; each change goes to the ledger, which settles when the watch ends.
+    private var watch: (observation: DictationObservation, field: FocusSnapshot, current: String)?
+    private var watchTimer: Timer?
+    private func watchCorrections(_ insertion: InsertionResult, text: String, at offset: Int?) {
+        guard processing?.settings.learningEnabled == true, insertion.status == .verified, let offset,
+              let field = insertion.snapshot, field.learningEligible, let value = field.value else { return }
+        let range = NSRange(location: offset, length: (text as NSString).length)
+        guard NSMaxRange(range) <= (value as NSString).length, (value as NSString).substring(with: range) == text,
+              let observation = DictationObservation(value: value, insertedRange: range, now: ProcessInfo.processInfo.systemUptime) else { return }
+        watch = (observation, field, text)
+        watchTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.watchTick() }
+        }
+    }
+    private func watchTick(ending: Bool = false) {
+        guard var w = watch else { return }
+        let focus = try? captureFocus()
+        // captureFocus spins the run loop; a shortcut handled there may already have ended this watch.
+        guard watch?.observation.sessionID == w.observation.sessionID else { return }
+        let same = focus.map { $0.pid == w.field.pid && CFEqual($0.element, w.field.element) } ?? false
+        // Access is about the dictated field; another app's unreadable focus is a departure, not lost access.
+        let readable = AXIsProcessTrusted() && (same ? focus?.learningEligible == true : true)
+        let selection = focus?.selection.map { NSRange(location: $0.location, length: $0.length) } ?? NSRange(location: 0, length: 0)
+        _ = w.observation.observe(value: focus?.value ?? "", selection: selection, now: ProcessInfo.processInfo.systemUptime,
+                                  sameFocusedField: same, readableNonsecure: readable)
+        if ending { w.observation.finish() }
+        let session = w.observation.sessionID, current = w.observation.edited ?? w.observation.initial
+        do {
+            if current != w.current { try processing?.observeSpan(sessionID: session, original: w.observation.initial, current: current); w.current = current }
+            watch = w
+            if w.observation.stopped {
+                stopWatching()
+                if try processing?.settle(sessionID: session).isEmpty == false { refreshDictionary() }
+            }
+        } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
+    }
+    private func stopWatching() { watchTimer?.invalidate(); watchTimer = nil; watch = nil }
     func deleteEntry(_ entry: HistoryEntry) { do { try records?.delete(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
     func clearHistory() {
         let alert = NSAlert(); alert.messageText = "Delete all saved transcripts?"; alert.informativeText = "This cannot be undone."
@@ -1066,7 +1103,7 @@ final class PreStart: @unchecked Sendable {
         let failed = PostWipeStep.run { step in
             switch step {
             case .discardInMemoryState:
-                records?.clearSessionOnly(); records = nil; store = nil; retry = nil; processing = nil
+                records?.clearSessionOnly(); records = nil; store = nil; retry = nil; processing = nil; stopWatching()
                 recoveryEntryID = nil; recoveryAudio = nil; historyCapWarning = nil
             case .recreateHistory:
                 let next = try HistoryStore(directory: locations.history)
@@ -1155,6 +1192,7 @@ final class PreStart: @unchecked Sendable {
 
     func shutdown() {
         generation = UUID(); cloudRequest.cancel(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
+        watchTick(ending: true)
         downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.
         if sessionAvailable { session.shutdown() }
         if let runner, runner.isRunning {

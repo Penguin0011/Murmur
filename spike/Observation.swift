@@ -9,7 +9,8 @@ struct TermCorrection: Hashable {
 /// Start only after verified insertion, in a nonsecure field with readable value/selection.
 struct DictationObservation {
     let sessionID: UUID
-    private let initial: String
+    /// The dictated span as inserted, original casing.
+    let initial: String
     private let prefix: String
     private let suffix: String
     private let start: TimeInterval
@@ -17,6 +18,9 @@ struct DictationObservation {
     private(set) var stopped = false
     private(set) var stopReason: String?
     private(set) var candidate: TermCorrection?
+    /// The span's current text, original casing; nil once attribution is lost. The app feeds
+    /// `initial` -> `edited` to the ledger, whose filter is broader than `candidate`'s one-letter rule.
+    private(set) var edited: String?
 
     init?(sessionID: UUID = UUID(), value: String, insertedRange: NSRange, now: TimeInterval) {
         let text = value as NSString
@@ -67,6 +71,7 @@ struct DictationObservation {
         // Any growth at the end could be ordinary appended typing. Do not attribute it as a correction.
         guard current == initial || !current.hasPrefix(initial) else { return stop("appended text") }
         range = updatedRange
+        edited = current
         candidate = Self.replacement(initial, current)
         return candidate
     }
@@ -77,9 +82,9 @@ struct DictationObservation {
     private mutating func stop(_ reason: String) -> TermCorrection? {
         stopped = true
         stopReason = reason
-        // A valid prior correction may survive a normal focus departure/expiry. An invalidating
-        // edit/selection change removes it because attribution is no longer established.
-        if reason != "window ended" && reason != "focus departed" { candidate = nil }
+        // A valid prior correction survives focus departure, expiry or the caret moving elsewhere
+        // (the text it was read from is unchanged). An invalidating edit removes it.
+        if !["window ended", "focus departed", "selection left dictated span"].contains(reason) { candidate = nil; edited = nil }
         return candidate
     }
 
