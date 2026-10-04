@@ -277,6 +277,8 @@ final class PreStart: @unchecked Sendable {
     private let dictionaryDownloader: ModelDownloader?
     private var dictionaryDownloadInFlight = false
     private var vocabularyFile: URL?
+    /// Set by start(); until then dictionary refreshes do not pre-warm, so launch hashes the model once.
+    private var started = false
     private let dictionaryModelDirectory = DictionaryModelFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser)
     private var lastAutomaticUpdateAttempt: Date?
     // TODO(R12): UpdateConfiguration still defaults to Penguin0011/dictation; confirm the release repository before shipping.
@@ -417,7 +419,7 @@ final class PreStart: @unchecked Sendable {
         signal(SIGPIPE, SIG_IGN)
         // App Nap would delay the shortcut; idle system sleep stays allowed.
         // Verify the model now so the first dictation does not hash 1.8 GB.
-        prewarm()
+        started = true; prewarm()
         noNap = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Respond to the dictation shortcut without delay")
         refreshPermissions()
         if !preview { configureShortcut() }
@@ -987,7 +989,8 @@ final class PreStart: @unchecked Sendable {
     /// the warm helper with it, so a wipe or edit never leaves old terms loaded.
     func refreshDictionary() {
         dictionaryEntries = processing?.dictionary.entries ?? []
-        writeHelperVocabulary(); prewarm()
+        writeHelperVocabulary()
+        if started { prewarm() }
     }
     /// FluidAudio's vocabulary JSON: enabled entries, preferred spelling plus "heard as" aliases.
     /// Owner-only, beside dictionary.json; absent when nothing is enabled.
@@ -1117,7 +1120,6 @@ final class PreStart: @unchecked Sendable {
         alert.addButton(withTitle: "Download"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: dictionaryDownloadInFlight) { dictionaryModelMessage = refusal; return }
-        warm.stopNow() // The helper may hold the folder's model files open.
         dictionaryDownloadInFlight = true; dictionaryModelMessage = ""; dictionarySupportFailed = false
         dictionaryModelStatus = .downloading(ModelDownloadProgress(bytesDone: 0, totalBytes: dictionaryDownloader.downloadSize))
         dictionaryDownloader.start { result in
