@@ -207,9 +207,9 @@ final class Chunker {
 
     /// Joins chunk transcripts. The model punctuates every chunk as if the speaker stopped there:
     /// it ends each with a period and capitalizes each first word. A cut at a sentence-length
-    /// pause (`sentenceEnds[i]`) keeps or adds the period; any other cut is mid-sentence, so the
-    /// period goes and the next word drops its capital. A sentence never ends on a word like
-    /// "the" or "and", whatever the pause. Only words in `lowercaseStarts` lose a capital, so names
+    /// pause (`sentenceEnds[i]`) keeps or adds the period. At any other cut, an unpunctuated
+    /// chunk's capitalized next word is lowercased. A sentence never ends on a word like "the" or
+    /// "and", so that period always goes. Only words in `lowercaseStarts` lose a capital, so names
     /// and "I" keep theirs.
     static func join(_ texts: [String], sentenceEnds: [Bool]) -> String {
         var out = "", sentenceBreak = false
@@ -222,9 +222,11 @@ final class Chunker {
                     let dangling = danglingWords.contains(lastWord)
                     if !sentenceBreak || dangling {
                         let lower = lowercaseStarts.contains(firstWord.lowercased()) && firstWord.first?.isUppercase == true
-                        // Without either sign the model's period may be real; leave it.
-                        if (lower || dangling) && out.last == "." && !out.hasSuffix("..") { out.removeLast() }
-                        if lower { text = firstWord.lowercased() + text.dropFirst(firstWord.count) }
+                        // A model period is real unless the sentence would end on a word like "the";
+                        // a short pause alone does not prove the speaker kept going.
+                        let period = out.last == "." && !out.hasSuffix("..")
+                        if period && dangling { out.removeLast() }
+                        if lower && (!period || dangling) { text = firstWord.lowercased() + text.dropFirst(firstWord.count) }
                     } else if let last = out.last, !".?!".contains(last) { out += "." }
                     out += " "
                 }

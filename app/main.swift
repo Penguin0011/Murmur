@@ -29,10 +29,10 @@ import SwiftUI
     }
     func showWindow() {
         if window == nil {
-            let next = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 660), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            next.title = "Murmur"; next.titleVisibility = .hidden; next.titlebarAppearsTransparent = true
+            let next = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 680), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            next.title = "Murmur"; next.titleVisibility = .hidden; next.titlebarAppearsTransparent = true; next.backgroundColor = Palette.paperNS
             next.contentView = NSHostingView(rootView: SettingsView(controller: controller))
-            next.contentMinSize = NSSize(width: 700, height: 560); next.center(); next.isReleasedWhenClosed = false
+            next.contentMinSize = NSSize(width: 760, height: 560); next.center(); next.isReleasedWhenClosed = false
             window = next
         }
         NSApp.activate(ignoringOtherApps: true); window?.makeKeyAndOrderFront(nil); controller.refreshPermissions(); controller.refreshHistory()

@@ -23,10 +23,10 @@ import SwiftUI
         delegate.controller = controller
         let compact = CommandLine.arguments.contains("--compact")
         let opaque = CommandLine.arguments.contains("--opaque")
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: compact ? 700 : 820, height: compact ? 560 : 660), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-        window.title = "Murmur UI Check"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: compact ? 760 : 1000, height: compact ? 560 : 680), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.title = "Murmur UI Check"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true; window.backgroundColor = Palette.paperNS
         window.contentView = NSHostingView(rootView: SettingsView(controller: controller).environment(\.utilityOpaquePreview, opaque))
-        window.contentMinSize = NSSize(width: 700, height: 560)
+        window.contentMinSize = NSSize(width: 760, height: 560)
         window.isReleasedWhenClosed = false
         window.center(); window.makeKeyAndOrderFront(nil)
         let entries = [
