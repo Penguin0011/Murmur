@@ -397,7 +397,10 @@ enum CleanupGuard {
         return (ma, mb)
     }
 
-    static func check(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String] = []) -> CleanupGuardResult {
+    /// `soundsLike(heard, term)` (lowercased letters only) lets a term join 2–3 raw words that
+    /// sound like it; the default accepts only an exact spelling.
+    static func check(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String] = [],
+                      soundsLike: (String, String) -> Bool = (==)) -> CleanupGuardResult {
         // Judge corrections against the comma form the cleaner rewrote ("Tuesday. No wait." -> "Tuesday, no wait,").
         let raw = options.corrections ? RuleCleaner.mergeSplitCues(raw) : raw
         let rawWords = words(raw)
@@ -556,7 +559,8 @@ enum CleanupGuard {
 
         // Every deleted word must be explained by an enabled option.
         // A dictionary respelling replaces at most one raw word per supplied term word present, or
-        // joins a run of 2–3 adjacent raw words that spell it exactly ("cloud dev" -> "clouddev").
+        // joins a run of 2–3 adjacent raw words that spell it ("cloud dev" -> "clouddev"), or sound
+        // like it per `soundsLike` ("shelf made" -> "Shelfmate").
         func spelled(_ text: String) -> String { String(text.filter { $0.isLetter || $0.isNumber }) }
         var termsUsed = 0
         for (j, w) in outWords.enumerated() where !matchedOut.contains(j) && termWords.contains(w.lower) {
@@ -565,7 +569,7 @@ enum CleanupGuard {
             search: for start in rawWords.indices {
                 for length in 2...3 where start + length <= rawWords.count {
                     let run = start..<(start + length)
-                    if run.allSatisfy({ !consumedRaw.contains($0) }) && spelled(run.map { a[$0] }.joined()) == target { joined = run; break search }
+                    if run.allSatisfy({ !consumedRaw.contains($0) }) && soundsLike(spelled(run.map { a[$0] }.joined()), target) { joined = run; break search }
                 }
             }
             if let joined { consumedRaw.formUnion(joined) } else { termsUsed += 1 }
@@ -703,14 +707,15 @@ enum CleanupPipeline {
         return judge(raw: raw, cleaned: cleaned, options: options, allowedTerms: allowedTerms)
     }
 
-    static func judge(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String]) -> CleanupOutcome {
+    static func judge(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String],
+                      soundsLike: (String, String) -> Bool = (==)) -> CleanupOutcome {
         let output = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         if output == raw.trimmingCharacters(in: .whitespacesAndNewlines) { return .cleaned(output) }
         // Only filler words ("Um."): nothing to insert, which is not a cleanup failure.
         if output.isEmpty, options.fillers,
            (try? RuleCleaner().clean(raw, options: CleanupOptions(fillers: true, corrections: false, lists: false)))?
                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { return .cleaned("") }
-        switch CleanupGuard.check(raw: raw, cleaned: output, options: options, allowedTerms: allowedTerms) {
+        switch CleanupGuard.check(raw: raw, cleaned: output, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike) {
         case .pass: return .cleaned(output)
         case .fail(let reason): return .heldForRecovery(raw: raw, reason: reason)
         }

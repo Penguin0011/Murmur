@@ -194,6 +194,11 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(joined.messages.first?.system.contains("clouddev") == true, "near-matched term in prompt")
         check(joined.messages.first?.system.contains("Akme") == false, "unrelated term still not in prompt")
         try p.deleteEntry(id: clouddev.id)
+        // Live Gemini wrote "shelf made" for Shelfmate: misheard and split, still accepted.
+        let shelfmate = try p.addEntry(preferred: "Shelfmate", variants: "")
+        p.cloudCleaner = MockCloudCleaner(.success("Send a Shelfmate report to Dana."))
+        await expect(p, "Send a shelf made report to Dana.", .insert("Send a Shelfmate report to Dana."), "sound-alike split term passes guard")
+        try p.deleteEntry(id: shelfmate.id)
 
         // Editing: in place, disable stops apply, a variant owned by another enabled entry is refused.
         let edited = try p.addEntry(preferred: "Postgress", variants: "post gres")
