@@ -20,6 +20,25 @@ Deferred: local Parakeet vocabulary boosting (FluidAudio `configureVocabularyBoo
 
 ---
 
+# Live Gemini and dictionary validation — October 4, 2026
+
+Current checkout: `main` at `f077b53`; working tree was clean at start. The installed `~/Applications/Murmur.app` executable and `runtime/Murmur.app` executable have the same SHA-256 (`4d032d274013ab8abecb69a6468b1ab2873adc4b5c7a8069c8f18b2db5347fc6`). Older sections below are historical; their uncompiled/unwired/no-real-key claims do not describe this checkpoint. [Certain]
+
+- Real Gemini calls succeeded using the saved key, without printing it: Gemini 3.5 Transcribe returned `Send the shelf-made report to Acme Robotics. Um, the total is $42.`; Gemini audio returned `Send a shelf made report to Acme Robotics. Um, the total is $42.` Synthetic Samantha speech was uploaded through the production `CloudTranscription` and provider code. This proves real network behavior, not human speech quality. [Certain]
+- Production `ProcessingCoordinator.processAsync` with Gemini cleanup preserved `ACME Robotics`, removed the filler, and retained the amount. A control with the configured variant `shelf mate` produced `Shelfmate`. Both audio cases missed `Shelfmate` because only `shelf mate`/`shelfmate` were registered, while Gemini returned `shelf-made`/`shelf made`. Dictionary replacement uses explicit whole-word variants, not fuzzy matching. [Certain]
+- The app currently passes no dictionary vocabulary hint to cloud transcription (`Controller.transcribeInCloud` → `CloudTranscription.run`). Dictionary replacement and relevant-term cloud cleanup run after transcription. Do not claim dictionary bias at recognition time. OpenRouter STT ignores prompts by design. [Certain]
+- Repeated real API tests with `shelf mate, shelfmate, shelf made, shelf-made` variants: **both Gemini 3.5 Transcribe and Gemini audio passed** dictionary replacement plus Gemini cleanup, producing `Shelfmate` and `ACME Robotics`, removing `Um`, and preserving `$42`. Gemini audio changed “the” to “a” in its raw transcript; the dictionary cannot repair unrelated transcription errors. [Certain]
+- `check_processing.swift`: 88 checks passed, zero failed. `check_providers.swift`: 553 assertions passed. Live OpenRouter remains untested because no OpenRouter key is saved. [Certain]
+- **Human-speech installed-app test passed.** User physically pressed Fn, spoke the requested phrase, and pressed Fn again. TextEdit visibly contained `Send the Shelfmate report to Acme Robotics. The total is $42.`; the matching durable History record contains that text as both raw and final, with `insertionStatus: verified`. Gemini recognized Shelfmate directly in this human sample; replacement itself was independently proved by the synthetic API samples above. [Certain]
+- Settings at checkpoint: Gemini 3.5 Transcribe selected; Gemini cleanup with all four options enabled; original Fn shortcut restored. Added temporary manual Shelfmate with `shelf mate, shelf made, shelf-made` variants. The user began another recording while results were being inspected, so cloud transcription and the test entry were left in place to avoid disrupting active use. Original transcription route was Local; no original dictionary entries existed. Cleanup was already Gemini. [Certain]
+- Native automated shortcut input typed a space without starting recording, and modifier-only input was rejected by the tool. The physical-user test above resolves the full-path gate; automated shortcut input is not evidence of a production shortcut defect. [Certain]
+
+- User clarified that transcription will usually run locally. Restored **On this Mac (Parakeet)** in the installed app and verified the selected control and LOCAL TRANSCRIPTION status. Gemini cleanup remains selected as before testing; dictionary replacements apply after either transcription route. Treat local transcription as the normal route and cloud transcription as an explicit alternative. [Certain]
+
+Ignored diagnostics are under `runtime/cloud-live/`; no credentials were written there. [Certain]
+
+---
+
 # Session checkpoint — October 3, 2026
 
 Branch `aakash/stoic-pascal-2p0zyt`. Since the merge commit `027c1bf`, these landed first (through `fecee29`): [Certain]
