@@ -31,532 +31,881 @@ private struct UtilityGlass: ViewModifier {
     }
 }
 
-private struct UtilityButton: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.utilityOpaquePreview) private var opaquePreview
-    var prominent = false
+/// The window's paper-and-ink palette (clouddev design system). Dark appearance swaps paper and ink
+/// and lifts the accent text colors so they stay readable on ink.
+enum Palette {
+    private static func rgb(_ hex: Int) -> NSColor {
+        NSColor(srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+    private static func dynamic(light: Int, dark: Int) -> NSColor {
+        NSColor(name: nil) { $0.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? rgb(dark) : rgb(light) }
+    }
+    static let paperNS = dynamic(light: 0xF4F2ED, dark: 0x141414)
+    static let paper = Color(nsColor: paperNS)
+    static let ink = Color(nsColor: dynamic(light: 0x141414, dark: 0xF4F2ED))
+    static let ink80 = ink.opacity(0.8)
+    static let ink70 = ink.opacity(0.7)
+    static let ink64 = ink.opacity(0.64)
+    static let ink45 = ink.opacity(0.45)
+    static let ink20 = ink.opacity(0.2)
+    static let accent = Color(red: 0x59 / 255, green: 0x95 / 255, blue: 0xC9 / 255)
+    /// Same hue at 4.8:1 on paper: accent text.
+    static let accentInk = Color(nsColor: dynamic(light: 0x2F6EA6, dark: 0x8DB6DC))
+    static let accentDeep = Color(nsColor: dynamic(light: 0x285F90, dark: 0xA9C8E6))
+    static let accent16 = accent.opacity(0.16)
+}
 
-    @ViewBuilder func body(content: Content) -> some View {
-        if opaquePreview || reduceTransparency || contrast == .increased {
-            if prominent { content.buttonStyle(.borderedProminent) }
-            else { content.buttonStyle(.bordered) }
-        } else {
-            if prominent { content.buttonStyle(.glassProminent).tint(Color(nsColor: .controlAccentColor)).foregroundStyle(.white).font(.system(size: 14, weight: .bold)) }
-            else { content.buttonStyle(.glass) }
+private struct InkButtonStyle: ButtonStyle {
+    enum Kind { case filled, outline, accent, plain }
+    var kind: Kind = .filled
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 15, weight: .semibold)).lineLimit(1)
+            .padding(.horizontal, kind == .plain ? 0 : 16).frame(height: 44)
+            .foregroundStyle(kind == .filled || kind == .accent ? Palette.paper : Palette.ink)
+            .background(kind == .filled ? (configuration.isPressed ? Palette.accentDeep : Palette.ink) : kind == .accent ? Palette.accentInk : Color.clear)
+            .overlay { if kind == .outline { Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5) } }
+            .contentShape(Rectangle())
+            .opacity(enabled ? 1 : 0.45)
+    }
+}
+
+/// A square switch; VoiceOver still sees a native toggle.
+private struct SquareToggleStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 24) {
+            configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                Rectangle().fill(configuration.isOn ? Palette.accent : Color.clear)
+                Rectangle().fill(Palette.ink).frame(width: 17, height: 17).padding(.horizontal, 2.5)
+            }
+            .frame(width: 48, height: 24).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+            .frame(height: 44)
         }
+        .contentShape(Rectangle())
+        .onTapGesture { if enabled { configuration.isOn.toggle() } }
+        .opacity(enabled ? 1 : 0.45)
+        .accessibilityRepresentation { Toggle(isOn: configuration.$isOn) { configuration.label } }
+    }
+}
+
+private struct WindowAppearance: NSViewRepresentable {
+    let dark: Bool
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) {
+        let name: NSAppearance.Name = dark ? .darkAqua : .aqua
+        // The view joins its window after the first update.
+        DispatchQueue.main.async { view.window?.appearance = NSAppearance(named: name) }
     }
 }
 
 struct SettingsView: View {
     @ObservedObject var controller: AppController
-    @State private var selectedTab = 0
+    private enum Screen { case settings, history, setup }
+    @State private var screen = Screen.settings
+    @State private var section = 0
+    @State private var showAdvanced = false
+    /// The expanded History row.
     @State private var selectedID: String?
+    @State private var copiedID: String?
     @State private var searchText = ""
+    @State private var attentionOnly = false
     @State private var newPreferred = ""
     @State private var newVariants = ""
-    @State private var geminiKey = ""
-    @State private var openrouterKey = ""
-    @State private var serverKey = ""
+    @State private var openKey: ProviderID?
+    @State private var keyDraft = ""
+    @State private var checkedSetup = false
+    /// A window preference only; the floating indicator keeps following the system appearance.
+    @AppStorage("appearance") private var appearance = "light"
     /// Server address and model apply when editing ends (Return or leaving the field), not per keystroke.
     @FocusState private var serverFieldFocused: Bool
 
+    private static let sections = ["General", "Transcription", "Cleanup", "Dictionary", "History & Privacy", "API Keys", "Updates"]
+    private static let ledes = [
+        "The shortcut, how text is inserted, and what Murmur is allowed to do.",
+        "Where your voice is turned into text. On this Mac by default.",
+        "Tidy the transcript before it is typed. Each option works on its own.",
+        "Words Murmur should spell your way, in every mode.",
+        "What Murmur saves, and for how long. Nothing leaves this Mac.",
+        "Needed only for cloud routes. Stored in your Keychain.",
+        "Murmur checks for new versions. You install them yourself."
+    ]
+
     var body: some View {
-        VStack(spacing: 18) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Murmur").font(.largeTitle.weight(.semibold))
-                    Text("Your voice, on your Mac.").font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                }
-                Spacer()
-                Label(controller.appliedTranscriptionIsLocal ? "Local transcription" : "Cloud transcription", systemImage: controller.appliedTranscriptionIsLocal ? "desktopcomputer" : "cloud")
-                    .font(.callout).padding(.horizontal, 14).padding(.vertical, 9)
-                    .modifier(UtilityGlass())
-            }
-            TabView(selection: $selectedTab) {
-                dictation.tabItem { Label("Dictation", systemImage: "mic") }.tag(0)
-                history.tabItem { Label("History", systemImage: "clock") }.tag(1)
+        VStack(spacing: 0) {
+            if screen == .setup { setup } else {
+                header
+                banners
+                if screen == .settings { settings } else { history }
             }
         }
-        .padding(20)
-        .background(Color(nsColor: .windowBackgroundColor))
-        .frame(minWidth: 680, minHeight: 520)
-        .onAppear { controller.refreshPermissions(); controller.refreshHistory(); selectedID = controller.history.first?.id }
-        .onChange(of: controller.history.map(\.id)) { _, _ in
-            if !filteredHistory.contains(where: { $0.id == selectedID }) { selectedID = filteredHistory.first?.id }
+        .foregroundStyle(Palette.ink)
+        .background(Palette.paper)
+        .environment(\.colorScheme, appearance == "dark" ? .dark : .light)
+        // preferredColorScheme leaks app-wide and darkened the floating bubble; set only this window.
+        .background(WindowAppearance(dark: appearance == "dark"))
+        .frame(minWidth: 760, minHeight: 560)
+        // Every setting applies as soon as it changes; attached here so hidden sections still apply.
+        .modifier(AutoApplyGeneral(controller: controller))
+        .modifier(AutoApplyRoutes(controller: controller, serverFieldFocused: serverFieldFocused))
+        .onAppear {
+            controller.refreshPermissions(); controller.refreshHistory()
+            if !checkedSetup { checkedSetup = true; if !setupComplete { screen = .setup } }
         }
-        .onChange(of: searchText) { _, _ in
-            if !filteredHistory.contains(where: { $0.id == selectedID }) { selectedID = filteredHistory.first?.id }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .dictationShowError)) { _ in selectedTab = 0 }
+        // Permissions are granted in System Settings; re-read them on return.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in controller.refreshPermissions() }
+        .onReceive(NotificationCenter.default.publisher(for: .dictationShowError)) { _ in screen = .settings }
         .onReceive(NotificationCenter.default.publisher(for: .dictationShowHistory)) { _ in
-            searchText = ""
-            selectedTab = 1
-            selectedID = controller.history.first(where: { $0.id == controller.recoveryEntryID })?.id
-                ?? controller.history.first?.id
+            searchText = ""; attentionOnly = false; screen = .history
+            selectedID = controller.history.first(where: { $0.id == controller.recoveryEntryID })?.id ?? controller.history.first?.id
         }
     }
 
-    private var dictation: some View {
-        VStack(spacing: 14) {
+    // MARK: Shared pieces
+
+    private func mono(_ text: String, size: CGFloat = 12, color: Color = Palette.ink) -> some View {
+        Text(text).font(.system(size: size, design: .monospaced)).tracking(size * 0.08).textCase(.uppercase).foregroundStyle(color)
+    }
+
+    private func eyebrow(_ text: String) -> some View { mono(text, size: 11, color: Palette.accentInk) }
+
+    private var rule: some View { Rectangle().fill(Palette.ink).frame(height: 1.5) }
+    private var softRule: some View { Rectangle().fill(Palette.ink20).frame(height: 1) }
+
+    private func help(_ text: String, color: Color = Palette.ink70) -> some View {
+        Text(text).font(.system(size: 14)).lineSpacing(2).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func titled(_ title: String, _ detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.system(size: 16, weight: .semibold))
+            if let detail { help(detail) }
+        }
+    }
+
+    private func toggleRow(_ title: String, _ detail: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) { titled(title, detail) }.toggleStyle(SquareToggleStyle())
+            .padding(.vertical, 12).overlay(alignment: .bottom) { softRule }
+    }
+
+    private func segmented<T: Hashable>(_ options: [(T, String)], _ selection: Binding<T>, size: CGFloat = 15) -> some View {
+        HStack(spacing: -1.5) {
+            ForEach(options.indices, id: \.self) { index in
+                let (value, label) = options[index]
+                let on = selection.wrappedValue == value
+                Button { selection.wrappedValue = value } label: {
+                    Text(label).font(.system(size: size, weight: .medium)).lineLimit(1).minimumScaleFactor(0.75)
+                        .padding(.horizontal, 8).frame(maxWidth: .infinity).frame(height: 44)
+                        .foregroundStyle(on ? Palette.paper : Palette.ink).background(on ? Palette.ink : Color.clear)
+                        .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+    }
+
+    /// "Gemini 3.5 Transcribe (speech recognition, …)" → "Gemini 3.5 Transcribe" for segment labels.
+    private func short(_ name: String) -> String {
+        name.components(separatedBy: CharacterSet(charactersIn: "(,")).first?.trimmingCharacters(in: .whitespaces) ?? name
+    }
+
+    private func field(_ title: String, text: Binding<String>, secure: Bool = false) -> some View {
+        Group {
+            if secure { SecureField("", text: text) } else { TextField("", text: text) }
+        }
+        .textFieldStyle(.plain).font(.system(size: 15)).accessibilityLabel(title)
+        .overlay(alignment: .leading) {
+            if text.wrappedValue.isEmpty {
+                Text(title).font(.system(size: 15)).foregroundStyle(Palette.ink64).allowsHitTesting(false).accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 12).frame(height: 44)
+        .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+    }
+
+    private func progressBar(_ fraction: Double) -> some View {
+        GeometryReader { geometry in
+            Rectangle().fill(Palette.accent).frame(width: geometry.size.width * fraction)
+        }
+        .frame(height: 8).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+        .accessibilityElement().accessibilityLabel("Download progress").accessibilityValue("\(Int(fraction * 100)) percent")
+    }
+
+    /// The name with the accent square; a drawn square, since the ■ glyph renders rounded in the system font.
+    private func wordmark(_ text: String, size: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: size * 0.06) {
+            Text(text).font(.system(size: size, weight: .bold)).tracking(-size * 0.045)
+            Rectangle().fill(Palette.accent).frame(width: size * 0.5, height: size * 0.5)
+        }
+    }
+
+    private var setupComplete: Bool {
+        controller.microphoneAuthorized && controller.accessibilityAuthorized && controller.inputMonitoringAuthorized && modelSatisfied
+    }
+
+    /// Cloud transcription does not need the local model.
+    private var modelSatisfied: Bool { controller.modelRow.isReady || controller.transcriptionRoute == .cloud }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack(spacing: 32) {
+            wordmark("Murmur", size: 24)
+            HStack(spacing: 4) {
+                tab("Settings", .settings, count: nil)
+                tab("History", .history, count: controller.history.count)
+            }
+            Spacer()
+            HStack(spacing: 16) {
+                mono(controller.appliedTranscriptionIsLocal ? "Local transcription" : "Cloud transcription", color: Palette.ink70)
+                HStack(spacing: 7) {
+                    Rectangle().fill(controller.phase == "Error" ? Palette.ink : Palette.accent).frame(width: 9, height: 9)
+                    mono(controller.phase)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(.horizontal, 24).frame(height: 64)
+        .overlay(alignment: .bottom) { rule }
+    }
+
+    private func tab(_ title: String, _ target: Screen, count: Int?) -> some View {
+        Button { screen = target } label: {
+            HStack(spacing: 6) {
+                mono(title, size: 13)
+                if let count { mono("\(count)", size: 13, color: Palette.ink64) }
+            }
+            .padding(.horizontal, 14).frame(height: 44)
+            .overlay(alignment: .bottom) { Rectangle().fill(screen == target ? Palette.accent : Color.clear).frame(height: 2) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityAddTraits(screen == target ? .isSelected : [])
+    }
+
+    @ViewBuilder private var banners: some View {
+        if controller.hasStatusToShow && !controller.isBusy {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: controller.phase == "Error" ? "exclamationmark.triangle" : "waveform")
-                    .font(.title2).foregroundStyle(controller.phase == "Error" ? Color.orange : Color.accentColor)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(controller.phase).font(.headline)
-                    Text(controller.message).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if controller.phase == "Error" { mono("Error", color: Palette.paper).padding(.top, 2) }
+                Text(controller.message).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 Spacer(minLength: 8)
-                if !controller.isBusy && controller.phase != "Ready" {
-                    Button(action: controller.dismissStatus) { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).help("Dismiss status").accessibilityLabel("Dismiss status")
-                }
+                Button(action: controller.dismissStatus) { Image(systemName: "xmark") }
+                    .buttonStyle(.plain).help("Dismiss status").accessibilityLabel("Dismiss status")
             }
-            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(UtilityGlass())
+            .foregroundStyle(Palette.paper).padding(.horizontal, 24).padding(.vertical, 12)
+            .background(controller.phase == "Error" ? Palette.ink : Palette.accentDeep)
+        }
+        if !setupComplete {
+            HStack {
+                Text(controller.accessibilityAuthorized && controller.inputMonitoringAuthorized
+                     ? (modelSatisfied ? "Murmur needs the microphone before you can dictate." : "Murmur needs the microphone and its speech model before you can dictate.")
+                     : "Accessibility and Input Monitoring are needed before Murmur can type for you.")
+                    .font(.system(size: 14))
+                Spacer(minLength: 12)
+                Button { screen = .setup } label: {
+                    Text("Finish Setup →").font(.system(size: 14, weight: .semibold))
+                        .underline(color: Palette.accent).frame(height: 44)
+                }
+                .buttonStyle(.plain)
+            }
+            .foregroundStyle(Palette.paper).padding(.horizontal, 24)
+            .background(Palette.ink)
+        }
+    }
 
-            Form {
-                Section {
-                    Picker("Dictation shortcut", selection: $controller.shortcut) {
-                        Text("Right Option").tag("right-option")
-                        Text("Fn / Globe").tag("fn")
-                        Text("Control–Option–Space").tag("ctrl-option-space")
-                    }
-                    Toggle("Press once to start, again to stop", isOn: $controller.pressToToggle)
-                    Text(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .top, spacing: 16) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(ModelFacts.displayName)
-                                if !controller.modelSummary.isEmpty {
-                                    Text(controller.modelSummary).font(.caption).foregroundStyle(Color.primary.opacity(0.72))
-                                }
-                                Label(controller.modelRow.statusText, systemImage: controller.modelRow.isReady ? "checkmark.circle" : controller.modelRow.isWorking ? "arrow.down.circle" : "exclamationmark.circle")
-                                    .font(.callout).foregroundStyle(controller.modelRow.isReady ? Color.primary.opacity(0.72) : Color.primary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer()
-                            if controller.modelRow.actions.contains(.download) { Button("Download…", action: controller.downloadModel) }
-                            if controller.modelRow.actions.contains(.retry) { Button("Retry…", action: controller.downloadModel) }
-                            if controller.modelRow.actions.contains(.cancel) { Button("Cancel", action: controller.cancelModelDownload) }
-                            if controller.modelRow.actions.contains(.remove) { Button("Remove…", role: .destructive, action: controller.removeModel) }
-                        }
-                        if let progress = controller.modelRow.progress { ProgressView(value: progress) }
-                        if !controller.modelMessage.isEmpty {
-                            Text(controller.modelMessage).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    if let license = controller.modelLicense {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("License").font(.callout.weight(.medium))
-                            ForEach(license.declarations) { declaration in
-                                Button { controller.openLink(declaration.url) } label: { Text(declaration.name + " · " + declaration.source) }
-                                    .buttonStyle(.plain).foregroundStyle(Color.accentColor).help(declaration.url.absoluteString)
-                            }
-                            Text(license.note).font(.caption).foregroundStyle(Color.primary.opacity(0.72))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    HStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Advanced: model folder")
-                            Label(controller.modelAvailable ? "Model files found" : "No model files in this folder", systemImage: controller.modelAvailable ? "checkmark.circle" : "exclamationmark.circle")
-                                .font(.callout).foregroundStyle(controller.modelAvailable ? Color.primary.opacity(0.72) : Color.primary)
-                            if !controller.modelDirectory.isEmpty {
-                                Text(URL(fileURLWithPath: controller.modelDirectory).lastPathComponent)
-                                    .font(.caption).foregroundStyle(Color.primary.opacity(0.72)).lineLimit(1).textSelection(.enabled)
-                                    .help(controller.modelDirectory)
-                            }
-                        }
-                        Spacer()
-                        if controller.usesCustomModelFolder { Button("Use Default", action: controller.useDefaultModelDirectory) }
-                        Button("Choose Folder…", action: controller.chooseModelDirectory)
-                    }
-                    Text("Local transcription runs on this Mac. Downloading the model uses the network once; dictation does not. A folder you choose takes effect at once. Cloud transcription is chosen under Processing routes.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                } header: { Text("Recording") }
+    // MARK: Settings
 
-                Section {
-                    Picker("Transcription", selection: $controller.transcriptionRoute) {
-                        Text("On this Mac (Parakeet)").tag(TranscriptionRoute.local)
-                        Text("Cloud").tag(TranscriptionRoute.cloud)
-                    }
-                    if controller.transcriptionRoute == .cloud {
-                        Picker("Cloud provider", selection: $controller.cloudTranscriber) {
-                            ForEach(CloudTranscriber.allCases) { choice in Text(choice.displayName).tag(choice) }
-                        }
-                        if let disclosure = controller.routeDisclosure(.transcription) {
-                            Text(disclosure).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    Picker("Cleanup", selection: $controller.cleanupChoice) {
-                        ForEach(CleanupChoice.allCases) { choice in Text(choice.displayName).tag(choice) }
-                    }
-                    if controller.cleanupChoice == .localServer {
-                        placeholderField("Server address, e.g. \(RouteSettings.defaultServerURL)", text: $controller.localServerURL)
-                            .focused($serverFieldFocused).onSubmit(controller.settingsChanged)
-                        HStack(spacing: 8) {
-                            placeholderField("Model name", text: $controller.localServerModel)
-                                .focused($serverFieldFocused).onSubmit(controller.settingsChanged)
-                            Button("Find Models", action: controller.findLocalModels).disabled(controller.findingModels)
-                        }
-                        if !controller.localServerModels.isEmpty {
-                            Picker("Found models", selection: $controller.localServerModel) {
-                                ForEach(controller.localServerModels, id: \.self) { model in Text(model).tag(model) }
-                            }
-                        }
-                        if !controller.localServerMessage.isEmpty {
-                            Text(controller.localServerMessage).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    if controller.cleanupChoice != .localRules, let disclosure = controller.routeDisclosure(.cleanup) {
-                        Text(disclosure).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Text("Routes take effect as soon as you choose them; a route that sends data off this Mac first shows what leaves it. Murmur never falls back to another route: if a provider fails, your audio or raw transcript stays here.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                } header: { Text("Processing routes") }
-
-                Section {
-                    keyRow(.gemini, text: $geminiKey)
-                    keyRow(.openrouter, text: $openrouterKey)
-                    keyRow(.localServer, text: $serverKey)
-                    Text("Keys are stored in your Keychain and shown only as saved. The local model server key is optional.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                } header: { Text("API keys") }
-
-                Section {
-                    Toggle("Remove filler words", isOn: $controller.cleanupFillers)
-                    Toggle("Apply spoken corrections", isOn: $controller.cleanupCorrections)
-                    Toggle("Format spoken lists", isOn: $controller.cleanupLists)
-                    Toggle("Fix punctuation and capitalization", isOn: $controller.cleanupPunctuation)
-                    HStack(spacing: 16) {
-                        Text("Each option works on its own. Faithful transcription turns them all off; dictionary spellings still apply.")
-                            .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                        Spacer()
-                        Button("Faithful Transcription", action: controller.useFaithfulTranscription)
-                            .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists && !controller.cleanupPunctuation)
-                    }
-                    Text((controller.appliedCleanupIsLocal ? "Cleanup runs on this Mac." : "Cleanup uses the provider chosen under Processing routes.") + " If it fails or changes too much, Murmur keeps the raw transcript in History and does not insert it.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                } header: { Text("Cleanup") }
-
-                Section {
-                    Toggle("Learn from my corrections", isOn: $controller.learningEnabled)
-                    Text("Automatic learning from edits is not available in this build yet. Learned entries keep applying until you delete or reset them.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                    ForEach(controller.dictionaryEntries) { entry in
+    private var settings: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Self.sections.indices, id: \.self) { index in
+                    let on = section == index
+                    Button { section = index } label: {
                         HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.preferred)
-                                if !entry.variants.isEmpty {
-                                    Text(entry.variants.joined(separator: ", ")).font(.caption).foregroundStyle(Color.primary.opacity(0.72)).lineLimit(1)
-                                }
-                            }
-                            Spacer()
-                            Text(entry.source == .learned ? "Learned" : "Manual")
-                                .font(.caption).foregroundStyle(Color.primary.opacity(0.72))
-                                .padding(.horizontal, 8).padding(.vertical, 2)
-                                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-                            Button { controller.deleteDictionaryEntry(entry) } label: { Image(systemName: "trash") }
-                                .buttonStyle(.plain).help("Delete \(entry.preferred)").accessibilityLabel("Delete \(entry.preferred)")
+                            mono(String(format: "%02d", index + 1), size: 13, color: on ? Palette.paper : Palette.ink).opacity(0.7)
+                            mono(Self.sections[index], size: 13, color: on ? Palette.paper : Palette.ink)
                         }
+                        .padding(.horizontal, 24).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .background(on ? Palette.ink : Color.clear).contentShape(Rectangle())
                     }
-                    HStack(spacing: 8) {
-                        placeholderField("Preferred spelling", text: $newPreferred)
-                        placeholderField("Heard as, comma-separated", text: $newVariants)
-                        Button("Add") {
-                            if controller.addDictionaryEntry(preferred: newPreferred, variants: newVariants) { newPreferred = ""; newVariants = "" }
-                        }
-                        .disabled(newPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    if !controller.dictionaryMessage.isEmpty {
-                        Text(controller.dictionaryMessage).font(.callout).foregroundStyle(Color.orange)
-                    }
-                    HStack {
-                        Text("Dictionary spellings apply in every mode. Edits save immediately.")
-                            .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                        Spacer()
-                        Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries)
-                            .disabled(!controller.dictionaryEntries.contains { $0.source == .learned })
-                    }
-                } header: { Text("Dictionary and learning") }
-
-                Section {
-                    Toggle("Insert into the original text field", isOn: $controller.automaticInsertion)
-                    Text("Saved before insertion. If the destination changes or delivery is uncertain, copy the text from History. Murmur never sends a message.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                    Toggle("Intelligently add a leading space", isOn: $controller.intelligentLeadingSpace)
-                    Text("Separate dictation from existing text at the cursor. Existing whitespace, punctuation, and selected text are left alone.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                    Picker("Keep transcripts", selection: $controller.retention) {
-                        Text("30 days").tag("30-days")
-                        Text("Six months").tag("six-months")
-                        Text("Forever").tag("forever")
-                    }
-                    if let warning = controller.historyCapWarning {
-                        Text(warning).font(.callout).foregroundStyle(Color.orange).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Picker("Transcript history", selection: $controller.historyMode) {
-                        Text("Save on this Mac").tag(HistoryMode.on)
-                        Text("Off").tag(HistoryMode.off)
-                    }
-                    if controller.historyMode == .off {
-                        Text(HistoryMode.offDisclosure).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    HStack(spacing: 16) {
-                        Text(DeleteAllDataText.explanation).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                        Spacer()
-                        Button("Delete All Data…", role: .destructive, action: controller.deleteAllData)
-                    }
-                    Toggle("Show menu bar icon", isOn: $controller.showMenuBar)
-                    Text("When hidden, reopen Murmur from Finder or Spotlight.")
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                } header: { Text("Output and history") }
-
-                Section {
-                    Toggle("Check for updates automatically", isOn: $controller.updateChecksEnabled)
-                    Text(UpdateText.explanation).font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                    HStack(spacing: 16) {
-                        Text(controller.updateStatus.isEmpty ? "Murmur " + controller.currentVersion : controller.updateStatus)
-                            .font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                        Button("Check for Updates", action: controller.checkForUpdates).disabled(controller.checkingForUpdates)
-                    }
-                    if let release = controller.availableRelease {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(UpdateText.headline(release)).font(.headline)
-                            if !release.notes.isEmpty {
-                                Text(UpdateText.notesExcerpt(release.notes)).font(.callout).textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            HStack(spacing: 16) {
-                                Text("Murmur never downloads or installs updates. Download the new version from GitHub and replace the app yourself.")
-                                    .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                                Spacer()
-                                Button("Open Release Page…", action: controller.openReleasePage)
-                            }
-                        }
-                    }
-                } header: { Text("Updates") }
-
-                Section {
-                    permissionRow("Microphone", allowed: controller.microphoneAuthorized, actionTitle: "Allow Microphone", action: controller.requestMicrophone)
-                    permissionRow("Accessibility", allowed: controller.accessibilityAuthorized, actionTitle: "Open Settings…") { controller.openPermissionSettings("accessibility") }
-                    permissionRow("Input Monitoring", allowed: controller.inputMonitoringAuthorized, actionTitle: "Open Settings…") { controller.openPermissionSettings("input-monitoring") }
-                } header: { Text("Permissions") }
-            }
-            .formStyle(.grouped)
-            .disabled(controller.isBusy)
-            // Every setting applies as soon as it changes; there is no Apply button to forget.
-            .modifier(AutoApplyGeneral(controller: controller))
-            .modifier(AutoApplyRoutes(controller: controller, serverFieldFocused: serverFieldFocused))
-
-            GlassEffectContainer(spacing: 12) {
-                HStack(spacing: 12) {
-                    Button("Refresh Permissions", action: controller.refreshPermissionsAndShortcut)
-                        .modifier(UtilityButton())
-                    Spacer()
-                    Text(controller.isBusy ? "Finish dictating to change settings." : "Changes apply as soon as you make them.")
-                        .font(.caption).foregroundStyle(Color.primary.opacity(0.72))
+                    .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
                 }
+                Spacer()
+                help(controller.isBusy ? "Finish dictating to change settings." : "Changes apply as soon as you make them.", color: Palette.ink64)
+                    .font(.system(size: 12)).padding(.horizontal, 24)
+            }
+            .padding(.vertical, 16).frame(width: 216)
+            .overlay(alignment: .trailing) { Rectangle().fill(Palette.ink).frame(width: 1.5) }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(Self.sections[section]).font(.system(size: 36, weight: .bold)).tracking(-1.4)
+                    Text(Self.ledes[section]).font(.system(size: 16)).foregroundStyle(Palette.ink70).padding(.top, 10).padding(.bottom, 8)
+                    sectionBody.disabled(controller.isBusy)
+                }
+                .frame(maxWidth: 640, alignment: .leading)
+                .padding(EdgeInsets(top: 32, leading: 40, bottom: 40, trailing: 40))
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.top, 14)
     }
 
-    private func placeholderField(_ title: String, text: Binding<String>) -> some View {
-        TextField("", text: text)
-            .accessibilityLabel(title)
-            .overlay(alignment: .leading) {
-                if text.wrappedValue.isEmpty {
-                    Text(title).foregroundStyle(Color.primary.opacity(0.72)).padding(.leading, 4)
-                        .allowsHitTesting(false).accessibilityHidden(true)
-                }
-            }
+    @ViewBuilder private var sectionBody: some View {
+        switch section {
+        case 0: general
+        case 1: transcription
+        case 2: cleanup
+        case 3: dictionary
+        case 4: privacy
+        case 5: apiKeys
+        default: updates
+        }
     }
 
-    private func keyRow(_ provider: ProviderID, text: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(provider.displayName)
-                Spacer()
-                Text(controller.savedKeys.contains(provider) ? KeyText.saved : KeyText.none)
-                    .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+    private var general: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow("Shortcut").padding(.top, 20)
+            VStack(alignment: .leading, spacing: 12) {
+                segmented([("right-option", "Right Option"), ("fn", "Fn / Globe"), ("ctrl-option-space", "Control–Option–Space")], $controller.shortcut)
+                help(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
             }
-            HStack(spacing: 8) {
-                // A visible box and prompt: an unstyled field drew nothing, so there was nowhere obvious to click or paste.
-                SecureField("", text: text, prompt: Text("Paste your \(provider.displayName) API key"))
-                    .textFieldStyle(.roundedBorder).accessibilityLabel("\(provider.displayName) API key")
-                Button("Save") { if controller.saveKey(provider, text.wrappedValue) { text.wrappedValue = "" } }
-                    .disabled(text.wrappedValue.isEmpty)
-                Button("Validate") { controller.validateKey(provider) }
-                    .disabled(!controller.savedKeys.contains(provider) && provider != .localServer)
-                Button("Remove", role: .destructive) { controller.removeKey(provider) }
-                    .disabled(!controller.savedKeys.contains(provider))
+            .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
+            toggleRow("Press once to start, again to stop", "Off means hold to record.", isOn: $controller.pressToToggle)
+            toggleRow("Insert into the original text field", "Saved before insertion. If the destination changes or delivery is uncertain, copy the text from History. Murmur never sends a message.", isOn: $controller.automaticInsertion)
+            toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
+            toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
+
+            eyebrow("Permissions").padding(.top, 28)
+            VStack(spacing: 0) {
+                permissionRow("Microphone", allowed: controller.microphoneAuthorized, actionTitle: "Allow", action: controller.requestMicrophone)
+                permissionRow("Accessibility", allowed: controller.accessibilityAuthorized, actionTitle: "Open Settings…") { controller.openPermissionSettings("accessibility") }
+                permissionRow("Input Monitoring", allowed: controller.inputMonitoringAuthorized, actionTitle: "Open Settings…") { controller.openPermissionSettings("input-monitoring") }
             }
-            if let message = controller.keyMessages[provider], !message.isEmpty {
-                Text(message).font(.callout).foregroundStyle(Color.primary.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
-            }
+            .overlay(alignment: .top) { rule }.padding(.top, 8)
+            Button("Refresh Permissions", action: controller.refreshPermissionsAndShortcut)
+                .buttonStyle(InkButtonStyle(kind: .outline)).padding(.top, 16)
+
+            eyebrow("Appearance").padding(.top, 28)
+            segmented([("light", "Light"), ("dark", "Dark")], $appearance).padding(.top, 8)
         }
     }
 
     private func permissionRow(_ title: String, allowed: Bool, actionTitle: String, action: @escaping () -> Void) -> some View {
-        HStack(spacing: 12) {
-            Label(title, systemImage: allowed ? "checkmark.circle" : "exclamationmark.circle")
+        HStack(spacing: 14) {
+            Text(title).font(.system(size: 16, weight: .semibold))
             Spacer()
-            Text(allowed ? "Allowed" : "Needed").font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-            if !allowed { Button(actionTitle, action: action) }
+            mono(allowed ? "Allowed ✓" : "Needed", color: allowed ? Palette.accentInk : Palette.ink)
+            if !allowed { Button(actionTitle, action: action).buttonStyle(InkButtonStyle()) }
         }
+        .frame(minHeight: 44).padding(.vertical, 12).overlay(alignment: .bottom) { softRule }
+    }
+
+    private var transcription: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(ModelFacts.displayName).font(.system(size: 18, weight: .semibold))
+                        if !controller.modelSummary.isEmpty { help(controller.modelSummary) }
+                        Group {
+                            if controller.modelRow.isReady { mono("Model ready ✓", color: Palette.accentInk) }
+                            else { Text(controller.modelRow.statusText).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
+                        }
+                        .padding(.top, 5)
+                    }
+                    Spacer()
+                    if controller.modelRow.actions.contains(.download) { Button("Download…", action: controller.downloadModel).buttonStyle(InkButtonStyle()) }
+                    if controller.modelRow.actions.contains(.retry) { Button("Retry…", action: controller.downloadModel).buttonStyle(InkButtonStyle()) }
+                    if controller.modelRow.actions.contains(.cancel) { Button("Cancel", action: controller.cancelModelDownload).buttonStyle(InkButtonStyle(kind: .outline)) }
+                    if controller.modelRow.actions.contains(.remove) { Button("Remove…", role: .destructive, action: controller.removeModel).buttonStyle(InkButtonStyle(kind: .outline)) }
+                }
+                if let progress = controller.modelRow.progress { progressBar(progress) }
+                if !controller.modelMessage.isEmpty { help(controller.modelMessage) }
+            }
+            .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 20)
+            if let license = controller.modelLicense {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(license.declarations) { declaration in
+                        Button { controller.openLink(declaration.url) } label: { Text("License: " + declaration.name + " · " + declaration.source).underline() }
+                            .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(Palette.accentInk).help(declaration.url.absoluteString)
+                    }
+                    help(license.note, color: Palette.ink64).font(.system(size: 12))
+                }
+                .padding(.top, 10)
+            }
+
+            eyebrow("Where transcription runs").padding(.top, 28)
+            segmented([(TranscriptionRoute.local, "On this Mac (Parakeet)"), (TranscriptionRoute.cloud, "Cloud")], $controller.transcriptionRoute).padding(.top, 8)
+            if controller.transcriptionRoute == .local {
+                help("Audio stays on this Mac. Downloading the model uses the network once; dictation does not.").padding(.top, 12)
+            } else {
+                segmented(CloudTranscriber.allCases.map { ($0, short($0.displayName)) }, $controller.cloudTranscriber, size: 14).padding(.top, 16)
+                    .help(controller.cloudTranscriber.displayName)
+                disclosure(controller.routeDisclosure(.transcription)).padding(.top, 16)
+            }
+
+            Button { showAdvanced.toggle() } label: {
+                mono((showAdvanced ? "▾" : "▸") + " Advanced", size: 13).frame(height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).padding(.top, 28)
+            if showAdvanced {
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Model folder").font(.system(size: 16, weight: .semibold))
+                        help((controller.usesCustomModelFolder ? "Custom folder" : "Default folder") + " · " + (controller.modelAvailable ? "model files found ✓" : "no model files in this folder"))
+                        if !controller.modelDirectory.isEmpty {
+                            Text(URL(fileURLWithPath: controller.modelDirectory).lastPathComponent)
+                                .font(.system(size: 12, design: .monospaced)).foregroundStyle(Palette.ink64).lineLimit(1)
+                                .textSelection(.enabled).help(controller.modelDirectory)
+                        }
+                    }
+                    Spacer()
+                    if controller.usesCustomModelFolder { Button("Use Default", action: controller.useDefaultModelDirectory).buttonStyle(InkButtonStyle(kind: .outline)) }
+                    Button("Choose Folder…", action: controller.chooseModelDirectory).buttonStyle(InkButtonStyle(kind: .outline))
+                }
+                .padding(.vertical, 16).overlay(alignment: .top) { rule }
+                help("A folder you choose takes effect at once.")
+            }
+        }
+    }
+
+    @ViewBuilder private func disclosure(_ text: String?) -> some View {
+        if let text {
+            Text(text + " Murmur never falls back to another route.")
+                .font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                .padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Palette.accent16)
+        }
+    }
+
+    private var cleanup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            rule.padding(.top, 20)
+            toggleRow("Remove filler words", "Takes out “um”, “uh” and similar.", isOn: $controller.cleanupFillers)
+            toggleRow("Apply spoken corrections", "“Friday, no wait, Monday” becomes “Monday”.", isOn: $controller.cleanupCorrections)
+            toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
+            toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
+            HStack(spacing: 16) {
+                help("If cleanup fails or changes too much, Murmur keeps the raw transcript in History and does not insert it. Faithful transcription turns every option off; dictionary spellings still apply.")
+                Spacer()
+                Button("Faithful Transcription", action: controller.useFaithfulTranscription)
+                    .buttonStyle(InkButtonStyle(kind: .outline))
+                    .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists && !controller.cleanupPunctuation)
+            }
+            .padding(.top, 16)
+
+            eyebrow("Cleanup runs with").padding(.top, 28)
+            segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
+                .padding(.top, 8).help(controller.cleanupChoice.displayName)
+            if controller.cleanupChoice == .localRules {
+                help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
+            } else {
+                disclosure(controller.routeDisclosure(.cleanup)).padding(.top, 16)
+            }
+            if controller.cleanupChoice == .localServer {
+                HStack(spacing: 8) {
+                    field("Server address, e.g. \(RouteSettings.defaultServerURL)", text: $controller.localServerURL)
+                        .focused($serverFieldFocused).onSubmit(controller.settingsChanged)
+                    field("Model name", text: $controller.localServerModel)
+                        .focused($serverFieldFocused).onSubmit(controller.settingsChanged)
+                    Button("Find Models", action: controller.findLocalModels).buttonStyle(InkButtonStyle()).disabled(controller.findingModels)
+                }
+                .padding(.top, 16)
+                if !controller.localServerModels.isEmpty {
+                    Picker("Found models", selection: $controller.localServerModel) {
+                        ForEach(controller.localServerModels, id: \.self) { model in Text(model).tag(model) }
+                    }
+                    .padding(.top, 12)
+                }
+                if !controller.localServerMessage.isEmpty { help(controller.localServerMessage).padding(.top, 12) }
+            }
+        }
+    }
+
+    private var dictionary: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            rule.padding(.top, 20)
+            toggleRow("Learn from my corrections", "Automatic learning from edits is not available in this build yet. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
+            HStack(spacing: 8) {
+                field("Preferred spelling", text: $newPreferred)
+                field("Heard as, comma-separated", text: $newVariants).layoutPriority(1)
+                Button("Add") {
+                    if controller.addDictionaryEntry(preferred: newPreferred, variants: newVariants) { newPreferred = ""; newVariants = "" }
+                }
+                .buttonStyle(InkButtonStyle(kind: newPreferred.trimmingCharacters(in: .whitespaces).isEmpty ? .outline : .filled))
+                .disabled(newPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(.top, 20)
+            if !controller.dictionaryMessage.isEmpty {
+                Text(controller.dictionaryMessage).font(.system(size: 14, weight: .semibold)).padding(.top, 10)
+            }
+            VStack(spacing: 0) {
+                ForEach(controller.dictionaryEntries) { entry in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.preferred).font(.system(size: 16, weight: .semibold))
+                            if !entry.variants.isEmpty {
+                                Text("Heard as " + entry.variants.joined(separator: ", ")).font(.system(size: 13)).foregroundStyle(Palette.ink70).lineLimit(1)
+                            }
+                        }
+                        Spacer()
+                        mono(entry.source == .learned ? "Learned" : "Manual", size: 11, color: Palette.accentDeep)
+                            .padding(.horizontal, 8).padding(.vertical, 3).background(Palette.accent16)
+                        Button { controller.deleteDictionaryEntry(entry) } label: {
+                            Text("×").font(.system(size: 18)).frame(width: 44, height: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).help("Delete \(entry.preferred)").accessibilityLabel("Delete \(entry.preferred)")
+                    }
+                    .frame(minHeight: 56).padding(.vertical, 4).overlay(alignment: .bottom) { softRule }
+                }
+            }
+            .overlay(alignment: .top) { rule }.padding(.top, 20)
+            HStack {
+                help("Spellings apply in every mode. Edits save immediately.")
+                Spacer()
+                Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries).buttonStyle(InkButtonStyle(kind: .outline))
+                    .disabled(!controller.dictionaryEntries.contains { $0.source == .learned })
+            }
+            .padding(.top, 16)
+        }
+    }
+
+    private var privacy: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow("Transcript history").padding(.top, 20)
+            segmented([(HistoryMode.on, "Save on this Mac"), (HistoryMode.off, "Off")], $controller.historyMode).padding(.top, 8)
+            help(controller.historyMode == .on
+                 ? "Completed transcripts are saved before insertion, so you can copy them if typing fails. No cloud sync."
+                 : HistoryMode.offDisclosure).padding(.top, 12)
+            eyebrow("Keep transcripts for").padding(.top, 28)
+            segmented([("30-days", "30 days"), ("six-months", "Six months"), ("forever", "Forever")], $controller.retention).padding(.top, 8)
+            if let warning = controller.historyCapWarning {
+                Text(warning).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+            }
+            HStack(spacing: 20) {
+                titled("Delete all data", DeleteAllDataText.explanation)
+                Spacer()
+                Button("Delete All Data…", role: .destructive, action: controller.deleteAllData).buttonStyle(InkButtonStyle())
+            }
+            .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 36)
+        }
+    }
+
+    private var apiKeys: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(spacing: 0) {
+                ForEach(KeyText.providers, id: \.self) { provider in keyRow(provider) }
+            }
+            .overlay(alignment: .top) { rule }.padding(.top, 20)
+            help("Keys are stored in your Keychain and never shown again after saving. The local model server key is optional.").padding(.top, 16)
+        }
+    }
+
+    private func keyRow(_ provider: ProviderID) -> some View {
+        let has = controller.savedKeys.contains(provider), open = openKey == provider
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(provider.displayName).font(.system(size: 16, weight: .semibold))
+                    mono(has ? "Saved in Keychain ✓" : KeyText.none, color: has ? Palette.accentInk : Palette.ink70)
+                }
+                Spacer()
+                if has || provider == .localServer {
+                    Button("Validate") { controller.validateKey(provider) }.buttonStyle(InkButtonStyle(kind: .outline))
+                }
+                if has { Button("Remove", role: .destructive) { controller.removeKey(provider) }.buttonStyle(InkButtonStyle(kind: .outline)) }
+                Button(open ? "Cancel" : has ? "Replace" : "Add Key") { keyDraft = ""; openKey = open ? nil : provider }
+                    .buttonStyle(InkButtonStyle())
+            }
+            if open {
+                HStack(spacing: 8) {
+                    field(provider == .localServer ? "Paste a server key (optional)" : "Paste your \(provider.displayName) API key", text: $keyDraft, secure: true)
+                    Button("Save Key") { if controller.saveKey(provider, keyDraft) { keyDraft = ""; openKey = nil } }
+                        .buttonStyle(InkButtonStyle(kind: .accent)).disabled(keyDraft.isEmpty)
+                }
+            }
+            if let message = controller.keyMessages[provider], !message.isEmpty { help(message) }
+        }
+        .padding(.vertical, 16).overlay(alignment: .bottom) { softRule }
+    }
+
+    private var updates: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Murmur " + controller.currentVersion).font(.system(size: 18, weight: .semibold))
+                    if !controller.updateStatus.isEmpty { help(controller.updateStatus) }
+                }
+                Spacer()
+                Button("Check for Updates", action: controller.checkForUpdates).buttonStyle(InkButtonStyle()).disabled(controller.checkingForUpdates)
+            }
+            .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 20)
+            if let release = controller.availableRelease {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(UpdateText.headline(release)).font(.system(size: 16, weight: .semibold))
+                    if !release.notes.isEmpty {
+                        Text(UpdateText.notesExcerpt(release.notes)).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 16) {
+                        help("Murmur never downloads or installs updates. Download the new version from GitHub and replace the app yourself.")
+                        Spacer()
+                        Button("Open Release Page…", action: controller.openReleasePage).buttonStyle(InkButtonStyle())
+                    }
+                }
+                .padding(16).background(Palette.accent16).padding(.top, 16)
+            }
+            toggleRow("Check automatically", UpdateText.explanation, isOn: $controller.updateChecksEnabled)
+        }
+    }
+
+    // MARK: History
+
+    private var visibleHistory: [HistoryEntry] {
+        controller.history.filter { entry in
+            (!attentionOnly || needsAttention(entry.insertionStatus))
+                && (searchText.isEmpty || entry.finalText.localizedCaseInsensitiveContains(searchText) || entry.rawText.localizedCaseInsensitiveContains(searchText))
+        }
+    }
+
+    /// Consecutive entries from the same day, in history order (newest first).
+    private var historyGroups: [(day: String, entries: [HistoryEntry])] {
+        var groups: [(day: String, entries: [HistoryEntry])] = []
+        for entry in visibleHistory {
+            let calendar = Calendar.current, date = entry.recordedAt
+            // Grouped by the full date; the year shows only when it is not this year.
+            let day = calendar.isDateInToday(date) ? "Today"
+                : calendar.isDateInYesterday(date) ? "Yesterday"
+                : calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? date.formatted(.dateTime.month(.abbreviated).day())
+                : date.formatted(.dateTime.month(.abbreviated).day().year())
+            if let last = groups.last?.entries.first, calendar.isDate(last.recordedAt, inSameDayAs: date) { groups[groups.count - 1].entries.append(entry) } else { groups.append((day, [entry])) }
+        }
+        return groups
     }
 
     private var history: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("History").font(.title2.weight(.semibold))
-                    Text(controller.historySummary)
-                        .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
+        VStack(spacing: 0) {
+            HStack(alignment: .bottom, spacing: 24) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("History").font(.system(size: 36, weight: .bold)).tracking(-1.4)
+                    help(controller.historySummary)
                 }
                 Spacer()
+                segmented([(false, "All"), (true, "Needs attention")], $attentionOnly, size: 14).frame(width: 260)
                 HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(Color.primary.opacity(0.72)).accessibilityHidden(true)
-                    TextField("", text: $searchText).textFieldStyle(.plain)
-                        .accessibilityLabel("Search transcripts")
-                        .overlay(alignment: .leading) {
-                            if searchText.isEmpty {
-                                Text("Search transcripts").foregroundStyle(Color.primary.opacity(0.72))
-                                    .allowsHitTesting(false).accessibilityHidden(true)
+                    field("Search transcripts", text: $searchText)
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: { Image(systemName: "xmark") }
+                            .buttonStyle(.plain).foregroundStyle(Palette.ink70).accessibilityLabel("Clear search")
+                    }
+                }
+                .frame(width: 220)
+            }
+            .padding(EdgeInsets(top: 24, leading: 40, bottom: 16, trailing: 40))
+            .overlay(alignment: .bottom) { rule }
+
+            ScrollView {
+                let groups = historyGroups
+                LazyVStack(spacing: 0) {
+                    if groups.isEmpty {
+                        VStack(spacing: 8) {
+                            Text(controller.history.isEmpty ? "Your dictation appears here" : "No matching transcripts").font(.system(size: 26, weight: .semibold))
+                            help(controller.history.isEmpty ? "Completed transcripts are saved here before they are inserted." : "Try a different search or filter.")
+                            if controller.history.isEmpty && !setupComplete {
+                                Button("Set Up Murmur") { screen = .setup }.buttonStyle(InkButtonStyle()).padding(.top, 8)
                             }
                         }
-                    if !searchText.isEmpty {
-                        Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain).foregroundStyle(Color.primary.opacity(0.72)).accessibilityLabel("Clear search")
+                        .padding(.vertical, 80).frame(maxWidth: .infinity)
                     }
-                }
-                .padding(.horizontal, 12).padding(.vertical, 9).frame(width: 220)
-                .modifier(UtilityGlass())
-            }
-            if controller.history.isEmpty {
-                ContentUnavailableView {
-                    Label("Your dictation appears here", systemImage: "text.bubble")
-                } description: {
-                    Text("Choose your local model and allow permissions in Murmur. Completed transcripts are saved here before insertion.")
-                } actions: {
-                    Button("Set Up Murmur") { selectedTab = 0 }.modifier(UtilityButton(prominent: true))
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if filteredHistory.isEmpty {
-                ContentUnavailableView.search(text: searchText).frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                HSplitView {
-                    List(filteredHistory, selection: $selectedID) { entry in
-                        VStack(alignment: .leading, spacing: 6) {
-                            // Explicit primary: the sidebar list style dims unstyled text below its own captions.
-                            Text((entry.finalText.isEmpty ? entry.rawText : entry.finalText).trimmingCharacters(in: .whitespacesAndNewlines))
-                                .foregroundStyle(Color.primary).lineLimit(2)
-                            Label(statusLabel(entry.insertionStatus), systemImage: statusSymbol(entry.insertionStatus))
-                                .font(.caption).foregroundStyle(selectedID == entry.id ? Color.primary : Color.primary.opacity(0.72)).lineLimit(2)
-                            Text(entry.recordedAt, format: .dateTime.month().day().hour().minute())
-                                .font(.caption).foregroundStyle(selectedID == entry.id ? Color.primary : Color.primary.opacity(0.72))
-                        }.padding(.vertical, 7).tag(entry.id)
-                    }
-                    .listStyle(.sidebar).scrollContentBackground(.hidden)
-                    .frame(minWidth: 210, idealWidth: 240, maxWidth: 300)
-                    if let entry = filteredHistory.first(where: { $0.id == selectedID }) {
-                        VStack(spacing: 0) {
-                            ScrollView {
-                                VStack(alignment: .leading, spacing: 20) {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text(entry.recordedAt, format: .dateTime.month().day().year().hour().minute())
-                                            .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
-                                        Label(statusLabel(entry.insertionStatus), systemImage: statusSymbol(entry.insertionStatus))
-                                            .font(.callout.weight(.medium))
-                                        if controller.sessionOnlyIDs.contains(entry.id) {
-                                            Text(HistoryText.sessionOnlyNote).font(.callout).foregroundStyle(Color.orange)
-                                        }
-                                    }
-                                    transcript("Final text", entry.finalText)
-                                    if entry.rawText != entry.finalText { transcript("Raw transcription", entry.rawText) }
-                                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                    ForEach(groups.indices, id: \.self) { index in
+                        let group = groups[index]
+                        HStack(alignment: .top, spacing: 24) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                mono(group.day)
+                                mono(group.entries.count == 1 ? "1 entry" : "\(group.entries.count) entries", color: Palette.ink64)
                             }
-                            GlassEffectContainer(spacing: 12) {
-                                HStack(spacing: 12) {
-                                    if !entry.finalText.isEmpty {
-                                        Button { controller.copyEntry(entry) } label: { Label("Copy Text", systemImage: "doc.on.doc").foregroundStyle(.white) }
-                                            .modifier(UtilityButton(prominent: true))
-                                    }
-                                    if entry.rawText != entry.finalText {
-                                        Button { controller.copyRawEntry(entry) } label: { Label("Copy Raw", systemImage: "doc.on.clipboard") }
-                                            .modifier(UtilityButton())
-                                    }
-                                    Spacer()
-                                    Button("Delete", role: .destructive) { controller.deleteEntry(entry) }
-                                        .modifier(UtilityButton())
-                                }
-                            }.padding(.horizontal, 20).padding(.top, 10)
-                            Text("Copying never retries insertion or sends a message.")
-                                .font(.caption).foregroundStyle(Color.primary.opacity(0.72))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
-                        }.frame(minWidth: 300)
-                    } else {
-                        ContentUnavailableView("Select a transcript", systemImage: "text.alignleft", description: Text("Inspect saved text, copy it, or delete it."))
-                            .frame(minWidth: 300, maxWidth: .infinity)
+                            .frame(width: 120, alignment: .leading).padding(.top, 14)
+                            VStack(spacing: 0) {
+                                ForEach(group.entries) { entry in historyRow(entry) }
+                            }
+                        }
+                        .padding(.vertical, 24).overlay(alignment: .bottom) { rule }
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 40)
             }
-            GlassEffectContainer(spacing: 12) {
-                HStack {
-                    Button("Refresh", action: controller.refreshHistory).modifier(UtilityButton())
-                    Spacer()
-                    Button("Clear History…", role: .destructive, action: controller.clearHistory)
-                        .modifier(UtilityButton()).disabled(controller.history.isEmpty)
-                }
+
+            HStack {
+                help(controller.historyMode == .on ? "Saved on this Mac only. \(retentionText)" : controller.historySummary)
+                Spacer()
+                Button("Clear History…", role: .destructive, action: controller.clearHistory).buttonStyle(InkButtonStyle(kind: .outline))
+                    .disabled(controller.history.isEmpty)
             }
+            .padding(.horizontal, 40).frame(height: 56).overlay(alignment: .top) { rule }
         }
-        .padding(.top, 14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private var filteredHistory: [HistoryEntry] {
-        guard !searchText.isEmpty else { return controller.history }
-        return controller.history.filter { $0.finalText.localizedCaseInsensitiveContains(searchText) || $0.rawText.localizedCaseInsensitiveContains(searchText) }
+    private var retentionText: String {
+        switch controller.retention {
+        case "six-months": return "Kept for six months."
+        case "forever": return "Kept forever."
+        default: return "Kept for 30 days."
+        }
+    }
+
+    private func historyRow(_ entry: HistoryEntry) -> some View {
+        let open = selectedID == entry.id, attention = needsAttention(entry.insertionStatus)
+        let note = controller.sessionOnlyIDs.contains(entry.id) ? HistoryText.sessionOnlyNote : statusNote(entry.insertionStatus)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { selectedID = open ? nil : entry.id } label: {
+                HStack(alignment: .top, spacing: 16) {
+                    Text(entry.recordedAt, format: .dateTime.hour().minute())
+                        .font(.system(size: 13, design: .monospaced)).foregroundStyle(Palette.ink70).lineLimit(1).fixedSize().frame(width: 72, alignment: .leading).padding(.top, 2)
+                    Text((entry.finalText.isEmpty ? entry.rawText : entry.finalText).replacingOccurrences(of: "\n", with: " "))
+                        .font(.system(size: 16)).lineSpacing(2).lineLimit(open ? 1 : 2).frame(maxWidth: .infinity, alignment: .leading)
+                    mono(statusLabel(entry.insertionStatus), size: 11, color: attention ? Palette.paper : Palette.accentDeep)
+                        .lineLimit(1).fixedSize().padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(attention ? Palette.ink : Palette.accent16)
+                }
+                .padding(.vertical, 12).frame(minHeight: 56).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).accessibilityAddTraits(open ? .isSelected : [])
+            if open {
+                VStack(alignment: .leading, spacing: 0) {
+                    if let note {
+                        Text(note).font(.system(size: 14)).foregroundStyle(Palette.ink80).fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 14).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Palette.accent16).padding(.bottom, 16)
+                    }
+                    eyebrow("Final text")
+                    Text(entry.finalText.isEmpty ? "No final text saved." : entry.finalText).font(.system(size: 16)).lineSpacing(3)
+                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                    if entry.rawText != entry.finalText {
+                        eyebrow("Raw transcription").padding(.top, 16)
+                        Text(entry.rawText).font(.system(size: 15)).lineSpacing(3).foregroundStyle(Palette.ink70)
+                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                    }
+                    HStack(spacing: 8) {
+                        if !entry.finalText.isEmpty {
+                            Button(copiedID == entry.id + "f" ? "Copied ✓" : "Copy Text") { controller.copyEntry(entry); flashCopied(entry.id + "f") }
+                                .buttonStyle(InkButtonStyle())
+                        }
+                        if entry.rawText != entry.finalText {
+                            Button(copiedID == entry.id + "r" ? "Copied ✓" : "Copy Raw") { controller.copyRawEntry(entry); flashCopied(entry.id + "r") }
+                                .buttonStyle(InkButtonStyle(kind: .outline))
+                        }
+                        Spacer()
+                        Button("Delete", role: .destructive) { controller.deleteEntry(entry) }.buttonStyle(InkButtonStyle(kind: .plain))
+                    }
+                    .padding(.top, 18)
+                    Text("Copying never retries insertion or sends a message.").font(.system(size: 13)).foregroundStyle(Palette.ink64).padding(.top, 10)
+                }
+                .padding(.leading, 88).padding(.top, 4).padding(.bottom, 20)
+            }
+        }
+        .overlay(alignment: .bottom) { Rectangle().fill(Palette.ink45).frame(height: 1) }
+    }
+
+    private func flashCopied(_ id: String) {
+        copiedID = id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copiedID == id { copiedID = nil } }
+    }
+
+    private func needsAttention(_ status: String) -> Bool {
+        ["unverified", "insertion-pending", "failed", "held-cleanup", "held-transcript"].contains(status)
     }
 
     private func statusLabel(_ status: String) -> String {
         switch status {
-        case "verified": return "Inserted and verified"
-        case "unverified", "insertion-pending": return "Delivery uncertain · text saved"
-        case "failed": return "Could not insert · text saved"
-        case "copied": return "Copied to clipboard · text saved"
-        case "held-cleanup": return "Cleanup held · raw text saved"
-        case "held-transcript": return "Transcript held for review · raw text saved"
-        default: return "Saved · not inserted"
+        case "verified": return "Inserted ✓"
+        case "unverified", "insertion-pending": return "Delivery uncertain"
+        case "failed": return "Not inserted"
+        case "copied": return "Copied"
+        case "held-cleanup": return "Cleanup held"
+        case "held-transcript": return "Held for review"
+        default: return "Saved"
         }
     }
 
-    private func statusSymbol(_ status: String) -> String {
+    private func statusNote(_ status: String) -> String? {
         switch status {
-        case "verified": return "checkmark.circle"
-        case "unverified", "insertion-pending": return "questionmark.circle"
-        case "failed": return "exclamationmark.circle"
-        case "copied": return "doc.on.clipboard"
-        case "held-cleanup", "held-transcript": return "pause.circle"
-        default: return "tray"
+        case "unverified", "insertion-pending": return "Murmur could not confirm the text arrived. It is saved here in case it did not."
+        case "failed": return "Murmur could not type this into the original field. The text is saved here so you can copy it."
+        case "held-cleanup": return "Cleanup changed too much, so only the raw transcript was saved and nothing was inserted."
+        case "held-transcript": return "The transcript was held for review, so nothing was inserted."
+        default: return nil
         }
     }
 
-    private func transcript(_ title: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
-            Text(text.isEmpty ? "No text saved." : text).textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    // MARK: First run
+
+    private var setup: some View {
+        let steps: [(title: String, detail: String, done: Bool, action: String, run: () -> Void)] = [
+            ("Microphone", "So Murmur can hear you while the shortcut is held.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
+            ("Accessibility", "So Murmur can type into the field you are using.", controller.accessibilityAuthorized, "Open Settings…", { controller.openPermissionSettings("accessibility") }),
+            ("Input Monitoring", "So the global shortcut works in every app.", controller.inputMonitoringAuthorized, "Open Settings…", { controller.openPermissionSettings("input-monitoring") }),
+            ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed while transcription runs in the cloud." : ModelFacts.displayName + (controller.modelSummary.isEmpty ? "" : " · " + controller.modelSummary), modelSatisfied,
+             controller.modelRow.actions.contains(.retry) ? "Retry…" : "Download…", controller.downloadModel)
+        ]
+        let done = steps.filter(\.done).count
+        return GeometryReader { geometry in
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
+                    eyebrow("First run · \(done) / 4")
+                    VStack(alignment: .leading, spacing: -10) {
+                        Text("Set up").font(.system(size: 56, weight: .bold)).tracking(-2.8)
+                        wordmark("Murmur", size: 56)
+                    }
+                    .accessibilityElement(children: .combine).padding(.top, 16)
+                    Text("Your voice, on your Mac.").font(.system(size: 18)).foregroundStyle(Palette.ink80).padding(.top, 20)
+                    Spacer()
+                    Canvas { context, size in
+                        var path = Path()
+                        for x in stride(from: -size.height, to: size.width, by: 9) {
+                            path.move(to: CGPoint(x: x, y: size.height)); path.addLine(to: CGPoint(x: x + size.height, y: 0))
+                        }
+                        context.stroke(path, with: .color(Palette.accent.opacity(0.55)), lineWidth: 2)
+                    }
+                    .frame(width: 140, height: 140).clipped()
+                    .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 2))
+                    .rotationEffect(.degrees(-1.5)).accessibilityHidden(true)
+                }
+                .padding(40).frame(width: geometry.size.width * 5 / 12, alignment: .leading).frame(maxHeight: .infinity, alignment: .top)
+                .background(Palette.accent16)
+                .overlay(alignment: .trailing) { Rectangle().fill(Palette.ink).frame(width: 1.5) }
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(steps.indices, id: \.self) { index in
+                                let step = steps[index]
+                                let working = index == 3 && controller.modelRow.isWorking
+                                HStack(spacing: 16) {
+                                    mono(String(format: "%02d", index + 1), size: 13, color: step.done ? Palette.accentInk : Palette.ink70).frame(width: 40, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(step.title).font(.system(size: 18, weight: .semibold))
+                                        help(working ? controller.modelRow.statusText : step.detail)
+                                        if working, let progress = controller.modelRow.progress { progressBar(progress).padding(.top, 7) }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    if step.done { mono("Done ✓", color: Palette.accentInk) }
+                                    else if working { Button("Cancel", action: controller.cancelModelDownload).buttonStyle(InkButtonStyle(kind: .outline)) }
+                                    else { Button(step.action, action: step.run).buttonStyle(InkButtonStyle()) }
+                                }
+                                .padding(.vertical, 18).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink45).frame(height: 1) }
+                            }
+                            if !controller.modelMessage.isEmpty { help(controller.modelMessage).padding(.top, 12).frame(maxWidth: .infinity, alignment: .leading) }
+                        }
+                    }
+                    HStack {
+                        Button("Not Now") { screen = .settings }.buttonStyle(InkButtonStyle(kind: .plain))
+                        Spacer()
+                        Button("Start Dictating →") { screen = .settings }
+                            .buttonStyle(InkButtonStyle(kind: done == 4 ? .filled : .outline)).disabled(done < 4)
+                    }
+                    .padding(.top, 24)
+                }
+                .padding(40)
+            }
         }
     }
 }

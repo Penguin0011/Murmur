@@ -569,7 +569,10 @@ final class PreStart: @unchecked Sendable {
         session.finishRecording = { [weak self] in timingLog.notice("capture-cap reached"); guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
-    private var idleMessage: String { pressToToggle ? "Press your shortcut to dictate, and press it again to finish." : "Hold your shortcut to dictate, or double-press it to dictate until you press it again." }
+    private static let idleMessages = ["Press your shortcut to dictate, and press it again to finish.", "Hold your shortcut to dictate, or double-press it to dictate until you press it again."]
+    private var idleMessage: String { Self.idleMessages[pressToToggle ? 0 : 1] }
+    /// False only for the plain idle hint; failures that leave the phase at Ready still show.
+    var hasStatusToShow: Bool { phase != "Ready" || !Self.idleMessages.contains(message) }
     private var listeningMessage: String { "Listening… \(listener?.pressToToggle == true ? "Press the shortcut again" : "Release") to finish, or press Escape to cancel." }
     private func removeShortcut() {
         shortcutGeneration = UUID()
