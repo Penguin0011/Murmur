@@ -48,10 +48,12 @@ final class WarmRunner: @unchecked Sendable {
     var onDictionaryStatus: ((Bool) -> Void)?
 
     func prepare(helper: URL, launch: HelperLaunch) { queue.async { [self] in _ = start(helper, launch) } }
-    func transcribe(_ audio: URL, helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
+    /// `boundary`: a clip spanning a chunk cut; the answer lists dictionary replacements, not text.
+    func transcribe(_ audio: URL, helper: URL, launch: HelperLaunch, boundary: Bool = false, completion: @escaping (Data?) -> Void) {
         queue.async { [self] in
-            guard !audio.path.contains("\n"), start(helper, launch), let input,
-                  (try? input.write(contentsOf: Data((audio.path + "\n").utf8))) != nil,
+            let line = boundary ? (try? JSONSerialization.data(withJSONObject: ["boundary": audio.path])).map { String(decoding: $0, as: UTF8.self) } : audio.path
+            guard let line, !line.contains("\n"), start(helper, launch), let input,
+                  (try? input.write(contentsOf: Data((line + "\n").utf8))) != nil,
                   let line = readLine(timeout: 300) else { stopLocked(); completion(nil); return }
             completion(line)
         }
@@ -104,12 +106,15 @@ final class WarmRunner: @unchecked Sendable {
 final class ChunkJob: @unchecked Sendable {
     private let lock = NSLock()
     private var texts: [String?] = [], sentenceEnds: [Bool] = []
-    private var queued: [(index: Int, url: URL)] = [], inFlight = false
+    /// A boundary clip is keyed by the chunk before its cut; it repairs a dictionary term the cut split.
+    private var queued: [(index: Int, url: URL, boundary: Bool)] = [], inFlight = false
+    private var repairs: [Int: [(from: String, to: String)]] = [:], boundariesOpen = 0
     private var failed = false, ended = false, discarded = false
     private var waiter: ((String?) -> Void)?
-    private let transcribe: (URL, @escaping (Data?) -> Void) -> Void
+    private let transcribe: (URL, Bool, @escaping (Data?) -> Void) -> Void
 
-    init(transcribe: @escaping (URL, @escaping (Data?) -> Void) -> Void) { self.transcribe = transcribe }
+    /// `transcribe(url, boundary, completion)`; see WarmRunner.transcribe.
+    init(transcribe: @escaping (URL, Bool, @escaping (Data?) -> Void) -> Void) { self.transcribe = transcribe }
 
     /// Called on the capture queue, in order.
     func receive(_ event: Chunker.Event) {
@@ -120,29 +125,54 @@ final class ChunkJob: @unchecked Sendable {
             let accepted: Bool = lock.withLock {
                 guard !discarded, !failed else { return false }
                 texts.append(nil); sentenceEnds.append(sentenceEnd); if last { ended = true }
-                queued.append((texts.count - 1, url)); return true
+                queued.append((texts.count - 1, url, false)); return true
+            }
+            guard accepted else { try? FileManager.default.removeItem(at: url); return }
+            pump()
+        case .boundary(let url):
+            let accepted: Bool = lock.withLock {
+                guard !discarded, !failed, !texts.isEmpty else { return false }
+                boundariesOpen += 1; queued.append((texts.count - 1, url, true)); return true
             }
             guard accepted else { try? FileManager.default.removeItem(at: url); return }
             pump()
         }
     }
     private func pump() {
-        let next: (index: Int, url: URL)? = lock.withLock {
+        let next: (index: Int, url: URL, boundary: Bool)? = lock.withLock {
             guard !inFlight, !queued.isEmpty else { return nil }
             inFlight = true; return queued.removeFirst()
         }
         guard let next else { return }
-        transcribe(next.url) { [self] line in
+        transcribe(next.url, next.boundary) { [self] line in
             try? FileManager.default.removeItem(at: next.url)
-            let text = line.flatMap { (try? JSONSerialization.jsonObject(with: $0) as? [String: Any])?["text"] as? String }
+            let answer = line.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            if next.boundary {
+                // A boundary that fails only skips its repair.
+                let found = (answer?["replacements"] as? [[String: String]] ?? []).compactMap { r in r["from"].flatMap { f in r["to"].map { (f, $0) } } }
+                lock.withLock { inFlight = false; boundariesOpen -= 1; if !found.isEmpty { repairs[next.index] = found } }
+                settle(); pump(); return
+            }
+            let text = answer?["text"] as? String
             let dropped: [URL] = lock.withLock {
                 inFlight = false
                 if let text { texts[next.index] = text; return [] }
-                failed = true; defer { queued = [] }; return queued.map(\.url)
+                failed = true; boundariesOpen = 0; defer { queued = [] }; return queued.map(\.url)
             }
             dropped.forEach { try? FileManager.default.removeItem(at: $0) }
             settle(); pump()
         }
+    }
+    /// Applies each cut's boundary replacements to the chunk texts on either side of it.
+    static func repaired(_ texts: [String], _ repairs: [Int: [(from: String, to: String)]]) -> [String] {
+        var texts = texts
+        for (index, found) in repairs.sorted(by: { $0.key < $1.key }) where index + 1 < texts.count {
+            for replacement in found {
+                guard let fixed = Chunker.repair(tail: texts[index], head: texts[index + 1], from: replacement.from, to: replacement.to) else { continue }
+                texts[index] = fixed.tail; texts[index + 1] = fixed.head
+            }
+        }
+        return texts
     }
     /// Whether the last chunk arrived (or chunking failed), so `result` will answer.
     var isEnded: Bool { lock.withLock { ended || failed } }
@@ -155,9 +185,9 @@ final class ChunkJob: @unchecked Sendable {
     }
     private func settle() {
         let answer: (((String?) -> Void), String?)? = lock.withLock {
-            guard let waiter, failed || (ended && !texts.contains(where: { $0 == nil })) else { return nil }
+            guard let waiter, failed || (ended && boundariesOpen == 0 && !texts.contains(where: { $0 == nil })) else { return nil }
             self.waiter = nil
-            return (waiter, failed ? nil : Chunker.join(texts.map { $0! }, sentenceEnds: sentenceEnds))
+            return (waiter, failed ? nil : Chunker.join(Self.repaired(texts.map { $0! }, repairs), sentenceEnds: sentenceEnds))
         }
         if let (waiter, text) = answer { waiter(text) }
     }
@@ -651,11 +681,13 @@ final class PreStart: @unchecked Sendable {
         let models = URL(fileURLWithPath: activeModelDirectory)
         guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
         let warm = warm, vocabulary = vocabularyFile, dictionaryModel = dictionaryModelDirectory
-        let job = ChunkJob { url, done in
+        let job = ChunkJob { url, boundary, done in
             DispatchQueue.global(qos: .userInitiated).async {
                 guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
                       let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel) else { done(nil); return }
-                warm.transcribe(url, helper: helper, launch: launch, completion: done)
+                // Without dictionary support there is nothing to repair at a cut.
+                if boundary && launch.dictionaryArguments.isEmpty { done(nil); return }
+                warm.transcribe(url, helper: helper, launch: launch, boundary: boundary, completion: done)
             }
         }
         if capture.attachChunks({ job.receive($0) }) { chunkJobs[audio] = job }

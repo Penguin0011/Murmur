@@ -205,10 +205,11 @@ import AppKit
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         func file(_ name: String) throws -> URL { let url = dir.appendingPathComponent(name); try Data().write(to: url); return url }
+        /// `answers`: chunk text, or for a boundary clip a raw JSON answer.
         func run(_ events: [Chunker.Event], answers: [String: String?]) -> String?? {
-            let job = ChunkJob { url, done in
+            let job = ChunkJob { url, boundary, done in
                 let text = answers[url.lastPathComponent] ?? nil
-                DispatchQueue.global().async { done(text.map { Data("{\"text\":\"\($0)\"}".utf8) }) }
+                DispatchQueue.global().async { done(text.map { Data((boundary ? $0 : "{\"text\":\"\($0)\"}").utf8) }) }
             }
             events.forEach(job.receive)
             guard job.isEnded else { return .none }
@@ -229,7 +230,7 @@ import AppKit
         // One chunk at a time: after the first failure, queued chunks are dropped unsent.
         var sent: [String] = []
         let sendLock = NSLock()
-        let serial = ChunkJob { url, done in
+        let serial = ChunkJob { url, _, done in
             sendLock.withLock { sent.append(url.lastPathComponent) }
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { done(nil) }
         }
@@ -240,11 +241,24 @@ import AppKit
         gotSerial.wait(); Thread.sleep(forTimeInterval: 0.2)
         precondition(serialAnswer == nil && sendLock.withLock({ sent }) == ["h.wav"], "only the first chunk was sent: \(sent)")
         precondition(![h, i, j].contains { FileManager.default.fileExists(atPath: $0.path) }, "dropped chunk files are deleted")
-        let discarded = ChunkJob { _, done in done(nil) }
+        let discarded = ChunkJob { _, _, done in done(nil) }
         discarded.discard()
         let g = try file("g.wav")
         discarded.receive(.chunk(g, last: true, sentenceEnd: false))
         precondition(!FileManager.default.fileExists(atPath: g.path), "a discarded job deletes later chunks unread")
-        print("Chunk checks passed (quiet cut, pause length, join rule, copy chord, ordered join, one-at-a-time with drop on failure, failure fallback, cleanup).")
+        // Dictionary terms split by a cut: repaired from the boundary clip's replacements.
+        precondition(Chunker.repair(tail: "Route calls through open.", head: "Router, then deploy.", from: "open router", to: "OpenRouter")! == ("Route calls through OpenRouter,", "then deploy."), "two-word term split by a cut")
+        precondition(Chunker.repair(tail: "Deploy it to Cooper.", head: "Netties today.", from: "coopernetties", to: "Kubernetes")! == ("Deploy it to Kubernetes", "today."), "one word split mid-word")
+        precondition(Chunker.repair(tail: "Ask about it.", head: "Then go.", from: "open router", to: "OpenRouter") == nil, "a replacement that does not cross the cut is ignored")
+        precondition(Chunker.repair(tail: "", head: "open router", from: "open router", to: "OpenRouter") == nil, "empty side never traps")
+        let k = try file("k.wav"), kb = try file("kb.wav"), l = try file("l.wav")
+        precondition(run([.chunk(k, last: false, sentenceEnd: false), .boundary(kb), .chunk(l, last: true, sentenceEnd: false)],
+                         answers: ["k.wav": "Route calls through open.", "kb.wav": #"{"replacements":[{"from":"open router","to":"OpenRouter"}]}"#, "l.wav": "Router, then deploy."])
+                  == .some("Route calls through OpenRouter, then deploy."), "boundary repair joins the term")
+        let m = try file("m.wav"), mb = try file("mb.wav"), n = try file("n.wav")
+        precondition(run([.chunk(m, last: false, sentenceEnd: false), .boundary(mb), .chunk(n, last: true, sentenceEnd: false)], answers: ["m.wav": "One two", "n.wav": "three."])
+                  == .some("One two three."), "a failed boundary only skips its repair")
+        precondition(![k, kb, l, m, mb, n].contains { FileManager.default.fileExists(atPath: $0.path) }, "boundary clips are deleted once read")
+        print("Chunk checks passed (quiet cut, pause length, join rule, copy chord, ordered join, one-at-a-time with drop on failure, failure fallback, cleanup, boundary repair).")
     }
 }

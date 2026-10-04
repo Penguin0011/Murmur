@@ -37,9 +37,20 @@ enum BoostFilter {
     static func fold(_ text: String) -> String { text.replacingOccurrences(of: "\u{2019}", with: "'").lowercased() }
     static func letters(_ text: String) -> String { String(fold(text).filter { $0.isLetter || $0.isNumber }) }
 
+    struct Replacement { let range: Range<String.Index>; let from: String; let to: String }
+
     /// `aliases`: folded alias phrases ("cube cuddle"). `isCommonWord` receives one folded word.
     static func filter(raw: String, rescored: String, aliases: Set<String>, isCommonWord: (String) -> Bool) -> String {
-        guard raw != rescored else { return raw }
+        var output = raw
+        for kept in replacements(raw: raw, rescored: rescored, aliases: aliases, isCommonWord: isCommonWord).reversed() {
+            output.replaceSubrange(kept.range, with: kept.to)
+        }
+        return output
+    }
+
+    /// The kept replacements, in order: `range` and `from` in `raw`, `to` from `rescored`.
+    static func replacements(raw: String, rescored: String, aliases: Set<String>, isCommonWord: (String) -> Bool) -> [Replacement] {
+        guard raw != rescored else { return [] }
         let a = words(raw), b = words(rescored)
         // LCS over folded words; unmatched runs between matches are the replaced spans.
         var dp = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
@@ -48,7 +59,7 @@ enum BoostFilter {
                 dp[i][j] = a[i].folded == b[j].folded ? dp[i + 1][j + 1] + 1 : max(dp[i + 1][j], dp[i][j + 1])
             }
         }
-        var kept: [(Range<String.Index>, String)] = []
+        var kept: [Replacement] = []
         var i = 0, j = 0
         while i < a.count || j < b.count {
             if i < a.count, j < b.count, a[i].folded == b[j].folded { i += 1; j += 1; continue }
@@ -62,11 +73,9 @@ enum BoostFilter {
             let rawWords = a[i0..<i].map(\.folded)
             let keep = letters(rawSpan) == letters(newSpan) || aliases.contains(rawWords.joined(separator: " "))
                 || (rawWords.contains { !isCommonWord($0) } && similarity(letters(rawSpan), letters(newSpan)) >= 0.5)
-            if keep { kept.append((a[i0].start..<a[i - 1].end, newSpan)) }
+            if keep { kept.append(Replacement(range: a[i0].start..<a[i - 1].end, from: rawSpan, to: newSpan)) }
         }
-        var output = raw
-        for (range, text) in kept.reversed() { output.replaceSubrange(range, with: text) }
-        return output
+        return kept
     }
 
     /// 1 - Levenshtein distance / longer length (the learning filter's measure).

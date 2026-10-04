@@ -47,13 +47,24 @@ import Foundation
 
     /// Loads the model once, prints {"ready":true}, then answers one JSON line per audio path read
     /// from stdin until stdin closes. A failed request answers {"error":…} and the server keeps going.
+    /// A line `{"boundary": PATH}` (a clip spanning a cut between two recording chunks) answers
+    /// {"replacements":[{"from":…,"to":…}]}: the dictionary replacements kept in that clip, so the
+    /// app can repair a term the cut split. Without dictionary support it answers none.
     static func serve(models: URL, ctc: URL?, vocabulary: URL?) async throws {
         let manager = UnifiedAsrManager()
         let start = Date()
         try await manager.loadModels(from: models)
         let (dictionary, vocabularyError) = await Dictionary.load(ctc: ctc, vocabulary: vocabulary)
         try emit(["ready": true, "load_seconds": Date().timeIntervalSince(start), "vocabulary_terms": dictionary?.terms ?? 0, "vocabulary_error": vocabularyError])
-        while let path = readLine() {
+        while let line = readLine() {
+            if line.hasPrefix("{") {
+                let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
+                guard let clip = request?["boundary"] as? String else { try emit(["error": "unknown request"]); continue }
+                let found = (try? await boundaryReplacements(clip, manager, dictionary)) ?? []
+                try emit(["replacements": found.map { ["from": $0.from, "to": $0.to] }])
+                continue
+            }
+            let path = line
             let begin = Date()
             do {
                 let samples = try readSamples(path)
@@ -112,6 +123,18 @@ import Foundation
               rescored.text != raw.text else { return raw.text }
         return await MainActor.run {
             BoostFilter.filter(raw: raw.text, rescored: rescored.text, aliases: dictionary.aliases, isCommonWord: isCommonEnglishWord)
+        }
+    }
+
+    static func boundaryReplacements(_ path: String, _ manager: UnifiedAsrManager, _ dictionary: Dictionary?) async throws -> [(from: String, to: String)] {
+        guard let dictionary else { return [] }
+        let samples = try readSamples(path)
+        let raw = try await manager.transcribeWithTimings(samples)
+        guard let rescored = await dictionary.session.rescore(text: raw.text, tokenTimings: raw.tokenTimings, audioSamples: samples),
+              rescored.text != raw.text else { return [] }
+        return await MainActor.run {
+            BoostFilter.replacements(raw: raw.text, rescored: rescored.text, aliases: dictionary.aliases, isCommonWord: isCommonEnglishWord)
+                .map { ($0.from, $0.to) }
         }
     }
 
