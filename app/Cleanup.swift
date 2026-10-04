@@ -10,19 +10,29 @@ struct CleanupOptions: Codable, Equatable, Hashable, Sendable {
     var fillers: Bool
     var corrections: Bool
     var lists: Bool
+    /// Sentence punctuation and capitalization; words are never changed.
+    var punctuation: Bool
 
-    init(fillers: Bool = true, corrections: Bool = true, lists: Bool = true) {
+    init(fillers: Bool = true, corrections: Bool = true, lists: Bool = true, punctuation: Bool = false) {
         self.fillers = fillers
         self.corrections = corrections
         self.lists = lists
+        self.punctuation = punctuation
     }
 
-    /// Approved default: all three comforts on.
-    static let standard = CleanupOptions()
+    /// Saved options from before punctuation existed decode with it off.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(fillers: try c.decode(Bool.self, forKey: .fillers), corrections: try c.decode(Bool.self, forKey: .corrections),
+                  lists: try c.decode(Bool.self, forKey: .lists), punctuation: try c.decodeIfPresent(Bool.self, forKey: .punctuation) ?? false)
+    }
+
+    /// Approved default: every comfort on.
+    static let standard = CleanupOptions(punctuation: true)
     /// Plainly labeled faithful-transcription preset: every cleanup operation off.
     static let faithful = CleanupOptions(fillers: false, corrections: false, lists: false)
 
-    var anyEnabled: Bool { fillers || corrections || lists }
+    var anyEnabled: Bool { fillers || corrections || lists || punctuation }
 }
 
 // MARK: - Failure reasons (content-free)
@@ -404,7 +414,8 @@ enum CleanupGuard {
             return .fail(.structureAdded)
         }
         // No new symbols or emphasis: only list/sentence punctuation may increase.
-        let mayIncrease: Set<Character> = [".", ",", ":", "'", "\u{2019}", "-", "\n", " "]
+        var mayIncrease: Set<Character> = [".", ",", ":", "'", "\u{2019}", "-", "\n", " "]
+        if options.punctuation { mayIncrease.insert("?") }
         var rawChars: [Character: Int] = [:], outChars: [Character: Int] = [:]
         for c in raw where !c.isLetter && !c.isNumber { rawChars[c, default: 0] += 1 }
         for c in cleaned where !c.isLetter && !c.isNumber { outChars[c, default: 0] += 1 }
@@ -578,6 +589,9 @@ enum CleanupPrompt {
         if options.corrections {
             ops.append("- Apply explicit spoken self-corrections only when the replaced words are unambiguous, e.g. \"Tuesday, sorry, Thursday\" becomes \"Thursday\". An apology such as \"sorry\" on its own is not a correction. If the scope of a correction is unclear, keep the original wording.")
         }
+        if options.punctuation {
+            ops.append("- Fix sentence punctuation and capitalization: end sentences with a period, or a question mark for a question; add commas only where the speech clearly separates clauses; capitalize sentence starts and the word \"I\". Never add, remove, reorder, or respell words, and never add exclamation marks.")
+        }
         if options.lists {
             ops.append("- Format a numbered list only when the speaker explicitly announces a list and enumerates items with ordinal markers (first, second, third). Keep every item's wording. Never turn ordinary prose into a list.")
         }
@@ -702,7 +716,20 @@ struct RuleCleaner: Cleaner {
         if options.fillers { text = RuleCleaner.removeFillers(text) }
         if options.corrections { text = RuleCleaner.applyCorrections(text) }
         if options.lists { text = RuleCleaner.formatList(text) }
+        if options.punctuation { text = RuleCleaner.capitalizeSentences(text) }
         return text
+    }
+
+    /// Local punctuation: capitals at sentence starts and for "I". Adding periods or question
+    /// marks needs the cloud model; rules cannot tell where an unpunctuated sentence ends.
+    static func capitalizeSentences(_ text: String) -> String {
+        var out = "", start = true
+        for c in text {
+            if start, c.isLetter { out += c.uppercased(); start = false; continue }
+            if c.isLetter || c.isNumber { start = false } else if ".?!\n".contains(c) { start = true }
+            out.append(c)
+        }
+        return out.replacingOccurrences(of: #"\bi(?=\b|')"#, with: "I", options: .regularExpression)
     }
 
     // MARK: Fillers

@@ -164,6 +164,7 @@ final class PreStart: @unchecked Sendable {
     @Published var cleanupFillers: Bool
     @Published var cleanupCorrections: Bool
     @Published var cleanupLists: Bool
+    @Published var cleanupPunctuation: Bool
     @Published var learningEnabled: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
     @Published var dictionaryEntries: [DictionaryEntry] = []
@@ -302,6 +303,7 @@ final class PreStart: @unchecked Sendable {
         cleanupFillers = processingSettings.options.fillers
         cleanupCorrections = processingSettings.options.corrections
         cleanupLists = processingSettings.options.lists
+        cleanupPunctuation = processingSettings.options.punctuation
         learningEnabled = processingSettings.learningEnabled
         historyMode = processingSettings.historyMode
         appliedHistoryMode = processingSettings.historyMode
@@ -341,6 +343,7 @@ final class PreStart: @unchecked Sendable {
         // Choose Folder, Use Default and a finished download all change the folder, even with
         // Settings closed; apply each so the folder survives a relaunch.
         folderWatch = $modelDirectory.dropFirst().removeDuplicates().sink { [weak self] _ in self?.settingsChanged() }
+        if phase == "Ready" { message = idleMessage }
     }
     func start() {
         // Writing to a warm helper that died must fail with EPIPE, not kill Murmur.
@@ -465,7 +468,7 @@ final class PreStart: @unchecked Sendable {
         }
         // R4: confirm what leaves this Mac before the first use of a route, provider or endpoint.
         let routes = routeSettings
-        let plan = routePlan(routes, cleanupSendsText: cleanupFillers || cleanupCorrections || cleanupLists)
+        let plan = routePlan(routes, cleanupSendsText: cleanupFillers || cleanupCorrections || cleanupLists || cleanupPunctuation)
         let pending = DisclosureAcknowledgement.pending(plan, acknowledged: DisclosureAcknowledgement.acknowledged(.standard))
         if !pending.isEmpty {
             let text = DisclosureText.alert(pending)
@@ -483,7 +486,7 @@ final class PreStart: @unchecked Sendable {
         defaults.set(retention, forKey: "retention")
         if let processing {
             var next = processing.settings
-            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists)
+            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation)
             next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
             next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled
             do { try processing.update(next) } catch { setPhase("Error", "Could not save cleanup and learning settings.") }
@@ -492,7 +495,9 @@ final class PreStart: @unchecked Sendable {
         defaults.set(historyMode.rawValue, forKey: ProcessingSettings.Key.historyMode)
         defaults.set(updateChecksEnabled, forKey: ProcessingSettings.Key.updateChecks)
         do { try store?.purge(retention: appliedRetention); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
-        refreshPermissions(); if !preview { configureShortcut() }; updateMenu?()
+        refreshPermissions(); if !preview { configureShortcut() }
+        if phase == "Ready" { message = idleMessage }
+        updateMenu?()
     }
     private func revertRoutes() {
         transcriptionRoute = appliedRoutes.transcription; cloudTranscriber = appliedRoutes.cloudTranscriber; cleanupChoice = appliedRoutes.cleanup
@@ -547,6 +552,7 @@ final class PreStart: @unchecked Sendable {
         session.finishRecording = { [weak self] in timingLog.notice("capture-cap reached"); guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
+    private var idleMessage: String { pressToToggle ? "Press your shortcut to dictate, and press it again to finish." : "Hold your shortcut to dictate, or double-press it to dictate until you press it again." }
     private var listeningMessage: String { "Listening… \(listener?.pressToToggle == true ? "Press the shortcut again" : "Release") to finish, or press Escape to cancel." }
     private func removeShortcut() {
         shortcutGeneration = UUID()
@@ -910,7 +916,7 @@ final class PreStart: @unchecked Sendable {
     }
     func copyRawEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.rawText, forType: .string) }
     /// Turns all three cleanup options off. Like other settings, it takes effect at once.
-    func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false }
+    func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false; cleanupPunctuation = false }
     func refreshDictionary() { dictionaryEntries = processing?.dictionary.entries ?? [] }
     @discardableResult
     func addDictionaryEntry(preferred: String, variants: String) -> Bool {
@@ -947,7 +953,7 @@ final class PreStart: @unchecked Sendable {
     func dismissStatus() {
         guard !isBusy else { return }
         if sessionAvailable {
-            setPhase("Ready", "Hold your shortcut to dictate, or double-press it to dictate until you press it again.")
+            setPhase("Ready", idleMessage)
         } else {
             phase = "Error"; message = "Private storage is unavailable. Murmur cannot start."
             updateMenu?()

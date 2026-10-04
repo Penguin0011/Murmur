@@ -232,12 +232,13 @@ struct SettingsView: View {
                     Toggle("Remove filler words", isOn: $controller.cleanupFillers)
                     Toggle("Apply spoken corrections", isOn: $controller.cleanupCorrections)
                     Toggle("Format spoken lists", isOn: $controller.cleanupLists)
+                    Toggle("Fix punctuation and capitalization", isOn: $controller.cleanupPunctuation)
                     HStack(spacing: 16) {
-                        Text("Each option works on its own. Faithful transcription turns all three off; dictionary spellings still apply.")
+                        Text("Each option works on its own. Faithful transcription turns them all off; dictionary spellings still apply.")
                             .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                         Spacer()
                         Button("Faithful Transcription", action: controller.useFaithfulTranscription)
-                            .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists)
+                            .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists && !controller.cleanupPunctuation)
                     }
                     Text((controller.appliedCleanupIsLocal ? "Cleanup runs on this Mac." : "Cleanup uses the provider chosen under Processing routes.") + " If it fails or changes too much, Murmur keeps the raw transcript in History and does not insert it.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
@@ -599,6 +600,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupFillers) { controller.settingsChanged() }
             .onChange(of: controller.cleanupCorrections) { controller.settingsChanged() }
             .onChange(of: controller.cleanupLists) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupPunctuation) { controller.settingsChanged() }
             .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
             .onChange(of: controller.transcriptionRoute) { controller.settingsChanged() }
             .onChange(of: controller.cloudTranscriber) { controller.settingsChanged() }

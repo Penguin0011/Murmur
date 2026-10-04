@@ -63,6 +63,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try settingsChecks(defaults)
         try localChecks(ProcessingCoordinator(directory: root.appendingPathComponent("local"), defaults: defaults))
         try await cloudChecks(ProcessingCoordinator(directory: root.appendingPathComponent("cloud"), defaults: defaults))
+        try punctuationChecks()
         try learningChecks(root.appendingPathComponent("learn"), defaults)
         try await sectionChecks(ProcessingCoordinator(directory: root.appendingPathComponent("sections"), defaults: defaults))
         try editorChecks(ProcessingCoordinator(directory: root.appendingPathComponent("editor"), defaults: defaults))
@@ -213,6 +214,20 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(idle.messages.isEmpty, "local route never calls the provider")
     }
 
+    /// Punctuation: local capitals only; the guard allows an added "?" only with the option on; old saved options decode with it off.
+    static func punctuationChecks() throws {
+        let on = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
+        check(RuleCleaner.capitalizeSentences("hello we went. then i'm sure i said hi? yes") == "Hello we went. Then I'm sure I said hi? Yes", "local capitals")
+        check(RuleCleaner.capitalizeSentences("it is 3.5 percent") == "It is 3.5 percent", "decimals are not sentence ends")
+        check(CleanupGuard.check(raw: "hello we are building it is that right", cleaned: "Hello, we are building it. Is that right?", options: on) == .pass, "punctuation-only edit passes")
+        check(CleanupGuard.check(raw: "is that right", cleaned: "Is that right?", options: CleanupOptions(fillers: false, corrections: false, lists: false)) != .pass, "an added ? needs the option")
+        check(CleanupGuard.check(raw: "hello we are here", cleaned: "Hello, we are not here.", options: on) != .pass, "punctuation never covers word changes")
+        check(CleanupPrompt.build(transcript: "x", options: on).system.contains("punctuation and capitalization"), "prompt names the operation")
+        check(!CleanupPrompt.build(transcript: "x", options: .faithful).system.contains("punctuation"), "faithful omits it")
+        let old = try JSONDecoder().decode(CleanupOptions.self, from: Data(#"{"fillers":true,"corrections":true,"lists":true}"#.utf8))
+        check(!old.punctuation && CleanupOptions.standard.punctuation && !CleanupOptions.faithful.punctuation, "defaults and old saved options")
+    }
+
     static func learningChecks(_ dir: URL, _ defaults: UserDefaults) throws {
         // Learning on: two settled sessions promote.
         let on = try ProcessingCoordinator(directory: dir.appendingPathComponent("on"), defaults: defaults)
@@ -223,7 +238,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
             try on.settle(sessionID: session)
         }
         check(on.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" }, "promoted after two sessions")
-        check(on.process("call acme") == .insert("call Akme"), "learned entry applies")
+        check(on.process("call acme") == .insert("Call Akme"), "learned entry applies (punctuation capitalizes)")
 
         // Learning off: nothing recorded, nothing promoted.
         let off = try ProcessingCoordinator(directory: dir.appendingPathComponent("off"), defaults: defaults)

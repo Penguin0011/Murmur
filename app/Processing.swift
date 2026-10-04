@@ -40,6 +40,7 @@ struct ProcessingSettings: Equatable, Sendable {
         static let fillers = "cleanupFillers"
         static let corrections = "cleanupCorrections"
         static let lists = "cleanupLists"
+        static let punctuation = "cleanupPunctuation"
         static let route = "cleanupRoute"
         static let learning = "learningEnabled"
         static let historyMode = "historyMode"
@@ -50,7 +51,7 @@ struct ProcessingSettings: Equatable, Sendable {
     static func load(from defaults: UserDefaults) -> ProcessingSettings {
         var settings = ProcessingSettings()
         func flag(_ key: String, _ fallback: Bool) -> Bool { defaults.object(forKey: key) as? Bool ?? fallback }
-        settings.options = CleanupOptions(fillers: flag(Key.fillers, true), corrections: flag(Key.corrections, true), lists: flag(Key.lists, true))
+        settings.options = CleanupOptions(fillers: flag(Key.fillers, true), corrections: flag(Key.corrections, true), lists: flag(Key.lists, true), punctuation: flag(Key.punctuation, true))
         settings.route = defaults.string(forKey: Key.route).flatMap(CleanupRoute.init(rawValue:)) ?? .local
         settings.learningEnabled = flag(Key.learning, true)
         settings.historyMode = defaults.string(forKey: Key.historyMode).flatMap(HistoryMode.init(rawValue:)) ?? .on
@@ -62,6 +63,7 @@ struct ProcessingSettings: Equatable, Sendable {
         defaults.set(options.fillers, forKey: Key.fillers)
         defaults.set(options.corrections, forKey: Key.corrections)
         defaults.set(options.lists, forKey: Key.lists)
+        defaults.set(options.punctuation, forKey: Key.punctuation)
         defaults.set(route.rawValue, forKey: Key.route)
         defaults.set(learningEnabled, forKey: Key.learning)
         defaults.set(historyMode.rawValue, forKey: Key.historyMode)
