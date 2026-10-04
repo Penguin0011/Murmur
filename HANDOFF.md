@@ -14,10 +14,21 @@ Known limits: "seen" sends "Sean" to the cleanup provider; the prompt tells it t
 
 Not done: a live Gemini call through this branch's sound-alike path; the earlier live run used exact variants on `main`. Next live check: remove Shelfmate's variants and say "Send the Shelfmate report". [Certain]
 
-Decisions for the user:
-- Cloud transcription vocabulary hint is unwired (`CloudAudio.prepare` never sets `vocabularyHint`), though provider disclosures mention it. Wiring it means sending the dictionary's preferred spellings with every cloud transcription, since nothing can be filtered before the transcript exists. Not done without approval. [Certain]
+**User decisions, October 4, 2026:** cloud transcription gets the dictionary; dictionary support in Parakeet is critical (most users run local transcription with cloud cleanup); the user runs the live Gemini test. [Certain]
 
-Deferred: local Parakeet vocabulary boosting (FluidAudio `configureVocabularyBoosting` needs an extra CTC model: new pins, download and license review); automatic learning from edits (`TODO(observation)` in Controller.swift). [Certain]
+- `aa31965` Cloud transcription sends every enabled preferred spelling (manual first) as the vocabulary hint: Gemini 3.5 Transcribe as custom vocabulary, Gemini audio as spelling hints, OpenRouter Whisper none. Disclosures now say "your dictionary's spellings". [Certain]
+- `7f31ad1`, `10de932` Dictionary support in on-device transcription:
+  - Optional 103 MB download (Settings → Dictionary) of the pinned Parakeet CTC 110M model, `FluidInference/parakeet-ctc-110m-coreml` at `accdafd8`, CC-BY-4.0 (recorded in the pins and in THIRD_PARTY_NOTICES). [Certain]
+  - Installed in FluidAudio's own folder, `~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml`, because `VocabularyBoostingSession` reads the CTC tokenizer only from `CtcModels.defaultCacheDirectory`. Other FluidAudio apps (Handy, OpenWhispr are installed here) could share it, so it is hash-verified before every use and skipped when it does not match; the Download and Remove alerts name the folder and say it may be shared. [Certain]
+  - Helper: `ModelBench … --ctc DIR --vocabulary FILE` rescoring, then `BoostFilter` (see `app/README.md`). Vocabulary or model errors never fail transcription. `build.sh` now always builds the helper. [Certain]
+  - App: `refreshDictionary()` rewrites `dictionary/parakeet-vocabulary.json` and pre-warms; `HelperLaunch.make` builds arguments and key for warm, chunk and one-shot paths. [Certain]
+- Measured (synthetic `say -o` speech, never played; 20-term dictionary): 0/119 ordinary corpus sentences changed (6/119 before the filter: nothing→Notion, remind→Gemini, getting→Gemini, option→Notion); 6 misheard terms fixed (kubectl, Shelfmate, Aakash, Clouddev, Supabase, OpenRouter); +0.12 s per transcription; first load after download about 14 s (Core ML compile, pre-warmed). [Certain]
+- Verified: clean-state download through `ModelDownloader` with the real pins into the real folder (10 s, full hash pass); the bundled helper from `build.sh` with that folder; bad vocabulary and missing model still transcribe. All checks pass. [Certain]
+- Not verified: the Settings download row in pixels (the screen was locked), a download clicked in the app, and any human speech. On this Mac the CTC folder is already installed (from the clean-state test), so the app shows it as downloaded. [Certain]
+
+Limits: casing-only fixes (tailscale→Tailscale) are not made by the helper (cloud cleanup handles them); a term split across chunk boundaries is not fixed; History's raw text is the rescored transcript; a CTC folder with the right sizes but wrong content shows "Downloaded" while being skipped. [Certain]
+
+Deferred: automatic learning from edits (`TODO(observation)` in Controller.swift). [Certain]
 
 ---
 
