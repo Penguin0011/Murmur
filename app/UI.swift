@@ -531,10 +531,10 @@ struct SettingsView: View {
             rule.padding(.top, 20)
             toggleRow("Learn from my corrections", "Automatic learning from edits is not available in this build yet. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {
-                field("Preferred spelling", text: $newPreferred).onSubmit(addEntry)
-                field("Heard as, comma-separated (optional)", text: $newVariants).layoutPriority(1).onSubmit(addEntry)
+                field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
+                field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
                 Button("Add", action: addEntry)
-                    .buttonStyle(InkButtonStyle(kind: newPreferred.trimmingCharacters(in: .whitespaces).isEmpty ? .outline : .filled))
+                    .buttonStyle(InkButtonStyle(kind: newPreferred.trimmingCharacters(in: .whitespaces).isEmpty ? .outline : .filled)).fixedSize()
                     .disabled(newPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.top, 20)
@@ -580,8 +580,8 @@ struct SettingsView: View {
                 .padding(.horizontal, 8).padding(.vertical, 3).background(Palette.accent16)
             Toggle(isOn: Binding(get: { entry.enabled }, set: { on in
                 controller.updateDictionaryEntry(entry, preferred: entry.preferred, variants: entry.variants.joined(separator: ", "), enabled: on)
-            })) { Text("Use \(entry.preferred)") }
-                .toggleStyle(SquareToggleStyle()).labelsHidden().fixedSize()
+            })) { EmptyView() }
+                .toggleStyle(SquareToggleStyle()).fixedSize().accessibilityLabel("Use \(entry.preferred)")
             Button("Edit") {
                 editPreferred = entry.preferred; editVariants = entry.variants.joined(separator: ", ")
                 controller.dictionaryMessage = ""; editingEntryID = entry.id
@@ -599,11 +599,11 @@ struct SettingsView: View {
             if controller.updateDictionaryEntry(entry, preferred: editPreferred, variants: editVariants, enabled: entry.enabled) { editingEntryID = nil }
         }
         return HStack(spacing: 8) {
-            field("Preferred spelling", text: $editPreferred).onSubmit(save)
-            field("Heard as, comma-separated (optional)", text: $editVariants).layoutPriority(1).onSubmit(save)
-            Button("Save", action: save).buttonStyle(InkButtonStyle(kind: .filled))
+            field("Preferred spelling", text: $editPreferred).frame(width: 220).onSubmit(save)
+            field("Heard as, comma-separated (optional)", text: $editVariants).onSubmit(save)
+            Button("Save", action: save).buttonStyle(InkButtonStyle(kind: .filled)).fixedSize()
                 .disabled(editPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
-            Button("Cancel") { controller.dictionaryMessage = ""; editingEntryID = nil }.buttonStyle(InkButtonStyle(kind: .outline))
+            Button("Cancel") { controller.dictionaryMessage = ""; editingEntryID = nil }.buttonStyle(InkButtonStyle(kind: .outline)).fixedSize()
                 .keyboardShortcut(.cancelAction)
         }
     }
