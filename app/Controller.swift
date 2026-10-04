@@ -5,6 +5,7 @@ import AVFoundation
 import os
 import Combine
 import Darwin
+import Carbon
 @preconcurrency import Dispatch
 
 /// Content-free timing and stop reasons, alongside the capture and shortcut timing.
@@ -875,7 +876,7 @@ final class PreStart: @unchecked Sendable {
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
-                watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location)
+                watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
                 switch insertion.status {
                 case .verified: setPhase("Inserted", "Inserted.")
                 case .unverified: setPhase("Saved", "\(saved) Delivery could not be verified. Press ⌃⌘V to paste it if it is missing.")
@@ -965,32 +966,58 @@ final class PreStart: @unchecked Sendable {
         do { try processing?.resetLearned(); dictionaryMessage = "" } catch { dictionaryMessage = "Could not reset learned entries." }
         refreshDictionary()
     }
-    // Learning from corrections (PRD R10): after a verified insertion into a learning-eligible
-    // field, poll the dictated span until focus leaves, 60 seconds pass, attribution is lost or
-    // the next insertion; each change goes to the ledger, which settles when the watch ends.
-    private var watch: (observation: DictationObservation, field: FocusSnapshot, current: String)?
+    // Learning from corrections (PRD R10): after an insertion, watch the dictated span until focus
+    // leaves, 60 seconds pass, attribution is lost or the next insertion; each change goes to the
+    // ledger, which settles when the watch ends. A field that reads back the dictated text is read
+    // through AX; any other field (VS Code's stub, web canvases) is followed by the keys typed in
+    // that app during the window, which are never stored or logged.
+    private struct Watch {
+        var observation: DictationObservation
+        let pid: pid_t
+        let field: FocusSnapshot?
+        var keys: KeystrokeSpan?
+        var current: String
+    }
+    private var watch: Watch?
     private var watchTimer: Timer?
-    private func watchCorrections(_ insertion: InsertionResult, text: String, at offset: Int?) {
-        guard processing?.settings.learningEnabled == true, insertion.status == .verified, let offset,
-              let field = insertion.snapshot, field.learningEligible, let value = field.value else { return }
-        let range = NSRange(location: offset, length: (text as NSString).length)
-        guard NSMaxRange(range) <= (value as NSString).length, (value as NSString).substring(with: range) == text,
-              let observation = DictationObservation(value: value, insertedRange: range, now: ProcessInfo.processInfo.systemUptime) else { return }
-        watch = (observation, field, text)
+    private var keyTap: CFMachPort?
+    private func watchCorrections(_ insertion: InsertionResult, text: String, at offset: Int?, pid: pid_t?) {
+        guard processing?.settings.learningEnabled == true, insertion.status != .failed else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        // A snapshot exists only when the same field read back the dictated text (verified, or a
+        // browser paste whose read-back is not trusted for delivery but is for observation).
+        if let field = insertion.snapshot, field.readableText, let value = field.value, let offset,
+           NSMaxRange(NSRange(location: offset, length: (text as NSString).length)) <= (value as NSString).length,
+           (value as NSString).substring(with: NSRange(location: offset, length: (text as NSString).length)) == text,
+           let observation = DictationObservation(value: value, insertedRange: NSRange(location: offset, length: (text as NSString).length), now: now) {
+            watch = Watch(observation: observation, pid: field.pid, field: field, keys: nil, current: text)
+        } else if let pid, CGPreflightListenEventAccess(), startKeyTap(),
+                  let observation = DictationObservation(value: text, insertedRange: NSRange(location: 0, length: (text as NSString).length), now: now) {
+            watch = Watch(observation: observation, pid: pid, field: nil, keys: KeystrokeSpan(text), current: text)
+        } else { stopWatching(); return }
         watchTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.watchTick() }
         }
     }
     private func watchTick(ending: Bool = false) {
         guard var w = watch else { return }
-        let focus = try? captureFocus()
-        // captureFocus spins the run loop; a shortcut handled there may already have ended this watch.
-        guard watch?.observation.sessionID == w.observation.sessionID else { return }
-        let same = focus.map { $0.pid == w.field.pid && CFEqual($0.element, w.field.element) } ?? false
-        // Access is about the dictated field; another app's unreadable focus is a departure, not lost access.
-        let readable = AXIsProcessTrusted() && (same ? focus?.learningEligible == true : true)
-        let selection = focus?.selection.map { NSRange(location: $0.location, length: $0.length) } ?? NSRange(location: 0, length: 0)
-        _ = w.observation.observe(value: focus?.value ?? "", selection: selection, now: ProcessInfo.processInfo.systemUptime,
+        let same: Bool, readable: Bool, value: String, selection: NSRange
+        if let keys = w.keys {
+            same = keys.state != .departed && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
+            readable = keys.state != .lost && !IsSecureEventInputEnabled()
+            value = keys.value; selection = keys.selection
+        } else if let field = w.field {
+            let focus = try? captureFocus()
+            // captureFocus spins the run loop; a shortcut handled there may already have ended this watch.
+            guard watch?.observation.sessionID == w.observation.sessionID else { return }
+            same = focus.map { $0.pid == field.pid && CFEqual($0.element, field.element) } ?? false
+            // Access is about the dictated field; another app's unreadable focus is a departure, not lost access.
+            // Chromium turns Secure Event Input on in password fields, a backstop for unflagged ones.
+            readable = AXIsProcessTrusted() && !IsSecureEventInputEnabled() && (same ? focus?.readableText == true : true)
+            value = focus?.value ?? ""
+            selection = focus?.selection.map { NSRange(location: $0.location, length: $0.length) } ?? NSRange(location: 0, length: 0)
+        } else { return }
+        _ = w.observation.observe(value: value, selection: selection, now: ProcessInfo.processInfo.systemUptime,
                                   sameFocusedField: same, readableNonsecure: readable)
         if ending { w.observation.finish() }
         let session = w.observation.sessionID, current = w.observation.edited ?? w.observation.initial
@@ -1005,7 +1032,48 @@ final class PreStart: @unchecked Sendable {
             }
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
     }
-    private func stopWatching() { watchTimer?.invalidate(); watchTimer = nil; watch = nil }
+    private func stopWatching() {
+        watchTimer?.invalidate(); watchTimer = nil; watch = nil
+        if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: false); CFMachPortInvalidate(keyTap) }
+        keyTap = nil
+    }
+    /// Listen-only (Input Monitoring is enough); runs on the main run loop only while a keystroke watch is open.
+    private func startKeyTap() -> Bool {
+        let mask = [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown].reduce(CGEventMask(0)) { $0 | (1 << $1.rawValue) }
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly, eventsOfInterest: mask,
+            callback: { _, type, event, context in
+                if let context {
+                    let controller = Unmanaged<AppController>.fromOpaque(context).takeUnretainedValue()
+                    MainActor.assumeIsolated { controller.watchKey(type, event) }
+                }
+                return Unmanaged.passUnretained(event)
+            }, userInfo: Unmanaged.passUnretained(self).toOpaque()) else { return false }
+        CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
+        keyTap = tap
+        return true
+    }
+    private func watchKey(_ type: CGEventType, _ event: CGEvent) {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: true) }; return }
+        guard var keys = watch?.keys else { return }
+        if type == .keyDown { keys.apply(Self.watchedKey(event)) } else { keys.depart() }
+        watch?.keys = keys
+    }
+    nonisolated static func watchedKey(_ event: CGEvent) -> KeystrokeSpan.Key {
+        let flags = event.flags
+        if flags.contains(.maskCommand) || flags.contains(.maskControl) { return .other }
+        let word = flags.contains(.maskAlternate), extend = flags.contains(.maskShift)
+        switch event.getIntegerValueField(.keyboardEventKeycode) {
+        case 51: return .backspace(word: word)
+        case 117: return .forwardDelete
+        case 123: return .left(word: word, extend: extend)
+        case 124: return .right(word: word, extend: extend)
+        default:
+            var length = 0
+            var units = [UniChar](repeating: 0, count: 8)
+            event.keyboardGetUnicodeString(maxStringLength: 8, actualStringLength: &length, unicodeString: &units)
+            return .text(String(utf16CodeUnits: units, count: length))
+        }
+    }
     func deleteEntry(_ entry: HistoryEntry) { do { try records?.delete(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
     func clearHistory() {
         let alert = NSAlert(); alert.messageText = "Delete all saved transcripts?"; alert.informativeText = "This cannot be undone."
