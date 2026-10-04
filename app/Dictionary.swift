@@ -280,9 +280,49 @@ final class DictionaryStore {
         return output
     }
 
-    /// Entries a cloud stage may receive for this text: only enabled entries whose preferred
-    /// spelling or a variant occurs in the text as whole words. Never the whole dictionary.
+    static let maxNearMatches = 10
+
+    /// Entries a cloud stage may receive for this text: enabled entries whose preferred spelling
+    /// or a variant occurs in the text as whole words, then up to `maxNearMatches` entries whose
+    /// preferred spelling sounds like a 1–3 word span of the text (the learning filter's
+    /// similarity rules), so a misheard term can still be corrected by cleanup. Never the whole
+    /// dictionary. `apply(to:)` stays exact; only the cleanup hint uses near matches.
     func relevantEntries(for text: String) -> [DictionaryEntry] {
+        let exact = exactEntries(for: text)
+        let exactIDs = Set(exact.map(\.id))
+        let candidates = entries.filter { $0.enabled && !exactIDs.contains($0.id) }
+        guard !candidates.isEmpty else { return exact }
+        let chars = Array(text)
+        let words = TermText.tokens(chars)
+        var spans = Set<String>()
+        for i in words.indices {
+            for length in 1...min(CorrectionFilter.maxWords, words.count - i) {
+                let span = words[i..<(i + length)]
+                guard Self.spacedPhrase(span, chars) else { break }
+                spans.insert(CorrectionFilter.letters(span.map(\.text).joined()))
+            }
+        }
+        var near: [DictionaryEntry] = []
+        for entry in candidates where near.count < Self.maxNearMatches {
+            let target = CorrectionFilter.letters(entry.preferred)
+            if spans.contains(where: { Self.soundsLike($0, target) }) { near.append(entry) }
+        }
+        return exact + near
+    }
+
+    /// The learning filter's respelling test on letters only: at least 4 letters each, and either
+    /// matching phonetic keys with similarity >= 0.5, or similarity >= 0.75 for terms of 6+ letters.
+    static func soundsLike(_ heard: String, _ term: String) -> Bool {
+        guard heard.count >= CorrectionFilter.minLetters, term.count >= CorrectionFilter.minLetters,
+              Double(min(heard.count, term.count)) >= Double(max(heard.count, term.count)) * CorrectionFilter.phoneticSimilarity
+        else { return false }
+        let similarity = CorrectionFilter.similarity(heard, term)
+        // Edit similarity alone is too loose for short terms ("mean" is 0.75 from "Sean").
+        if similarity >= CorrectionFilter.directSimilarity && term.count >= 6 { return true }
+        return similarity >= CorrectionFilter.phoneticSimilarity && CorrectionFilter.phoneticKey(heard) == CorrectionFilter.phoneticKey(term)
+    }
+
+    private func exactEntries(for text: String) -> [DictionaryEntry] {
         let chars = Array(text)
         let words = TermText.tokens(chars)
         var present = Set<String>()

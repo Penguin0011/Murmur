@@ -185,6 +185,16 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         p.cloudCleaner = spelled
         await expect(p, "Um, run kubectl now.", .insert("Run kubectl now."), "provider output keeping a dictionary term passes guard")
 
+        // A preferred-only term the transcriber misheard reaches the prompt as a near match,
+        // and the guard accepts the respelling, including words joined into one term.
+        let clouddev = try p.addEntry(preferred: "clouddev", variants: "")
+        let joined = MockCloudCleaner(.success("Ship clouddev today."))
+        p.cloudCleaner = joined
+        await expect(p, "Um, ship cloud dev today.", .insert("Ship clouddev today."), "near-matched joined term passes guard")
+        check(joined.messages.first?.system.contains("clouddev") == true, "near-matched term in prompt")
+        check(joined.messages.first?.system.contains("Akme") == false, "unrelated term still not in prompt")
+        try p.deleteEntry(id: clouddev.id)
+
         // Provider failure: held, local cleaner never consulted.
         p.cloudCleaner = MockCloudCleaner(.failure(.timeout(.gemini)))
         await expect(p, "Um, call acme.", .heldForRecovery(raw: "Um, call acme.", reason: .cleanerFailed), "cloud failure held")

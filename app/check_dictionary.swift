@@ -56,6 +56,17 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         check(store.relevantEntries(for: "nothing here").isEmpty, "no entries for unrelated text")
         check(store.relevantEntries(for: "Akme already right").map(\.id) == [acme.id], "preferred spelling counts")
         check(store.relevantEntries(for: "Acmeville").isEmpty, "relevance uses word boundaries")
+        // Near matches feed the cleanup hint only; apply() never uses them.
+        let kube = try store.add(preferred: "Kubernetes", variants: [])
+        let cloud = try store.add(preferred: "clouddev", variants: [])
+        check(store.relevantEntries(for: "deploy it to coopernetties").map(\.id) == [kube.id], "misheard single word is near")
+        check(store.relevantEntries(for: "ship cloud dev today").map(\.id) == [cloud.id], "split words spelling the term are near")
+        check(store.apply(to: "deploy it to coopernetties") == "deploy it to coopernetties", "near match never applied")
+        check(store.relevantEntries(for: "Can we meet for lunch tomorrow at the office?").isEmpty, "ordinary sentence pulls in no terms")
+        var offKube = kube; offKube.enabled = false
+        try store.update(offKube)
+        check(store.relevantEntries(for: "deploy it to coopernetties").isEmpty, "disabled entry is never near")
+        try store.delete(id: kube.id); try store.delete(id: cloud.id)
 
         // Validation, edit, disable, delete.
         do { try store.add(preferred: "Other", variants: ["acme"]); check(false, "duplicate variant accepted") } catch { check(true, "") }

@@ -555,8 +555,21 @@ enum CleanupGuard {
         }
 
         // Every deleted word must be explained by an enabled option.
-        // A dictionary respelling replaces at most one raw word per supplied term word present.
-        let termsUsed = outWords.enumerated().filter { !matchedOut.contains($0.offset) && termWords.contains($0.element.lower) }.count
+        // A dictionary respelling replaces at most one raw word per supplied term word present, or
+        // joins a run of 2–3 adjacent raw words that spell it exactly ("cloud dev" -> "clouddev").
+        func spelled(_ text: String) -> String { String(text.filter { $0.isLetter || $0.isNumber }) }
+        var termsUsed = 0
+        for (j, w) in outWords.enumerated() where !matchedOut.contains(j) && termWords.contains(w.lower) {
+            let target = spelled(w.lower)
+            var joined: Range<Int>? = nil
+            search: for start in rawWords.indices {
+                for length in 2...3 where start + length <= rawWords.count {
+                    let run = start..<(start + length)
+                    if run.allSatisfy({ !consumedRaw.contains($0) }) && spelled(run.map { a[$0] }.joined()) == target { joined = run; break search }
+                }
+            }
+            if let joined { consumedRaw.formUnion(joined) } else { termsUsed += 1 }
+        }
         var unexplained = 0
         for i in rawWords.indices where !consumedRaw.contains(i) {
             if options.fillers && (fillerDeletable(i) || repeats.contains(i)) { continue }
@@ -619,7 +632,7 @@ enum CleanupPrompt {
             if !term.isEmpty, !terms.contains(term), terms.count < 50 { terms.append(term) }
         }
         if !terms.isEmpty {
-            system += "\n- Preferred spellings from the user's dictionary (use one only where the transcript clearly refers to that term): " + terms.joined(separator: "; ")
+            system += "\n\nPreferred spellings from the user's dictionary: " + terms.joined(separator: "; ") + "\nThe transcript comes from speech recognition, which can mishear these terms as similar-sounding words or split them into several words (\"cloud dev\" for \"clouddev\"). Where the transcript clearly refers to one of these terms, write it with the preferred spelling. This is the only respelling allowed, and it overrides the rules above; leave every other word as it is."
         }
         let user = "<\(tag)>\n\(transcript)\n</\(tag)>"
         return CleanupMessages(system: system, user: user)
