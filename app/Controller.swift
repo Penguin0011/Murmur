@@ -652,6 +652,11 @@ final class PreStart: @unchecked Sendable {
         }
         return NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) }
     }
+    /// The microphone level now, for the indicator's per-frame animation.
+    func liveVoiceLevel() -> Double {
+        guard let capture else { return 0 }
+        return capture.queue.sync { capture.level }
+    }
     func stopRecording() { guard let listener else { return }; listener.emit(listener.machine.finish()) }
     func cancelRecording() {
         if cloudRequest.isActive { cancelCloudRequest(); return }

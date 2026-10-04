@@ -622,22 +622,34 @@ private struct VoiceBubbles: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+    /// Centre bars swing most, like a synth's level meter.
+    private static let weights = [0.6, 0.85, 1, 0.85, 0.6]
     var body: some View {
         // Every display frame: a 0.15 s floor stepped the pulse visibly after release.
-        TimelineView(.animation(minimumInterval: nil, paused: phase != "Processing" || reduceMotion)) { context in
-            HStack(spacing: 5) {
-                ForEach(0..<5) { index in
-                    let pulse = (sin(context.date.timeIntervalSinceReferenceDate * 4 - Double(index)) + 1) / 2
-                    let level = phase == "Listening" ? controller.voiceLevel : phase == "Processing" ? (reduceMotion ? 0.35 : pulse * 0.45) : 0.15
-                    Circle().fill(Color.primary.opacity(0.35))
-                        .frame(width: 6 + level * Double(index == 2 ? 10 : 7), height: 6 + level * Double(index == 2 ? 10 : 7))
-                        .modifier(VoiceDotGlass(opaque: reduceTransparency || contrast == .increased))
+        TimelineView(.animation(minimumInterval: nil, paused: phase == "Error" || reduceMotion)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            // Clear Liquid Glass capsules that stretch vertically with the voice.
+            GlassEffectContainer(spacing: 2) {
+                HStack(spacing: 0) {
+                    ForEach(0..<5) { index in
+                        let wobble = reduceMotion ? 1 : 0.65 + 0.35 * sin(t * 9 + Double(index) * 1.7)
+                        // Read the microphone every frame (the published level updates every 0.15 s);
+                        // the square root lifts quiet speech so the bars react to it.
+                        let voice = reduceMotion ? controller.voiceLevel : controller.liveVoiceLevel()
+                        let level = phase == "Listening" ? voice.squareRoot() * wobble
+                            : phase == "Processing" ? (reduceMotion ? 0.35 : (sin(t * 4 - Double(index)) + 1) / 2 * 0.45) : 0.15
+                        // Rests as a short pill (9 × 13 pt) and stretches up to the full 40 pt.
+                        Color.clear.frame(width: 9, height: 13 + 27 * level * Self.weights[index])
+                            .modifier(VoiceDotGlass(opaque: reduceTransparency || contrast == .increased))
+                            .frame(width: 14, height: 40)
+                    }
                 }
             }
-            .frame(width: 80, height: 24)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: controller.voiceLevel)
+            .frame(width: 80, height: 40)
         }
-
+        // The indicator's panel never becomes key; render its glass as active so it refracts
+        // instead of falling back to the flat inactive look.
+        .environment(\.appearsActive, true)
         .accessibilityElement(children: .ignore).accessibilityLabel(phase)
         .help(phase == "Listening" ? "Release, or press the shortcut again after a double-press, to finish. Escape cancels." : phase)
     }
@@ -646,8 +658,12 @@ private struct VoiceBubbles: View {
 private struct VoiceDotGlass: ViewModifier {
     let opaque: Bool
     @ViewBuilder func body(content: Content) -> some View {
-        if opaque { content.overlay(Circle().fill(Color.primary.opacity(0.65))) }
-        else { content.glassEffect(.regular, in: Circle()) }
+        if opaque { content.overlay(Capsule().fill(Color.primary.opacity(0.65))) }
+        // A #5995C9 fill under clear glass: glass tint alone rendered gray and vanished on white.
+        else {
+            content.background(Capsule().fill(Color(red: 0x59 / 255, green: 0x95 / 255, blue: 0xC9 / 255).opacity(0.55)))
+                .glassEffect(.clear, in: Capsule())
+        }
     }
 }
 
@@ -668,7 +684,9 @@ private struct BubbleView: View {
                 Button(action: controller.dismissStatus) { Image(systemName: "xmark").font(.system(size: 11)) }
                     .buttonStyle(.plain).help("Dismiss error").accessibilityLabel("Dismiss error")
             }
-            if controller.recoveryAudio != nil || controller.hasRecoveryAudio {
+            // These keep only the pop-up; saved audio stays reachable from Murmur's window.
+            if controller.recoveryAudio != nil || controller.hasRecoveryAudio,
+               !["No speech was detected", "No audio was captured", "Transcription failed"].contains(where: message.hasPrefix) {
                 Button("Audio…", action: controller.revealRecoveryAudio)
                     .buttonStyle(.bordered).controlSize(.small)
             }
