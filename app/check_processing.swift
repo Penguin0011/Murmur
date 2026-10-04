@@ -243,8 +243,8 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         // Watched spans (AppController's loop without AX): undo drops evidence; two corrected
         // dictations promote with the user's casing, not the tracker's lowercased candidate.
         let watched = try ProcessingCoordinator(directory: dir.appendingPathComponent("watch"), defaults: defaults)
-        func dictate(_ snapshots: [String]) throws {
-            var o = DictationObservation(value: "Call Acme today", insertedRange: NSRange(location: 0, length: 15), now: 0)!
+        func dictate(_ snapshots: [String], inserted: String = "Call Acme today") throws {
+            var o = DictationObservation(value: inserted, insertedRange: NSRange(location: 0, length: 15), now: 0)!
             var last = o.initial
             for (i, value) in snapshots.enumerated() {
                 _ = o.observe(value: value, selection: NSRange(location: 0, length: 0), now: Double(i + 1), sameFocusedField: true, readableNonsecure: true)
@@ -260,6 +260,8 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(watched.dictionary.entries.isEmpty, "one session does not promote")
         try dictate(["Call Akme today"])
         check(watched.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "watched corrections promote with casing")
+        try dictate(["Call Acme today"], inserted: "Call Akme today")
+        check(watched.dictionary.entries.isEmpty, "changing a learned replacement back withdraws it")
 
         // Learning off: nothing recorded, nothing promoted.
         let off = try ProcessingCoordinator(directory: dir.appendingPathComponent("off"), defaults: defaults)

@@ -999,7 +999,9 @@ final class PreStart: @unchecked Sendable {
             watch = w
             if w.observation.stopped {
                 stopWatching()
-                if try processing?.settle(sessionID: session).isEmpty == false { refreshDictionary() }
+                // Settling can also delete learned entries (reversal, conflict), so always refresh.
+                defer { refreshDictionary() }
+                try processing?.settle(sessionID: session)
             }
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
     }
