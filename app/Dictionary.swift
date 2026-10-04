@@ -282,6 +282,18 @@ final class DictionaryStore {
 
     static let maxNearMatches = 10
 
+    /// Enabled preferred spellings for transcription biasing, manual entries first, commas removed
+    /// (callers join with ", "). Unlike `relevantEntries`, this is the whole enabled dictionary,
+    /// because nothing can be filtered before a transcript exists.
+    var vocabularyTerms: [String] {
+        var seen = Set<String>()
+        let enabled = entries.filter(\.enabled)
+        return (enabled.filter { $0.source == .manual } + enabled.filter { $0.source == .learned }).compactMap { entry in
+            let term = TermText.collapseWhitespace(entry.preferred.replacingOccurrences(of: ",", with: " "))
+            return seen.insert(TermText.fold(term)).inserted ? term : nil
+        }
+    }
+
     /// Entries a cloud stage may receive for this text: enabled entries whose preferred spelling
     /// or a variant occurs in the text as whole words, then up to `maxNearMatches` entries whose
     /// preferred spelling sounds like a 1–3 word span of the text (the learning filter's

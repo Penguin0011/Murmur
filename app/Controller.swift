@@ -785,7 +785,8 @@ final class PreStart: @unchecked Sendable {
         guard let store = records else { setPhase("Error", "Private storage is unavailable. Audio is saved for retry."); done(); return }
         let token = generation; let timestamp = listeningStarted
         cloudStage = .transcription; cloudDone = done
-        cloudRequest.start({ await CloudTranscription.run(provider: provider, audioFile: audio) }) { [weak self] outcome in
+        let vocabulary = processing?.dictionary.vocabularyTerms ?? []
+        cloudRequest.start({ await CloudTranscription.run(provider: provider, audioFile: audio, vocabulary: vocabulary) }) { [weak self] outcome in
             guard let self, self.generation == token else { return }
             self.cloudStage = nil; self.cloudDone = nil
             let text: String, held: Bool

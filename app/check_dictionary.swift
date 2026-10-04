@@ -67,6 +67,7 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         try store.update(offKube)
         check(store.relevantEntries(for: "deploy it to coopernetties").isEmpty, "disabled entry is never near")
         try store.delete(id: kube.id); try store.delete(id: cloud.id)
+        check(store.vocabularyTerms == ["Akme", "New York City", "New Yorker", "kubectl", "iPhone"], "vocabulary terms: enabled preferred spellings in order")
 
         // Validation, edit, disable, delete.
         do { try store.add(preferred: "Other", variants: ["acme"]); check(false, "duplicate variant accepted") } catch { check(true, "") }

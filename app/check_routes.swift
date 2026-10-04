@@ -23,10 +23,11 @@ private final class MockTransport: HTTPTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _count = 0
     let result: HTTPResult
+    private var _lastBody: Data?
     init(_ result: HTTPResult) { self.result = result }
     var count: Int { lock.lock(); defer { lock.unlock() }; return _count }
-    private func bump() { lock.lock(); _count += 1; lock.unlock() }
-    func send(_ request: URLRequest) async throws -> HTTPResult { bump(); return result }
+    var lastBody: String { lock.lock(); defer { lock.unlock() }; return String(decoding: _lastBody ?? Data(), as: UTF8.self) }
+    func send(_ request: URLRequest) async throws -> HTTPResult { lock.lock(); _count += 1; _lastBody = request.httpBody; lock.unlock(); return result }
 }
 
 /// A transcriber with no silence pre-check, like OpenRouter Whisper.
@@ -259,6 +260,9 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         let plain = MockTransport(HTTPResult(status: 200, body: geminiBody("Meet Thursday at three.")))
         gemini.transport = plain
         await checkA(await CloudTranscription.run(provider: gemini, audioData: speech) == .transcript("Meet Thursday at three."), "Gemini transcript")
+        check(!plain.lastBody.contains("Spelling hints"), "no hint without a dictionary")
+        _ = await CloudTranscription.run(provider: gemini, audioData: speech, vocabulary: ["Kubernetes", "Shelfmate"])
+        check(plain.lastBody.contains("Kubernetes, Shelfmate"), "dictionary spellings reach cloud transcription")
 
         // Whisper has no pre-check: silence is sent, and an empty result is "no speech".
         let whisper = SpyTranscriber(.success("  "))
