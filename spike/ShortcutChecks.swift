@@ -27,6 +27,14 @@ func runShortcutChecks() throws {
     try check(double.doublePressExpired(at: 7.5) == .cancel && double.state == .idle, "lone tap cancelled after the window")
     try check(double.press(at: 8) == .start, "new recording after a lone tap")
 
+    var toggle = ShortcutMachine(); toggle.pressToToggle = true
+    try check(toggle.press(at: 0) == .start, "press-to-toggle: a press starts")
+    try check(toggle.release(at: 3) == nil && toggle.state == .listening, "press-to-toggle: even a long hold's release keeps recording")
+    try check(toggle.doublePressExpired(at: 9) == nil, "press-to-toggle: no lone-tap expiry")
+    try check(toggle.press(at: 10) == .finish && toggle.release(at: 10.1) == nil, "press-to-toggle: the next press finishes")
+    toggle.processingFinished()
+    try check(toggle.press(at: 11) == .start && toggle.release(at: 11.05) == nil && toggle.state == .listening, "press-to-toggle: a quick tap also latches")
+
     var hold = ShortcutMachine()
     try check(hold.press(at: 0) == .start && hold.release(at: 0.5) == .finish, "hold release finishes")
     try check(hold.cancel() == nil, "Escape cannot discard processing")
@@ -86,5 +94,5 @@ func runShortcutChecks() throws {
         listener.machine.processingFinished(); _ = listener.machine.press(at: 3); listener.publishState()
         try check(!listener.consumes(.keyDown, key(0, true, [])) && !listener.consumes(.keyDown, key(36, true, [])), "plain keys pass through while recording")
     }
-    print("Shortcut checks passed (double-press toggle, lone-tap expiry, hold, threshold, repeats, cancellation, processing guard, chord consumption, Escape consumption).")
+    print("Shortcut checks passed (double-press toggle, lone-tap expiry, hold, threshold, repeats, cancellation, processing guard, chord consumption, Escape consumption, press-to-toggle).")
 }

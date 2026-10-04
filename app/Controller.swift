@@ -157,6 +157,8 @@ final class PreStart: @unchecked Sendable {
     var modelAvailable: Bool { modelFilesAvailable() }
     @Published var intelligentLeadingSpace: Bool
     @Published var automaticInsertion: Bool
+    /// One press starts recording and the next press stops it, instead of hold-to-record.
+    @Published var pressToToggle: Bool
     @Published var retention: String
     // Cleanup and learning settings, applied as soon as they change like the others.
     @Published var cleanupFillers: Bool
@@ -264,7 +266,7 @@ final class PreStart: @unchecked Sendable {
             guard let self else { throw CaptureError("Application stopped") }
             let recording = Capture(); self.capture = recording
             try recording.start(url: url)
-            self.setPhase("Listening", "Listening… Release to finish, or press Escape to cancel.")
+            self.setPhase("Listening", self.listeningMessage)
         }, stop: { [weak self] in
             guard let self else { return false }
             self.capture?.stop()
@@ -293,6 +295,7 @@ final class PreStart: @unchecked Sendable {
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
+        pressToToggle = defaults.bool(forKey: "pressToToggle")
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
         let processingSettings = ProcessingSettings.load(from: defaults)
@@ -475,7 +478,7 @@ final class PreStart: @unchecked Sendable {
         appliedHistoryMode = historyMode; records?.persistsTranscripts = historyMode.persistsTranscripts
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
-        defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion")
+        defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(retention, forKey: "retention")
         if let processing {
@@ -511,6 +514,7 @@ final class PreStart: @unchecked Sendable {
         guard let tap = next.createTap(), let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = "The shortcut could not start. Check Input Monitoring and Accessibility."; return }
         next.onEscapeWhileProcessing = { [weak self] in self?.cancelCloudRequest() }
         next.onCopyChord = { [weak self] in self?.copyLatestRawTranscript() }
+        next.pressToToggle = pressToToggle
         // A press while the previous dictation processes records right away; its events replay
         // into the machine when that dictation finishes, which adopts this capture.
         next.onQueuedPress = { [weak self] in
@@ -539,10 +543,11 @@ final class PreStart: @unchecked Sendable {
             guard let self, let (capture, url) = self.prestart.take() else { return nil }
             self.capture = capture; return url
         }
-        session.resumeCapture = { [weak self] in self?.setPhase("Listening", "Listening… Release to finish, or press Escape to cancel.") }
+        session.resumeCapture = { [weak self] in guard let self else { return }; self.setPhase("Listening", self.listeningMessage) }
         session.finishRecording = { [weak self] in timingLog.notice("capture-cap reached"); guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
+    private var listeningMessage: String { "Listening… \(listener?.pressToToggle == true ? "Press the shortcut again" : "Release") to finish, or press Escape to cancel." }
     private func removeShortcut() {
         shortcutGeneration = UUID()
         tapThread?.stop(); tapThread = nil

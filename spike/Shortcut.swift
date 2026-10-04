@@ -18,6 +18,9 @@ struct ShortcutMachine {
     /// The press that latched or finished a toggle owns its release, which must do nothing.
     private var ignoreRelease = false
     let holdThreshold: TimeInterval
+    /// Press-to-toggle setting: every press from idle latches like a double press, so releases do
+    /// nothing and the next press finishes.
+    var pressToToggle = false
     // ponytail: fixed window; make it a setting if people double-press slower or faster.
     let doublePressWindow: TimeInterval
 
@@ -35,7 +38,7 @@ struct ShortcutMachine {
         switch state {
         case .processing: return nil
         case .idle:
-            state = .listening; mode = .holding; ignoreRelease = false
+            state = .listening; mode = pressToToggle ? .toggled : .holding; ignoreRelease = false
             return .start
         case .listening:
             ignoreRelease = true
@@ -150,6 +153,8 @@ final class ShortcutListener {
     /// Tap thread only: when the current press from idle went down.
     private var tapThreadPressAt: TimeInterval?
     private let tapHoldThreshold = ShortcutMachine().holdThreshold
+    /// Set before the tap starts and read on the tap thread; a toggled recording has no hold release to cut at.
+    var pressToToggle = false { didSet { machine.pressToToggle = pressToToggle } }
     /// The machine state as last published by the main thread; the tap thread reads only this.
     private let mirrorLock = NSLock()
     private var mirror: (state: ShortcutMachine.State, queued: Bool) = (.idle, false)
@@ -251,7 +256,7 @@ final class ShortcutListener {
               event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
         let time = Double(event.timestamp) / 1_000_000_000
         if type == .keyUp || (type == .flagsChanged && !binding.isDown(event)) {
-            if let pressed = tapThreadPressAt, time - pressed >= tapHoldThreshold { onHoldRelease?(time) }
+            if !pressToToggle, let pressed = tapThreadPressAt, time - pressed >= tapHoldThreshold { onHoldRelease?(time) }
             tapThreadPressAt = nil
             return
         }

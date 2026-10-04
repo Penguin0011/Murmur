@@ -124,7 +124,8 @@ struct SettingsView: View {
                         Text("Fn / Globe").tag("fn")
                         Text("Control–Option–Space").tag("ctrl-option-space")
                     }
-                    Text("Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
+                    Toggle("Press once to start, again to stop", isOn: $controller.pressToToggle)
+                    Text(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
                         .font(.callout).foregroundStyle(Color.primary.opacity(0.72))
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top, spacing: 16) {
@@ -581,6 +582,7 @@ private struct AutoApplyGeneral: ViewModifier {
         content
             .onChange(of: controller.shortcut) { controller.settingsChanged() }
             .onChange(of: controller.automaticInsertion) { controller.settingsChanged() }
+            .onChange(of: controller.pressToToggle) { controller.settingsChanged() }
             .onChange(of: controller.intelligentLeadingSpace) { controller.settingsChanged() }
             .onChange(of: controller.showMenuBar) { controller.settingsChanged() }
             .onChange(of: controller.retention) { controller.settingsChanged() }
