@@ -50,7 +50,9 @@ Later the same day (through `e0b39b4`): [Certain]
 
 Every Controller/UI/main change is **uncompiled on the Mac**. Workers type-checked Controller and UI against stub AppKit/SwiftUI modules on Linux, which catches names and bindings but not real SDK signatures. Expect the first `app/build.sh` run to need fixes. [Certain]
 
-Still not wired: automatic observation feeding learning (`TODO(observation)`; spike `Observation.swift` is not in the app), onboarding, VoiceOver announcements, launch at login, input-device selection. Decided since: pursue `gemini-3.5-transcribe` with stored requests; promotion rule approved. [Certain]
+Still not wired: onboarding, VoiceOver announcements, launch at login, input-device selection. Decided since: pursue `gemini-3.5-transcribe` with stored requests; promotion rule approved. [Certain]
+
+Learning from corrections is wired in (October 4, 2026): verified insertions into learning-eligible fields are watched with `spike/Observation.swift`, and the ledger receives the original-case span so the approved filter decides. Live probe into TextEdit: "Please call ACME about the invoice" was inserted and edited to "Akme" by AX in two sessions. That promoted a learned `Akme` ← `ACME` entry, and the third dictation inserted "Akme". Test data, settings and documents were restored afterwards. Typing after the dictated span or editing outside it still drops that session's evidence. [Certain]
 
 **Mac-side next steps**
 1. Pull this branch, run `app/build.sh` and every check in `app/README.md` (including `check_ui.sh`) on the macOS 26 host. Fix anything that fails under Swift 6.3.3 and `-swift-version 5`. [Certain]

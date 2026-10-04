@@ -917,7 +917,13 @@ final class PreStart: @unchecked Sendable {
         destinationScreen = screenForDestination(focused); recoveryEntryID = nil
         transcribe(ownedAudio) { [weak self] in
             print("app-check=complete state=\(self?.phase ?? "unknown")")
-            fflush(stdout); completion()
+            fflush(stdout)
+            // Stay up through the correction window so the probe can exercise learning.
+            @MainActor func waitForWatch() {
+                guard let self, self.watch != nil else { print("app-check=watch-ended"); fflush(stdout); completion(); return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { MainActor.assumeIsolated { waitForWatch() } }
+            }
+            waitForWatch()
         }
     }
     private func refreshRecoveryAudio() {
