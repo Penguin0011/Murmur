@@ -219,12 +219,12 @@ final class Chunker {
                 if !out.isEmpty {
                     let lastWord = String(out.split(separator: " ").last ?? "").lowercased().trimmingCharacters(in: .punctuationCharacters)
                     let firstWord = String(text.prefix { $0.isLetter || $0 == "'" || $0 == "’" })
-                    let midSentence = !sentenceBreak || danglingWords.contains(lastWord)
-                    if midSentence {
-                        if out.last == "." && !out.hasSuffix("..") { out.removeLast() }
-                        if lowercaseStarts.contains(firstWord.lowercased()), firstWord.first?.isUppercase == true {
-                            text = firstWord.lowercased() + text.dropFirst(firstWord.count)
-                        }
+                    let dangling = danglingWords.contains(lastWord)
+                    if !sentenceBreak || dangling {
+                        let lower = lowercaseStarts.contains(firstWord.lowercased()) && firstWord.first?.isUppercase == true
+                        // Without either sign the model's period may be real; leave it.
+                        if (lower || dangling) && out.last == "." && !out.hasSuffix("..") { out.removeLast() }
+                        if lower { text = firstWord.lowercased() + text.dropFirst(firstWord.count) }
                     } else if let last = out.last, !".?!".contains(last) { out += "." }
                     out += " "
                 }
@@ -235,9 +235,9 @@ final class Chunker {
         return out
     }
     /// Words a sentence cannot end on.
-    static let danglingWords: Set<String> = ["a", "an", "the", "and", "or", "but", "nor", "of", "to", "in", "on", "at", "for", "with", "from", "by", "into", "onto", "as", "than", "that", "which", "who", "whose", "my", "your", "our", "their", "his", "her", "its", "this", "these", "those", "is", "are", "was", "were", "be", "been", "am", "will", "would", "could", "should", "can", "may", "might", "must", "shall", "do", "does", "did", "have", "has", "had", "very", "so", "because", "if", "when", "while", "where", "like", "about", "some", "any", "every", "each", "no", "not"]
+    static let danglingWords: Set<String> = ["a", "an", "the", "and", "or", "but", "nor", "of", "my", "your", "our", "their", "its", "than", "because"]
     /// Common words that start a chunk only because the model capitalized it.
-    static let lowercaseStarts: Set<String> = danglingWords.union(["it", "it's", "we", "you", "they", "he", "she", "there", "here", "then", "more", "most", "less", "also", "just", "all", "one", "two", "what", "how", "why", "now", "even", "only", "still", "other", "another", "such", "make", "made", "get", "got", "go", "going", "see", "use", "used", "new", "same", "up", "out", "over", "after", "before", "between", "through", "during", "without", "within", "instead", "rather", "well", "really", "much", "many", "few", "things", "thing", "way", "people"])
+    static let lowercaseStarts: Set<String> = danglingWords.union(["to", "in", "on", "at", "for", "with", "from", "by", "into", "as", "that", "which", "who", "is", "are", "was", "were", "be", "been", "will", "would", "could", "should", "can", "may", "might", "must", "do", "does", "did", "have", "has", "had", "this", "these", "those", "his", "her", "very", "so", "if", "when", "while", "where", "like", "about", "some", "any", "every", "each", "no", "not", "it", "it's", "we", "you", "they", "he", "she", "there", "here", "then", "more", "most", "less", "also", "just", "all", "one", "two", "what", "how", "why", "now", "even", "only", "still", "other", "another", "such", "make", "made", "get", "got", "go", "going", "see", "use", "used", "new", "same", "up", "out", "over", "after", "before", "between", "through", "during", "without", "within", "instead", "rather", "well", "really", "much", "many", "few", "things", "thing", "way", "people"])
 }
 
 struct RetryAudio {
