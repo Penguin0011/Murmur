@@ -36,6 +36,12 @@ import SwiftUI
         DispatchQueue.main.async {
             controller.history = entries
             controller.recoveryEntryID = entries[0].id
+            if CommandLine.arguments.contains("--dictionary") {
+                controller.addDictionaryEntry(preferred: "Kubernetes", variants: "")
+                controller.addDictionaryEntry(preferred: "kubectl", variants: "cube cuddle, cube control")
+                controller.addDictionaryEntry(preferred: "Siobhan", variants: "shivon")
+                if let entry = controller.dictionaryEntries.last { controller.updateDictionaryEntry(entry, preferred: entry.preferred, variants: "shivon", enabled: false) }
+            }
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"

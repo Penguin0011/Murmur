@@ -945,6 +945,13 @@ final class PreStart: @unchecked Sendable {
         do { try processing.addEntry(preferred: preferred, variants: variants); dictionaryMessage = ""; refreshDictionary(); return true }
         catch { dictionaryMessage = (error as? DictionaryError)?.description ?? "Could not save the dictionary."; return false }
     }
+    @discardableResult
+    func updateDictionaryEntry(_ entry: DictionaryEntry, preferred: String, variants: String, enabled: Bool) -> Bool {
+        guard let processing else { dictionaryMessage = "The dictionary is unavailable."; return false }
+        defer { refreshDictionary() }
+        do { try processing.updateEntry(id: entry.id, preferred: preferred, variants: variants, enabled: enabled); dictionaryMessage = ""; return true }
+        catch { dictionaryMessage = (error as? DictionaryError)?.description ?? "Could not save the dictionary."; return false }
+    }
     func deleteDictionaryEntry(_ entry: DictionaryEntry) {
         do { try processing?.deleteEntry(id: entry.id); dictionaryMessage = "" } catch { dictionaryMessage = "Could not delete this dictionary entry." }
         refreshDictionary()

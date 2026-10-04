@@ -195,6 +195,17 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(joined.messages.first?.system.contains("Akme") == false, "unrelated term still not in prompt")
         try p.deleteEntry(id: clouddev.id)
 
+        // Editing: in place, disable stops apply, a variant owned by another enabled entry is refused.
+        let edited = try p.addEntry(preferred: "Postgress", variants: "post gres")
+        try p.updateEntry(id: edited.id, preferred: "Postgres", variants: "post gres, postgre sequel", enabled: true)
+        check(p.dictionary.apply(to: "use postgre sequel") == "use Postgres", "edited entry applies new variant")
+        check(p.dictionary.entries.first { $0.id == edited.id }?.source == .manual, "edit keeps source")
+        try p.updateEntry(id: edited.id, preferred: "Postgres", variants: "post gres", enabled: false)
+        check(p.dictionary.apply(to: "use post gres") == "use post gres", "disabled entry not applied")
+        do { try p.updateEntry(id: edited.id, preferred: "Postgres", variants: "acme", enabled: true); check(false, "conflicting variant accepted") }
+        catch { check(error is DictionaryError, "conflicting variant refused with a message") }
+        try p.deleteEntry(id: edited.id)
+
         // Provider failure: held, local cleaner never consulted.
         p.cloudCleaner = MockCloudCleaner(.failure(.timeout(.gemini)))
         await expect(p, "Um, call acme.", .heldForRecovery(raw: "Um, call acme.", reason: .cleanerFailed), "cloud failure held")
