@@ -120,6 +120,13 @@ final class ShortcutListener {
     /// Called on the main thread for a fresh Escape press while a session is processing; the app
     /// uses it to cancel a cloud request. Escape is not swallowed then.
     var onEscapeWhileProcessing: (() -> Void)?
+    /// Called on the main thread for a fresh ⌃⌘C press. The tap swallows the chord, so the front
+    /// app neither beeps nor races the clipboard write.
+    var onCopyChord: (() -> Void)?
+    /// ⌃⌘C exactly: Control and Command, no Option or Shift.
+    static func isCopyChord(keyCode: Int64, flags: CGEventFlags) -> Bool {
+        keyCode == 8 && flags.intersection([.maskControl, .maskCommand, .maskAlternate, .maskShift]) == [.maskControl, .maskCommand]
+    }
     /// Shortcut presses/releases that arrive while a session is processing. They are replayed into
     /// the machine when processing finishes, so a back-to-back dictation is not dropped.
     /// `onQueuedPress` starts capture at the first one (false drops the press, as before wiring);
@@ -211,6 +218,7 @@ final class ShortcutListener {
     /// flips state to idle; the next fresh Escape press resets it.
     func consumes(_ type: CGEventType, _ event: CGEvent) -> Bool {
         if binding.consumes(type, event) { return true }
+        if type == .keyDown || type == .keyUp, Self.isCopyChord(keyCode: event.getIntegerValueField(.keyboardEventKeycode), flags: event.flags) { return true }
         guard type == .keyDown || type == .keyUp,
               event.getIntegerValueField(.keyboardEventKeycode) == 53 else { return false }
         if type == .keyDown && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
@@ -269,6 +277,9 @@ final class ShortcutListener {
             return
         }
         let key = event.getIntegerValueField(.keyboardEventKeycode)
+        if type == .keyDown, Self.isCopyChord(keyCode: key, flags: event.flags), event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+            onCopyChord?(); return
+        }
         if type == .keyDown && key == 53 {
             if !queued.isEmpty { cancelQueued(); return } // Cancels only the queued recording.
             if machine.state == .processing && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { onEscapeWhileProcessing?() }

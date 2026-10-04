@@ -105,6 +105,7 @@ import AppKit
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
         try warmRunnerChecks()
+        try chunkChecks()
     }
 
     /// A fake helper speaks the --serve protocol: ready line, one answer per path, "die" exits.
@@ -132,5 +133,57 @@ import AppKit
         precondition(ask("d.wav", key: "k2") == "d.wav" && launches() == 3, "a new model fingerprint restarts the helper")
         runner.stopNow()
         print("Warm runner checks passed (one launch, fallback on death, restart, model change).")
+    }
+
+    /// Cut picker, join rule, ⌃⌘C match and ChunkJob, without audio hardware or the model.
+    static func chunkChecks() throws {
+        // 100 buffers of 0.1 s at rate 10 (1 frame each): loud except a quiet stretch at 13–14 s.
+        let rate = 10.0
+        var buffers = Array(repeating: (1, 1.0), count: 200)
+        for i in 130..<133 { buffers[i] = (1, 0.0) }
+        for i in 50..<53 { buffers[i] = (1, 0.0) }   // 5 s: quieter but before target - slack
+        let cut = Chunker.quietestCut(buffers, rate: rate)
+        precondition((130...133).contains(cut), "cuts in the quiet stretch inside 10–20 s, not the earlier one (got \(cut))")
+        precondition(Chunker.quietestCut(Array(repeating: (1, 1.0), count: 200), rate: rate) >= 100, "no pause still cuts inside the window")
+        precondition(Chunker.join(["Hello there", "General Kenobi."]) == "Hello there. General Kenobi.")
+        precondition(Chunker.join(["we were going", "to the store."]) == "we were going to the store.")
+        precondition(Chunker.join(["Done.", " ", "Next one?", "Yes"]) == "Done. Next one? Yes")
+        precondition(ShortcutListener.isCopyChord(keyCode: 8, flags: [.maskControl, .maskCommand]))
+        precondition(ShortcutListener.isCopyChord(keyCode: 8, flags: [.maskControl, .maskCommand, .maskNumericPad]))
+        precondition(!ShortcutListener.isCopyChord(keyCode: 8, flags: [.maskCommand]))
+        precondition(!ShortcutListener.isCopyChord(keyCode: 8, flags: [.maskControl, .maskCommand, .maskShift]))
+        precondition(!ShortcutListener.isCopyChord(keyCode: 9, flags: [.maskControl, .maskCommand]))
+
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("chunks-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func file(_ name: String) throws -> URL { let url = dir.appendingPathComponent(name); try Data().write(to: url); return url }
+        func run(_ events: [Chunker.Event], answers: [String: String?]) -> String?? {
+            let job = ChunkJob { url, done in
+                let text = answers[url.lastPathComponent] ?? nil
+                DispatchQueue.global().async { done(text.map { Data("{\"text\":\"\($0)\"}".utf8) }) }
+            }
+            events.forEach(job.receive)
+            guard job.isEnded else { return .none }
+            let got = DispatchSemaphore(value: 0); var answer: String?
+            job.result { answer = $0; got.signal() }
+            got.wait(); return .some(answer)
+        }
+        let a = try file("a.wav"), b = try file("b.wav")
+        precondition(run([.chunk(a, last: false), .chunk(b, last: true)], answers: ["a.wav": "One two", "b.wav": "three."]) == .some("One two three."), "chunks join in order")
+        precondition(!FileManager.default.fileExists(atPath: a.path) && !FileManager.default.fileExists(atPath: b.path), "chunk files are deleted once read")
+        let c = try file("c.wav"), d = try file("d.wav")
+        precondition(run([.chunk(c, last: false), .chunk(d, last: true)], answers: ["c.wav": "fine"]) == .some(nil), "a failed chunk answers nil for the WAV fallback")
+        let e = try file("e.wav")
+        precondition(run([.chunk(e, last: false), .end], answers: ["e.wav": "Only"]) == .some("Only"), "an empty last chunk still ends")
+        precondition(run([.failed], answers: [:]) == .some(nil), "chunking failure answers nil")
+        let f = try file("f.wav")
+        precondition(run([.chunk(f, last: false)], answers: ["f.wav": "x"]) == .none, "no end yet: not ready, caller uses the WAV")
+        let discarded = ChunkJob { _, done in done(nil) }
+        discarded.discard()
+        let g = try file("g.wav")
+        discarded.receive(.chunk(g, last: true))
+        precondition(!FileManager.default.fileExists(atPath: g.path), "a discarded job deletes later chunks unread")
+        print("Chunk checks passed (quiet cut, join rule, copy chord, ordered join, failure fallback, cleanup).")
     }
 }

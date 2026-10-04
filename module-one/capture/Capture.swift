@@ -22,6 +22,8 @@ final class Capture {
     var firstBuffer: TimeInterval?
     var started: TimeInterval = 0
     var stopped = false
+    /// Queue-owned; nil when chunking is off.
+    private var chunker: Chunker?
     /// Uptime after which buffers are dropped (queue-owned). Set from the shortcut thread at a hold's
     /// release, so a late main thread cannot extend the recording past release plus tail.
     private var cutoff = TimeInterval.infinity
@@ -37,6 +39,12 @@ final class Capture {
         }
     }
 
+    /// Sends this recording's chunks to `handler` on the capture queue, replaying earlier ones.
+    /// Returns false when chunking is off.
+    func attachChunks(_ handler: @escaping (Chunker.Event) -> Void) -> Bool {
+        queue.sync { guard let chunker else { return false }; chunker.attach(handler); return true }
+    }
+
     func start(url: URL) throws {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
@@ -45,6 +53,7 @@ final class Capture {
         }
         file = try AVAudioFile(forWriting: url, settings: format.settings)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        if Chunker.directory != nil { chunker = Chunker(format: format) }
         // Install before start: capture does not wait for tap/hold classification.
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [self] buffer, _ in
             // AVAudioEngine owns the callback buffer, so copy before returning.
@@ -71,6 +80,7 @@ final class Capture {
                 }
                 do { try file?.write(from: copy); frames += AVAudioFramePosition(copy.frameLength) }
                 catch { writeError = error }
+                chunker?.append(copy)
             }
         }
         started = ProcessInfo.processInfo.systemUptime
@@ -87,11 +97,111 @@ final class Capture {
         Self.currentLock.withLock { if Self._current === self { Self._current = nil } }
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
-        queue.sync { file = nil }
+        // The last chunk is cut here; chunks nobody attached to (a cloud route) are deleted.
+        queue.sync { file = nil; chunker?.finish(); chunker?.discardUnclaimed() }
         let now = ProcessInfo.processInfo.systemUptime
         let rate = engine.inputNode.outputFormat(forBus: 0).sampleRate
         let recorded = rate > 0 ? Double(frames) / rate : 0
         timingLog.notice("capture-stop at=\(now, format: .fixed(precision: 3)) wall=\(now - self.started, format: .fixed(precision: 3)) recorded=\(recorded, format: .fixed(precision: 3))")
+    }
+}
+
+/// Splits a recording into chunk files at pauses while it is still being recorded, so local
+/// transcription can run during the recording and only the last chunk waits for release. Owned by
+/// its Capture's queue. The full WAV is still written and stays the fallback.
+/// Measured (STREAMING_TRANSCRIPTION.md): cuts at the quietest 0.2 s near 15 s matched the
+/// whole-file words; blind cuts did not.
+final class Chunker {
+    /// Private per-user folder for chunk files; nil turns chunking off.
+    nonisolated(unsafe) static var directory: URL?
+    static let target: TimeInterval = 15, slack: TimeInterval = 5, window: TimeInterval = 0.2
+    private let format: AVAudioFormat
+    private var buffers: [(buffer: AVAudioPCMBuffer, energy: Double)] = []
+    private var frames = 0
+    enum Event { case chunk(URL, last: Bool), end, failed }
+    private var pending: [Event] = []
+    private var handler: ((Event) -> Void)?
+    private var failed = false, finished = false
+
+    init(format: AVAudioFormat) { self.format = format }
+
+    /// Receives every event in order, replaying earlier ones. `.end` follows an empty last chunk;
+    /// after `.failed` nothing more is sent and the caller uses the full WAV.
+    func attach(_ handler: @escaping (Event) -> Void) {
+        self.handler = handler
+        for event in pending { handler(event) }
+        pending = []
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        guard !failed, !finished, let samples = buffer.floatChannelData, buffer.frameLength > 0 else { return }
+        var energy = 0.0
+        for i in 0..<Int(buffer.frameLength) { energy += Double(samples[0][i]) * Double(samples[0][i]) }
+        buffers.append((buffer, energy)); frames += Int(buffer.frameLength)
+        guard Double(frames) >= (Self.target + Self.slack) * format.sampleRate else { return }
+        let cut = Self.quietestCut(buffers.map { (Int($0.buffer.frameLength), $0.energy) }, rate: format.sampleRate)
+        emit(Array(buffers[..<cut].map(\.buffer)), final: false)
+        buffers.removeFirst(cut); frames = buffers.reduce(0) { $0 + Int($1.buffer.frameLength) }
+    }
+
+    func finish() {
+        guard !finished else { return }
+        finished = true
+        if failed { return }
+        emit(buffers.map(\.buffer), final: true); buffers = []
+    }
+
+    /// Unclaimed chunk files (a cloud-route or canceled recording) are deleted.
+    func discardUnclaimed() {
+        for case .chunk(let url, _) in pending { try? FileManager.default.removeItem(at: url) }
+        pending = []
+    }
+
+    /// Index of the buffer that starts the next chunk: the middle of the quietest `window` whose
+    /// middle lies within target ± slack seconds. Buffers are (frames, energy).
+    static func quietestCut(_ buffers: [(Int, Double)], rate: Double) -> Int {
+        var starts: [Int] = [0]
+        for b in buffers { starts.append(starts.last! + b.0) }
+        let lo = (target - slack) * rate, hi = (target + slack) * rate, span = window * rate
+        var best: (energy: Double, cut: Int)?
+        var end = 0, sum = 0.0
+        for begin in 0..<buffers.count {
+            while end < buffers.count && Double(starts[end] - starts[begin]) < span { sum += buffers[end].1; end += 1 }
+            guard Double(starts[end] - starts[begin]) >= span else { break }
+            let middle = (begin + end) / 2
+            if Double(starts[middle]) >= lo, Double(starts[middle]) <= hi, best == nil || sum < best!.energy { best = (sum, middle) }
+            sum -= buffers[begin].1
+        }
+        return max(1, best?.cut ?? buffers.count)
+    }
+
+    private func emit(_ chunk: [AVAudioPCMBuffer], final: Bool) {
+        guard !chunk.isEmpty else { send(.end); return }
+        guard let directory = Self.directory else { failed = true; send(.failed); return }
+        let url = directory.appendingPathComponent("\(UUID().uuidString).wav")
+        do {
+            let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+            guard fd >= 0 else { throw CaptureError("Cannot create chunk file") }
+            close(fd)
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            for buffer in chunk { try file.write(from: buffer) }
+            send(.chunk(url, last: final))
+        } catch { try? FileManager.default.removeItem(at: url); failed = true; send(.failed) }
+    }
+
+    private func send(_ event: Event) { if let handler { handler(event) } else { pending.append(event) } }
+
+    /// Joins chunk transcripts. A chunk that starts a capitalized word after one that ended
+    /// without terminal punctuation was cut at a sentence pause, so it gets a period.
+    static func join(_ texts: [String]) -> String {
+        var out = ""
+        for raw in texts {
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            if let last = out.last, !".?!".contains(last), text.first?.isUppercase == true { out += "." }
+            out += out.isEmpty ? text : " " + text
+        }
+        return out
     }
 }
 

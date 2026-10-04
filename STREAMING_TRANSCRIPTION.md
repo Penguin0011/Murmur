@@ -54,3 +54,64 @@ FluidAudio (pinned revision in `module-one/models/Runner/Package.swift`) ships `
 
   The streamed audio must follow the same trimming.
 - **Cloud transcription:** Gemini routes stay batch. Their docs offer a separate Live API, which would need its own disclosure review.
+
+## Follow-up: chunked offline transcription (October 3, 2026)
+
+A simpler alternative to the streaming encoder: while recording, send finished stretches of audio to the existing warm helper, cut at pauses; on release, transcribe only the last stretch and join. It uses the same offline model, so no new bundle, pins or downloader changes. [Certain]
+
+Measured with a 135 s `say` monologue (414 words, 16 kHz), warm `ModelBench --serve`, joining chunk texts with spaces. The cut is the quietest 0.2 s window within ±5 s of the target. [Certain]
+
+| Split | Chunks | Release wait (last chunk) | WER vs script | Differs from whole-file text |
+|---|---|---|---|---|
+| Whole file (today) | 1 | 0.97 s | 2.9% | — |
+| ~15 s, at pauses | 10 | 0.08 s | 2.9% | 0 words |
+| ~25 s, at pauses | 5 | 0.25 s | 2.9% | 0 words |
+| ~40 s, at pauses | 4 | 0.08 s | 3.4% | 0.5% |
+| ~15 s, blind cut | 9 | 0.14 s | 4.1% | 1.2% |
+| ~25 s, blind cut | 6 | 0.07 s | 3.6% | 0.7% |
+
+- **Cutting at pauses matters:** blind cuts split words and add errors; pause cuts at 15–25 s matched the whole-file transcript word for word. [Certain]
+- **Release wait** becomes the last chunk's time (under about 0.3 s) instead of growing with length. [Certain]
+- **Caveat:** `say` audio has clean, regular pauses. Real speech with background noise and fewer pauses needs a check on real dictations before shipping; keep whole-file offline transcription as the fallback. [Likely]
+- **Script:** reproduce with a scratch Python script (stdlib `wave` + the `--serve` protocol); not committed. [Certain]
+
+## Follow-up: cloud cleanup time grows with length (October 3, 2026)
+
+Measured with the app's own request builder (`CleanupPrompt.build` + `GeminiCleanupProvider.makeRequest`, all cleanup options on), Gemini API, two runs each. Transcripts were built from `cleanup-corpus.json` inputs at about 150 words per minute of speech. [Certain]
+
+| Speech length | Words in | Flash-Lite | Gemma 4 (26B A4B) |
+|---|---|---|---|
+| 15 s | 37 | 0.74 s | 1.4 s |
+| 1 min | 150 | 0.97 s | 4.4–7.3 s |
+| 2 min | 300 | 1.3 s | 7.9–8.1 s |
+| 3 min | 450 | 1.7–1.8 s | 11.3 s |
+| 5 min | 750 | 2.2 s | 17.0 s |
+
+- **Flash-Lite** cleanup grows slowly and stays a bit below local transcription time (5 min: 2.2 s cleanup vs 3.3 s transcription). [Certain]
+- **Gemma 4** produces about 35 words per second, so long dictations wait 8–17 s once Flash-Lite's daily quota runs out and Murmur fails over. For long messages, this is by far the biggest wait in the pipeline. [Certain]
+- **Possible fix:** clean long transcripts in sections of about 100–150 words, sent in parallel, with the guard checking each section, so wall time is close to one section (about 1.5–4 s on Gemma). Risks: a spoken correction or list that spans a section boundary, and per-minute rate limits. Not built. [Likely]
+- **Not checked:** whether Gemma still spends tokens on thinking despite `thinkingLevel: minimal`. `usageMetadata.thoughtsTokenCount` in one response would answer it. [Unverified]
+
+## Built: chunked local transcription (October 3, 2026)
+
+- **What:** `Chunker` (`module-one/capture/Capture.swift`) cuts the recording at the quietest 0.2 s within 10–20 s, on the capture queue after the release-cut guard, and writes each chunk to `Application Support/Dictation/chunks` (0700, wiped at launch). `ChunkJob` (`app/Controller.swift`) sends each chunk to the warm helper while recording continues. On release, only the last chunk is left. The full WAV is still written; if any chunk fails, it is transcribed exactly as before. [Certain]
+- **Scope:** local transcription only; cloud transcription and the `--test-audio` probe stay whole-file. Recordings are capped at 120 s, so the saving is at most about 1 s per dictation. [Certain]
+- **Measured:** feeding the 135 s synthetic WAV (48 kHz float, 1024-frame buffers) through `Chunker` and `ChunkJob` with the real helper gave 9 chunks, 0.17 s after release (whole file: about 1.0 s), identical words, and no chunk files left. Punctuation differed at 2 of 8 joins (a comma or period). [Certain]
+- **Join rule:** a chunk that starts with a capital after one without `.?!` gets a period. [Certain] The model capitalizes every chunk's first word ("and" came back "And"), so the rule carries little signal, and a mid-sentence cut before "I" or a name gets a stray period. Cloud cleanup should smooth most of this; untested. [Likely]
+- **Not yet verified:** live microphone dictation with real speech and noise. [Unverified]
+
+## Built: ⌃⌘C copies the latest raw transcript
+
+Pressing ⌃⌘C anywhere copies the raw transcript of the latest dictation since launch (held cleanup, held transcript, not inserted, or inserted). The held-cleanup message says so. When transcription itself fails there is no text, only retry audio, so there is nothing to copy. The event tap swallows ⌃⌘C, so other apps never see it. [Certain]
+
+## Cleanup models at the 2-minute cap (October 3, 2026, minimal thinking, 4 rounds over about 5 minutes)
+
+| Model | Typical | Outliers |
+|---|---|---|
+| gemini-3.5-flash-lite | 1.1–1.3 s | 4.2–5.5 s |
+| gemini-3.5-flash | 1.5–1.8 s | one 503 after 38 s, one 429 |
+| gemini-3.6-flash | 1.7–2.3 s | 6.6 s, 13.8 s, one 503 after 21 s |
+| gemma-4-26b-a4b-it | 7.7–8.1 s | — |
+
+- **Gemma:** reports 0 thinking tokens with `thinkingLevel: minimal`; it is simply slow, at about 44 output tokens per second. [Certain]
+- **Middle tier:** Flash 3.5 or 3.6 between Flash-Lite and Gemma would usually take about 2 s instead of 8 s. Failover today triggers only on quota and rate limits, not on 503, so an overloaded middle model would hold a cleanup rather than fail over. Free-tier daily limits per model are shown only in AI Studio. Not built. [Likely]
