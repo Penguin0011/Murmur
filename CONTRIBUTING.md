@@ -15,7 +15,7 @@ app/build.sh
 open runtime/Murmur.app
 ```
 
-`build.sh` builds the pinned `ModelBench` helper on first run, compiles the app with `-swift-version 5`, and signs it with the `clouddev Development` identity if present, otherwise ad hoc. Set `MURMUR_SIGN_IDENTITY` to use another identity; a stable identity keeps macOS permissions across rebuilds. [Certain]
+`build.sh` builds the pinned `ModelBench` helper (incrementally, every run), compiles the app with `-swift-version 5`, and signs it with the `clouddev Development` identity if present, otherwise ad hoc. Set `MURMUR_SIGN_IDENTITY` to use another identity; a stable identity keeps macOS permissions across rebuilds. [Certain]
 
 `runtime/` and `spike/.build/` are ignored by Git. Do not commit audio, transcripts, model files or API keys. [Certain]
 
@@ -37,6 +37,7 @@ Foundation-only modules (macOS or Linux):
 swiftc app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
 swiftc app/Cleanup.swift app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check && /tmp/murmur-providers-check
 swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check && /tmp/murmur-updates-check
+swiftc module-one/models/Runner/Sources/ModelBench/BoostFilter.swift app/check_boost_filter.swift -o /tmp/murmur-boost-check && /tmp/murmur-boost-check
 python3 app/tools/build_cleanup_corpus.py
 swiftc app/Cleanup.swift app/check_cleanup.swift -o /tmp/cc && /tmp/cc app/cleanup-corpus.json
 ```
