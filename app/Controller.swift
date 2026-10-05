@@ -813,10 +813,13 @@ final class PreStart: @unchecked Sendable {
     }
     func setPhase(_ phase: String, _ message: String) {
         self.phase = phase; self.message = message
-        // "No speech" needs no action, so its popup leaves on its own after 2 s unless replaced.
+        // Every finished status leaves on its own unless replaced: text stays in History and retry audio
+        // stays on disk. "No speech" needs no action (2 s); errors get longer to read (8 s); the rest 5 s.
         let shown = UUID(); statusShown = shown
-        if phase == "Error" && message.hasPrefix("No speech was detected") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        let dismissAfter: TimeInterval? = phase == "Listening" || phase == "Processing" || !hasStatusToShow ? nil :
+            phase != "Error" ? 5 : message.hasPrefix("No speech was detected") ? 2 : 8
+        if let dismissAfter {
+            DispatchQueue.main.asyncAfter(deadline: .now() + dismissAfter) { [weak self] in
                 guard let self, self.statusShown == shown else { return }
                 self.dismissStatus()
             }

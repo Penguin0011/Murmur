@@ -30,6 +30,7 @@ swiftc -O -swift-version 5 -target arm64-apple-macos26.0 \
   -o "$app_path/Contents/MacOS/Murmur"
 cp "$project_root/app/Info.plist" "$app_path/Contents/Info.plist"
 cp "$runner_path" "$app_path/Contents/MacOS/ModelBench"
+cp "$project_root/app/AppIcon.icns" "$app_path/Contents/Resources/AppIcon.icns"
 cp "$project_root/module-one/models/artifact-pins.json" "$app_path/Contents/Resources/artifact-pins.json"
 if [[ -d "$project_root/module-one/models/Runner/.build/release/FluidAudio_FluidAudio.bundle" ]]; then
   rm -rf "$app_path/Contents/Resources/FluidAudio_FluidAudio.bundle"
