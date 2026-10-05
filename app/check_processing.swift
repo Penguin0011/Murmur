@@ -61,6 +61,11 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         defer { try? FileManager.default.removeItem(at: root); defaults.removePersistentDomain(forName: suite) }
 
         try settingsChecks(defaults)
+        let probe = try ProcessingCoordinator(directory: root.appendingPathComponent("probe"), defaults: defaults)
+        let persisted = ProcessingSettings.load(from: defaults)
+        var transient = persisted; transient.route = .cloud
+        try probe.update(transient, persist: false)
+        check(probe.settings.route == .cloud && ProcessingSettings.load(from: defaults) == persisted, "transient probe settings do not change preferences")
         try localChecks(ProcessingCoordinator(directory: root.appendingPathComponent("local"), defaults: defaults))
         try await cloudChecks(ProcessingCoordinator(directory: root.appendingPathComponent("cloud"), defaults: defaults))
         try punctuationChecks()

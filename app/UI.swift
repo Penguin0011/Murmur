@@ -583,6 +583,9 @@ struct SettingsView: View {
                         }
                         .buttonStyle(InkButtonStyle(kind: .accent)).disabled(customAPIKeyDraft.isEmpty)
                     }
+                    if controller.customAPIKeyNeedsConfirmation {
+                        help("Save the API key again to confirm this server address. The existing key stays in Keychain and will not be sent until confirmed.", color: Palette.accentInk)
+                    }
                     if let message = controller.keyMessages[.customAPI], !message.isEmpty { help(message) }
                     help("The endpoint must accept OpenAI-compatible POST /v1/chat/completions requests. Enter the provider's base URL and exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
                 }

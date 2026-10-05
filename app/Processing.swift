@@ -102,10 +102,10 @@ final class ProcessingCoordinator {
     }
 
     /// Persists settings and keeps the ledger's learning switch in step with them.
-    func update(_ next: ProcessingSettings) throws {
+    func update(_ next: ProcessingSettings, persist: Bool = true) throws {
         if ledger.learningEnabled != next.learningEnabled { try ledger.setLearningEnabled(next.learningEnabled) }
         settings = next
-        next.save(to: defaults)
+        if persist { next.save(to: defaults) }
     }
 
     // MARK: Processing

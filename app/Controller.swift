@@ -1072,6 +1072,11 @@ final class PreStart: @unchecked Sendable {
             fputs("app-check=refused audio-copy-failed\n", stderr); completion(); return
         }
         // The probe is local only: it never sends audio or text to a provider.
+        if let processing {
+            var local = processing.settings; local.route = .local
+            do { try processing.update(local, persist: false) }
+            catch { fputs("app-check=refused local-settings-failed\n", stderr); completion(); return }
+        }
         sessionTranscriber = nil; processing?.cloudCleaner = nil
         destination = focused; insertThisSession = true; leadingSpaceThisSession = intelligentLeadingSpace
         activeModelDirectory = modelDirectory; listeningStarted = Date(); generation = UUID()
@@ -1496,6 +1501,10 @@ final class PreStart: @unchecked Sendable {
 
     /// Publishes which providers have a key. The key itself never leaves the Keychain store.
     func refreshKeys() { savedKeys = Set(KeyText.providers.filter { credentials.exists($0) }) }
+    var customAPIKeyNeedsConfirmation: Bool {
+        guard savedKeys.contains(.customAPI), let destination = try? CustomAPIKeyBinding.endpoint(customAPIBaseURL) else { return false }
+        return UserDefaults.standard.string(forKey: CustomAPIKeyBinding.preference) != destination
+    }
     @discardableResult
     func saveKey(_ provider: ProviderID, _ raw: String) -> Bool {
         guard let key = APIKey(raw) else { keyMessages[provider] = KeyText.invalid; return false }

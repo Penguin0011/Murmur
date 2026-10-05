@@ -155,6 +155,13 @@ import ApplicationServices
         precondition(controller.saveKey(.gemini, "test-key-123") && controller.savedKeys.contains(.gemini) && controller.keyMessages[.gemini] == KeyText.saved)
         controller.removeKey(.gemini)
         precondition(!controller.savedKeys.contains(.gemini))
+        controller.customAPIBaseURL = "https://first.example/v1"
+        precondition(controller.saveKey(.customAPI, "synthetic-api-key") && !controller.customAPIKeyNeedsConfirmation)
+        controller.customAPIBaseURL = "https://second.example/v1"
+        precondition(controller.customAPIKeyNeedsConfirmation, "changed destination shows a key confirmation warning")
+        controller.validateKey(.customAPI)
+        precondition(controller.keyMessages[.customAPI] == CredentialError.destinationMismatch.description, "validation refuses an unconfirmed destination without HTTP")
+        controller.removeKey(.customAPI)
         // The learning lexicon uses the real English spell checker.
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
         controller.uninserted = "held synthetic text"; controller.setupTestTranscript = "setup synthetic text"
