@@ -98,6 +98,8 @@ Learning from corrections is wired in (October 4, 2026): verified insertions int
 
 Installed `main` at `42dfd64` (learning merged) to `~/Applications/Murmur.app`, executable SHA-256 `287671065e70d617781234aee8b2fd2fb21ce2d6ca26f2689d424efae9950339`; the previous build is at `~/Applications/Murmur-backups/20261004-205537/Murmur.app`. Before install, all documented silent checks passed on that commit, and a live TextEdit probe promoted `Akme` ← `ACME` after two keystroke fixes and applied it on the third dictation. [Certain]
 
+Learning bug found by the user (October 4, 2026): real dictations never learned, because the whole dictated span reached `CorrectionFilter`, which rejects any punctuation (`unsupportedCharacters`), so "Hi, my name is Akash." → "…Aakash." was dropped. Earlier live probes passed only because their synthetic sentence had no punctuation. `ProcessingCoordinator.observeSpan` now passes only the changed words (`changedWords`). Live TextEdit probe with "Hi, my name is Akash": two keystroke fixes promoted `Aakash` ← `Akash`, and the third dictation inserted "Aakash". [Certain]
+
 Learning in non-standard fields (October 4, 2026, user request): live probe runs, each dictating "Please call ACME about the invoice" and then fixing the word with System Events keystrokes (Option-Left ×4, Shift-Option-Right, type "Akme"), then activating Finder. Every case settled one `ACME` → `Akme` correction in the ledger. Settings, dictionary and test History were restored afterwards. [Certain]
 
 | App and field | Delivery | Observation route |
