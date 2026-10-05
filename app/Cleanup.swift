@@ -75,6 +75,19 @@ struct CleanupToken: Equatable {
 }
 
 enum CleanupText {
+    /// 1 - Levenshtein distance / longer length, over Characters.
+    static func similarity(_ a: String, _ b: String) -> Double {
+        let x = Array(a), y = Array(b)
+        guard !x.isEmpty, !y.isEmpty else { return x.isEmpty && y.isEmpty ? 1 : 0 }
+        var previous = Array(0...y.count)
+        for i in 1...x.count {
+            var current = [i] + Array(repeating: 0, count: y.count)
+            for j in 1...y.count { current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (x[i - 1] == y[j - 1] ? 0 : 1)) }
+            previous = current
+        }
+        return 1 - Double(previous[y.count]) / Double(max(x.count, y.count))
+    }
+
     static func isWordChar(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "'" || c == "\u{2019}" }
 
     static func tokenize(_ s: String) -> [CleanupToken] {
@@ -397,10 +410,10 @@ enum CleanupGuard {
         return (ma, mb)
     }
 
-    /// `soundsLike(heard, term)` (lowercased letters only) lets a term join 2–3 raw words that
-    /// sound like it; the default accepts only an exact spelling.
+    /// `soundsLike(heard, term)` (lowercased letters only) lets a term replace 1–3 raw words that
+    /// sound like it, beyond the built-in exact or half-similar spelling.
     static func check(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String] = [],
-                      soundsLike: (String, String) -> Bool = (==)) -> CleanupGuardResult {
+                      soundsLike: (String, String) -> Bool = { _, _ in false }) -> CleanupGuardResult {
         // Judge corrections against the comma form the cleaner rewrote ("Tuesday. No wait." -> "Tuesday, no wait,").
         let raw = options.corrections ? RuleCleaner.mergeSplitCues(raw) : raw
         let rawWords = words(raw)
@@ -557,22 +570,30 @@ enum CleanupGuard {
             if !outWords.contains(where: { termWords.contains($0.lower) }) { return .fail(.nameDropped) }
         }
 
-        // Every deleted word must be explained by an enabled option.
-        // A dictionary respelling replaces at most one raw word per supplied term word present, or
-        // joins a run of 2–3 adjacent raw words that spell it ("cloud dev" -> "clouddev"), or sound
-        // like it per `soundsLike` ("shelf made" -> "Shelfmate").
+        // Every deleted word must be explained by an enabled option, or by a dictionary respelling.
+        // Each unaligned term word must replace its own run of 1–3 adjacent raw words that spell it
+        // ("cloud dev" -> "clouddev"), are spelled at least half like it ("acme" -> "Akme"), or sound
+        // like it per `soundsLike` ("shelf made" -> "Shelfmate"). A term with no such run is an
+        // inserted word, so a term never pays for deleting an unrelated word. The run must sit in the
+        // term's own alignment gap: matches keep order, so the k-th matched raw word pairs with the
+        // k-th matched output word.
         func spelled(_ text: String) -> String { String(text.filter { $0.isLetter || $0.isNumber }) }
-        var termsUsed = 0
+        let pairedRaw = matchedRaw.sorted(), pairedOut = matchedOut.sorted()
         for (j, w) in outWords.enumerated() where !matchedOut.contains(j) && termWords.contains(w.lower) {
             let target = spelled(w.lower)
-            var joined: Range<Int>? = nil
-            search: for start in rawWords.indices {
-                for length in 2...3 where start + length <= rawWords.count {
+            let before = pairedOut.filter { $0 < j }.count
+            let gap = (before == 0 ? 0 : pairedRaw[before - 1] + 1)..<(before < pairedRaw.count ? pairedRaw[before] : rawWords.count)
+            var replaced: Range<Int>? = nil
+            search: for length in stride(from: 3, through: 1, by: -1) {
+                for start in gap where start + length <= gap.upperBound {
                     let run = start..<(start + length)
-                    if run.allSatisfy({ !consumedRaw.contains($0) }) && soundsLike(spelled(run.map { a[$0] }.joined()), target) { joined = run; break search }
+                    guard run.allSatisfy({ !consumedRaw.contains($0) }) else { continue }
+                    let heard = spelled(run.map { a[$0] }.joined())
+                    if heard == target || CleanupText.similarity(heard, target) >= 0.5 || soundsLike(heard, target) { replaced = run; break search }
                 }
             }
-            if let joined { consumedRaw.formUnion(joined) } else { termsUsed += 1 }
+            guard let replaced else { return .fail(.insertedWords) }
+            consumedRaw.formUnion(replaced)
         }
         var unexplained = 0
         for i in rawWords.indices where !consumedRaw.contains(i) {
@@ -581,7 +602,7 @@ enum CleanupGuard {
             if isMarkerWord(i) { continue }
             unexplained += 1
         }
-        if unexplained > termsUsed { return .fail(.unexplainedDeletion) }
+        if unexplained > 0 { return .fail(.unexplainedDeletion) }
         return .pass
     }
 }
@@ -708,7 +729,7 @@ enum CleanupPipeline {
     }
 
     static func judge(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String],
-                      soundsLike: (String, String) -> Bool = (==)) -> CleanupOutcome {
+                      soundsLike: (String, String) -> Bool = { _, _ in false }) -> CleanupOutcome {
         let output = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
         if output == raw.trimmingCharacters(in: .whitespacesAndNewlines) { return .cleaned(output) }
         // Only filler words ("Um."): nothing to insert, which is not a cleanup failure.

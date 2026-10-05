@@ -169,7 +169,7 @@ final class ProcessingCoordinator {
         var parts: [String] = []
         for (section, text) in zip(sections, cleaned) {
             switch CleanupPipeline.judge(raw: section, cleaned: text, options: options, allowedTerms: terms,
-                                               soundsLike: { $0 == $1 || DictionaryStore.soundsLike($0, $1) }) {
+                                               soundsLike: DictionaryStore.soundsLike) {
             case .cleaned(let part), .unchanged(let part): if !part.isEmpty { parts.append(part) }
             case .heldForRecovery(_, let reason): return .heldForRecovery(raw: raw, reason: reason)
             }
