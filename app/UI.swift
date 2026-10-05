@@ -128,16 +128,6 @@ struct SettingsView: View {
     @FocusState private var apiFieldFocused: Bool
 
     private static let sections = ["General", "Transcription", "Cleanup", "Dictionary", "History & Privacy", "API Keys", "Updates"]
-    private static let ledes = [
-        "The shortcut, how text is inserted, and what Murmur is allowed to do.",
-        "Where your voice is turned into text. On this Mac by default.",
-        "Tidy the transcript before it is typed. Each option works on its own.",
-        "Words Murmur should spell your way, in every mode.",
-        "What Murmur saves, and for how long. Nothing leaves this Mac.",
-        "Needed only for cloud routes. Stored in your Keychain.",
-        "Murmur checks for new versions. You install them yourself."
-    ]
-
     var body: some View {
         VStack(spacing: 0) {
             if screen == .setup { setup } else {
@@ -346,7 +336,6 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(Self.sections[section]).font(.system(size: 36, weight: .bold)).tracking(-1.4)
-                    Text(Self.ledes[section]).font(.system(size: 16)).foregroundStyle(Palette.ink70).padding(.top, 10).padding(.bottom, 8)
                     sectionBody.disabled(controller.isBusy)
                 }
                 .frame(maxWidth: 640, alignment: .leading)
@@ -373,11 +362,11 @@ struct SettingsView: View {
             eyebrow("Shortcut").padding(.top, 20)
             VStack(alignment: .leading, spacing: 12) {
                 segmented([("right-option", "Right Option"), ("fn", "Fn / Globe"), ("ctrl-option-space", "Control–Option–Space")], $controller.shortcut)
-                help(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop, or hold it and release. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
+                help(controller.pressToToggle ? "Press to start/stop, or hold and release. Escape cancels." : "Hold and release, or double-press to keep recording until pressed again. Escape cancels.")
             }
             .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
-            toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
-            toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. If it cannot, press ⌃⌘V to paste the dictation where your cursor is. Your clipboard is always put back. Murmur never sends a message.", isOn: $controller.automaticInsertion)
+            toggleRow("Press once to start, again to stop", "Off: hold to record; double-press to keep recording. On: holding still works.", isOn: $controller.pressToToggle)
+            toggleRow("Insert at the cursor", "Types into the focused field when dictation ends. If that fails, press ⌃⌘V to paste. Your clipboard is restored; Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
 
@@ -491,7 +480,7 @@ struct SettingsView: View {
             toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
             toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
             HStack(spacing: 16) {
-                help("If cleanup fails or changes too much, Murmur keeps the raw transcript in History and does not insert it. Faithful transcription turns every option off; dictionary spellings still apply.")
+                help("If cleanup fails or changes too much, the raw transcript stays in History and nothing is inserted. Faithful transcription turns cleanup off; dictionary spellings still apply.")
                 Spacer()
                 Button("Faithful Transcription", action: controller.useFaithfulTranscription)
                     .buttonStyle(InkButtonStyle(kind: .outline))
@@ -534,7 +523,7 @@ struct SettingsView: View {
                         .buttonStyle(InkButtonStyle(kind: .accent)).disabled(customAPIKeyDraft.isEmpty)
                     }
                     if let message = controller.keyMessages[.customAPI], !message.isEmpty { help(message) }
-                    help("The endpoint must accept OpenAI-compatible POST /v1/chat/completions requests. Enter the provider's base URL and exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
+                    help("Use a base URL and exact model ID. The endpoint must support OpenAI-compatible POST /v1/chat/completions. Keys go only over HTTPS; local endpoints can omit a key.")
                 }
                 .padding(.top, 16)
             }
@@ -576,7 +565,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur adds the spelling to your dictionary; after the same fix in two dictations it also replaces the misheard form. Where an app hides its text, Murmur follows the keys you type in that app for that minute; they are never saved. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
+            toggleRow("Learn from my corrections", "After a correction within a minute, Murmur learns the spelling. The same fix in two dictations also adds the misheard form as a replacement. In apps that hide text, Murmur watches your keystrokes for that minute; it never saves them. Learned entries stay active until deleted or reset.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
@@ -607,7 +596,7 @@ struct SettingsView: View {
                 .overlay(alignment: .top) { rule }.padding(.top, 12)
             }
             HStack {
-                help("“Heard as” forms are replaced exactly, in every mode. With cleanup on, a word that sounds like one of yours is sent to the cleanup route with its spelling, so it can be fixed. Edits save immediately.")
+                help("“Heard as” forms replace exact matches in every mode. With cleanup on, similar-sounding words and your spelling go to the cleanup route for correction. Edits save immediately.")
                 Spacer()
                 Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries).buttonStyle(InkButtonStyle(kind: .outline))
                     .disabled(!controller.dictionaryEntries.contains { $0.source == .learned } && controller.blockedWords.isEmpty)
@@ -707,7 +696,7 @@ struct SettingsView: View {
                 ForEach(KeyText.providers.filter { $0 != .customAPI }, id: \.self) { provider in keyRow(provider) }
             }
             .overlay(alignment: .top) { rule }.padding(.top, 20)
-            help("Keys are stored in your Keychain and never shown again after saving. OpenRouter's key is used for transcription; the custom API key is set in Cleanup.").padding(.top, 16)
+            help("Keys are stored in your Keychain and hidden after saving. OpenRouter's key is used for transcription; the custom API key is set in Cleanup.").padding(.top, 16)
         }
     }
 
@@ -953,7 +942,7 @@ struct SettingsView: View {
             ("Microphone", "So Murmur can hear you while the shortcut is held.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
             ("Accessibility", "So Murmur can type into the field you are using.", controller.accessibilityAuthorized, "Open Settings…", { controller.openPermissionSettings("accessibility") }),
             ("Input Monitoring", "So the global shortcut works in every app.", controller.inputMonitoringAuthorized, "Open Settings…", { controller.openPermissionSettings("input-monitoring") }),
-            ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed while transcription runs in the cloud." : ModelFacts.displayName + (controller.modelSummary.isEmpty ? "" : " · " + controller.modelSummary), modelSatisfied,
+            ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed with cloud transcription." : ModelFacts.displayName + (controller.modelSummary.isEmpty ? "" : " · " + controller.modelSummary), modelSatisfied,
              controller.modelRow.actions.contains(.retry) ? "Retry…" : "Download…", controller.downloadModel)
         ]
         let done = steps.filter(\.done).count
@@ -966,7 +955,6 @@ struct SettingsView: View {
                         wordmark("Murmur", size: 56)
                     }
                     .accessibilityElement(children: .combine).padding(.top, 16)
-                    Text("Your voice, on your Mac.").font(.system(size: 18)).foregroundStyle(Palette.ink80).padding(.top, 20)
                     Spacer()
                     Canvas { context, size in
                         var path = Path()
