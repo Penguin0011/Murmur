@@ -42,7 +42,7 @@ private final class MockCloudCleaner: CleanupProvider, @unchecked Sendable {
     init(_ response: Result<String, ProviderError>) { self.response = response }
     var messages: [CleanupMessages] { lock.lock(); defer { lock.unlock() }; return _messages }
     func cleanup(_ messages: CleanupMessages) async throws -> String {
-        lock.lock(); _messages.append(messages); lock.unlock()
+        lock.withLock { _messages.append(messages) }
         return try response.get()
     }
     func validate() async throws {}
