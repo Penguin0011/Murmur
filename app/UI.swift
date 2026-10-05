@@ -189,6 +189,20 @@ struct SettingsView: View {
         }
     }
 
+    private var microphonePicker: some View {
+        let devices = Capture.inputDevices()
+        let saved = controller.inputDeviceUID
+        return VStack(alignment: .leading, spacing: 8) {
+            Picker("Microphone", selection: $controller.inputDeviceUID) {
+                Text("System default").tag("")
+                ForEach(devices, id: \.uid) { device in Text(device.name).tag(device.uid) }
+                if !saved.isEmpty && !devices.contains(where: { $0.uid == saved }) { Text("Chosen microphone (not connected)").tag(saved) }
+            }
+            .labelsHidden()
+            help("Used for the next dictation. If the chosen microphone is not connected, Murmur uses the system default.")
+        }
+    }
+
     private func toggleRow(_ title: String, _ detail: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) { titled(title, detail) }.toggleStyle(SquareToggleStyle())
             .padding(.vertical, 12).overlay(alignment: .bottom) { softRule }
@@ -379,6 +393,10 @@ struct SettingsView: View {
             toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. If it cannot, press ⌃⌘V to paste the dictation where your cursor is. Your clipboard is always put back. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
+            toggleRow("Open at login", "Starts Murmur in the background when you log in, so the shortcut is ready.", isOn: Binding(get: { controller.openAtLogin }, set: controller.setOpenAtLogin))
+
+            eyebrow("Microphone").padding(.top, 28)
+            microphonePicker.padding(.top, 8)
 
             eyebrow("Permissions").padding(.top, 28)
             VStack(spacing: 0) {
@@ -674,6 +692,9 @@ struct SettingsView: View {
                  : HistoryMode.offDisclosure).padding(.top, 12)
             eyebrow("Keep transcripts for").padding(.top, 28)
             segmented([("30-days", "30 days"), ("six-months", "Six months"), ("forever", "Forever")], $controller.retention).padding(.top, 8)
+            if let notice = controller.historyNotice {
+                Text(notice).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+            }
             if let warning = controller.historyCapWarning {
                 Text(warning).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
             }
@@ -1030,6 +1051,7 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.pressToToggle) { controller.settingsChanged() }
             .onChange(of: controller.intelligentLeadingSpace) { controller.settingsChanged() }
             .onChange(of: controller.showMenuBar) { controller.settingsChanged() }
+            .onChange(of: controller.inputDeviceUID) { controller.settingsChanged() }
             .onChange(of: controller.retention) { controller.settingsChanged() }
             .onChange(of: controller.historyMode) { controller.settingsChanged() }
             .onChange(of: controller.updateChecksEnabled) { controller.settingsChanged() }

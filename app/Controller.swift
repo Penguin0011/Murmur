@@ -7,6 +7,7 @@ import Combine
 import CryptoKit
 import Darwin
 import Carbon
+import ServiceManagement
 @preconcurrency import Dispatch
 
 /// Content-free timing and stop reasons, alongside the capture and shortcut timing.
@@ -228,6 +229,10 @@ final class PreStart: @unchecked Sendable {
     @Published var shortcut: String
     @Published var voiceLevel = 0.0
     @Published var showMenuBar: Bool
+    /// CoreAudio UID of the chosen microphone; empty means the system default.
+    @Published var inputDeviceUID: String
+    /// The system's login item state (SMAppService), not a stored setting; off until the user turns it on.
+    @Published private(set) var openAtLogin = SMAppService.mainApp.status == .enabled
     @Published var permissionsSummary = ""
     @Published var hasRecoveryAudio = false
     var microphoneAuthorized: Bool { permission() == "authorized" }
@@ -267,6 +272,8 @@ final class PreStart: @unchecked Sendable {
     // History-off mode and the size cap (R9, §6). History-off and update checks apply as soon as they change.
     @Published var historyMode: HistoryMode
     @Published var historyCapWarning: String?
+    /// Set at launch when damaged history files were moved aside.
+    @Published var historyNotice: String?
     @Published var sessionOnlyIDs: Set<String> = []
     var historySummary: String { HistoryText.summary(mode: appliedHistoryMode, count: history.count, sessionOnly: sessionOnlyIDs.count) }
     // Update checks (R12). Results are shown quietly in Settings only.
@@ -393,6 +400,8 @@ final class PreStart: @unchecked Sendable {
         } else { dictionaryDownloader = nil }
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
+        let inputDevice = defaults.string(forKey: "inputDeviceUID") ?? ""
+        inputDeviceUID = inputDevice; Capture.preferredInputUID = inputDevice.isEmpty ? nil : inputDevice
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         pressToToggle = defaults.bool(forKey: "pressToToggle")
@@ -434,6 +443,10 @@ final class PreStart: @unchecked Sendable {
                 for file in try FileManager.default.contentsOfDirectory(at: retry.directory, includingPropertiesForKeys: nil) where file.lastPathComponent.hasPrefix(".result-") {
                     try FileManager.default.removeItem(at: file)
                 }
+            }
+            // One damaged file must not stop Murmur: move it aside, say so, and still expire it on schedule.
+            if let moved = try store?.quarantineUnreadable(), moved > 0 {
+                historyNotice = "\(moved) damaged history \(moved == 1 ? "file was" : "files were") moved to the history/unreadable folder. \(moved == 1 ? "It" : "They") still expire with your retention setting."
             }
             try store?.purge(retention: appliedRetention)
             historySaved(); refreshRecoveryAudio(); refreshDictionary()
@@ -501,7 +514,15 @@ final class PreStart: @unchecked Sendable {
         }
     }
     private var sessionAvailable: Bool { retry != nil && store != nil }
+    func setOpenAtLogin(_ on: Bool) {
+        guard !preview else { openAtLogin = on; return }
+        do { if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() } }
+        catch { message = on ? "Murmur could not be added to Login Items. Add it in System Settings → General → Login Items." : "Murmur could not be removed from Login Items. Remove it in System Settings → General → Login Items." }
+        openAtLogin = SMAppService.mainApp.status == .enabled
+    }
     func refreshPermissions() {
+        // Login Items can be changed in System Settings; this runs whenever Murmur is reactivated.
+        if !preview { openAtLogin = SMAppService.mainApp.status == .enabled }
         permissionsSummary = "Microphone: \(permission()) · Accessibility: \(AXIsProcessTrusted() ? "allowed" : "needed") · Input Monitoring: \(CGPreflightListenEventAccess() ? "allowed" : "needed")"
     }
     func requestMicrophone() {
@@ -567,6 +588,7 @@ final class PreStart: @unchecked Sendable {
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
+        defaults.set(inputDeviceUID, forKey: "inputDeviceUID"); Capture.preferredInputUID = inputDeviceUID.isEmpty ? nil : inputDeviceUID
         defaults.set(retention, forKey: "retention")
         if let processing {
             var next = processing.settings
@@ -1378,7 +1400,7 @@ final class PreStart: @unchecked Sendable {
             switch step {
             case .discardInMemoryState:
                 records?.clearSessionOnly(); records = nil; store = nil; retry = nil; processing = nil; stopWatching()
-                recoveryEntryID = nil; recoveryAudio = nil; historyCapWarning = nil
+                recoveryEntryID = nil; recoveryAudio = nil; historyCapWarning = nil; historyNotice = nil
             case .recreateHistory:
                 let next = try HistoryStore(directory: locations.history)
                 store = next; records = HistoryRouter(disk: historyDisk(next), persists: appliedHistoryMode.persistsTranscripts)
