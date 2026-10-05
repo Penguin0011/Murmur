@@ -26,7 +26,7 @@ struct AudioPayload: Sendable {
     var mimeType: String
     /// ISO-639-1, e.g. "en". Nil lets the provider detect it.
     var language: String?
-    /// Optional vocabulary hint (relevant dictionary terms). Sent only where the provider uses it,
+    /// Optional vocabulary hint (the dictionary's enabled spellings). Sent only where the provider uses it,
     /// and listed in that provider's disclosure.
     var vocabularyHint: String?
 
@@ -571,7 +571,7 @@ struct FireworksTranscriptionProvider: TranscriptionProvider {
 
     var disclosure: DataDisclosure {
         DataDisclosure(provider: id, stage: .transcription, destinationHost: endpoint.host ?? "fireworks.ai",
-                       leavesDevice: ["the recorded audio", "relevant dictionary terms as a vocabulary hint (when enabled)"],
+                       leavesDevice: ["the recorded audio", "your dictionary's spellings as a vocabulary hint"],
                        staysOnDevice: ["history", "the rest of the dictionary", "other apps' text"],
                        retentionNote: "Fireworks states it does not store prompt or generation data without opt-in; whether this covers audio is not documented.")
     }
@@ -923,7 +923,7 @@ struct GeminiTranscriptionProvider: TranscriptionProvider {
 
     var disclosure: DataDisclosure {
         DataDisclosure(provider: id, stage: .transcription, destinationHost: baseURL.host ?? "generativelanguage.googleapis.com",
-                       leavesDevice: ["the recorded audio (it leaves this Mac to Google)", "relevant dictionary terms as spelling hints (when enabled)"],
+                       leavesDevice: ["the recorded audio (it leaves this Mac to Google)", "your dictionary's spellings as spelling hints"],
                        staysOnDevice: ["history", "the rest of the dictionary", "other apps' text"],
                        retentionNote: "Paid tier: Google logs prompts for a limited time for abuse detection only. Free tier: Google may use the audio and transcript to improve its products, and human reviewers may read, annotate and process them; do not use a free-tier key for sensitive dictation.",
                        warning: "Gemini is a language model asked to transcribe, not a speech recognizer: it can occasionally answer or follow spoken requests, invent text for silence, or tidy wording.")
@@ -1134,7 +1134,7 @@ struct GeminiTranscribeResult: Equatable, Sendable {
 ///
 /// - Verbatim mode by default (keeps fillers and false starts; cleanup is Murmur's job).
 /// - `language_codes` from `AudioPayload.language` (or `languageCodes`), `custom_vocabulary` from
-///   `AudioPayload.vocabularyHint` (the caller passes only relevant dictionary terms).
+///   `AudioPayload.vocabularyHint` (the caller passes the dictionary's enabled spellings).
 /// - `store` is true by default, per the user's decision of 2026-10-03: Google keeps the
 ///   interaction (audio, terms, transcript) for 55 days on a paid key or 1 day on a free key, and it
 ///   can be deleted earlier with `deleteStored(interactionID:)`.
@@ -1195,11 +1195,11 @@ struct GeminiTranscribeProvider: TranscriptionProvider {
         let host = baseURL.host ?? "generativelanguage.googleapis.com"
         let freeTier = "Free tier: Google may also use the audio and transcript to improve its products, and human reviewers may read them; do not use a free-tier key for sensitive dictation."
         let retention = store
-            ? "Google stores the audio, the relevant dictionary terms and the transcript (Interactions API, store on): for \(Self.paidTierRetentionDays) days on a paid-tier key or \(Self.freeTierRetentionDays) day on a free-tier key, then deletes them automatically. Stored interactions can be deleted earlier. " + freeTier
+            ? "Google stores the audio, your dictionary's spellings and the transcript (Interactions API, store on): for \(Self.paidTierRetentionDays) days on a paid-tier key or \(Self.freeTierRetentionDays) day on a free-tier key, then deletes them automatically. Stored interactions can be deleted earlier. " + freeTier
             : "Store is off, so Google does not keep the interaction. Paid tier: Google logs prompts for a limited time for abuse detection only. " + freeTier
         return DataDisclosure(provider: id, stage: .transcription, destinationHost: host,
                               leavesDevice: [store ? "the recorded audio (sent to and stored by Google)" : "the recorded audio (it leaves this Mac to Google)",
-                                             store ? "relevant dictionary terms as custom vocabulary (sent to and stored by Google, when enabled)" : "relevant dictionary terms as custom vocabulary (when enabled)"],
+                                             store ? "your dictionary's spellings as custom vocabulary (sent to and stored by Google)" : "your dictionary's spellings as custom vocabulary"],
                               staysOnDevice: ["history", "the rest of the dictionary", "other apps' text"],
                               retentionNote: retention,
                               warning: "Gemini 3.5 Transcribe uses Google's Beta Interactions API, whose formats may change.")

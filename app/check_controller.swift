@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import AppKit
 
@@ -115,13 +116,15 @@ import AppKit
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let helper = dir.appendingPathComponent("helper"), starts = dir.appendingPathComponent("starts")
-        try "#!/bin/sh\necho start >> '\(starts.path)'\necho '{\"ready\":true}'\nwhile read p; do [ \"$p\" = \"$(dirname \"$p\")/die\" ] && exit 1; echo \"{\\\"text\\\":\\\"$(basename \"$p\")\\\"}\"; done\n"
+        try "#!/bin/sh\necho \"start $*\" >> '\(starts.path)'\ncase \"$*\" in *--ctc*) echo '{\"ready\":true,\"vocabulary_error\":true}';; *) echo '{\"ready\":true}';; esac\nwhile read p; do [ \"$p\" = \"$(dirname \"$p\")/die\" ] && exit 1; echo \"{\\\"text\\\":\\\"$(basename \"$p\")\\\"}\"; done\n"
             .write(to: helper, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: helper.path)
         let runner = WarmRunner(), models = dir
-        func ask(_ name: String, key: String = "k1") -> String? {
+        var dictionaryStatus: Bool?
+        runner.onDictionaryStatus = { dictionaryStatus = $0 }
+        func ask(_ name: String, key: String = "k1", dictionary: [String] = []) -> String? {
             let done = DispatchSemaphore(value: 0); var answer: String?
-            runner.transcribe(dir.appendingPathComponent(name), helper: helper, models: models, key: key) { line in
+            runner.transcribe(dir.appendingPathComponent(name), helper: helper, launch: HelperLaunch(models: models, dictionaryArguments: dictionary, key: key)) { line in
                 answer = line.flatMap { (try? JSONSerialization.jsonObject(with: $0) as? [String: Any])?["text"] as? String }; done.signal()
             }
             done.wait(); return answer
@@ -131,8 +134,39 @@ import AppKit
         precondition(ask("die") == nil, "a helper that dies answers nil so the caller falls back")
         precondition(ask("c.wav") == "c.wav" && launches() == 2, "the next request restarts the helper")
         precondition(ask("d.wav", key: "k2") == "d.wav" && launches() == 3, "a new model fingerprint restarts the helper")
+        precondition(dictionaryStatus == nil, "no dictionary status without dictionary arguments")
+        precondition(ask("e.wav", key: "k3", dictionary: ["--ctc", "/c", "--vocabulary", "/v"]) == "e.wav" && launches() == 4, "dictionary arguments restart the helper")
+        let lastStart = ((try? String(contentsOf: starts, encoding: .utf8)) ?? "").split(separator: "\n").last ?? ""
+        precondition(lastStart == "start \(models.path) --serve --ctc /c --vocabulary /v", "helper receives the dictionary arguments")
+        precondition(dictionaryStatus == true, "a helper that could not load dictionary support is reported")
         runner.stopNow()
+        try helperLaunchChecks(dir)
         print("Warm runner checks passed (one launch, fallback on death, restart, model change).")
+    }
+
+    /// HelperLaunch.make: dictionary arguments only with a verified dictionary model and a vocabulary.
+    static func helperLaunchChecks(_ dir: URL) throws {
+        let models = dir.appendingPathComponent("unified"), ctc = dir.appendingPathComponent("ctc")
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: ctc, withIntermediateDirectories: true)
+        let weights = Data("weights".utf8), encoder = Data("encoder".utf8)
+        try weights.write(to: models.appendingPathComponent("w")); try encoder.write(to: ctc.appendingPathComponent("e"))
+        func sha(_ d: Data) -> String { SHA256.hash(data: d).map { String(format: "%02x", $0) }.joined() }
+        let manifest = dir.appendingPathComponent("pins.json")
+        try JSONSerialization.data(withJSONObject: ["models": [
+            unifiedRepository: ["files": [["rfilename": "w", "size": weights.count, "lfs": ["sha256": sha(weights)]]], "batch_files": ["w"]],
+            dictionaryModelRepository: ["files": [["rfilename": "e", "size": encoder.count, "lfs": ["sha256": sha(encoder)]]], "batch_files": ["e"]]]]).write(to: manifest)
+        let vocabulary = dir.appendingPathComponent("vocabulary.json")
+        let plain = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: ctc)
+        precondition(plain?.dictionaryArguments == [], "no vocabulary file: no dictionary arguments")
+        try Data(#"{"terms":[{"text":"Kubernetes"}]}"#.utf8).write(to: vocabulary)
+        let boosted = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: ctc)
+        precondition(boosted?.dictionaryArguments == ["--ctc", ctc.path, "--vocabulary", vocabulary.path] && boosted?.key != plain?.key, "verified model and vocabulary: dictionary arguments and a new key")
+        try Data(#"{"terms":[{"text":"Kubectl"}]}"#.utf8).write(to: vocabulary)
+        precondition(HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: ctc)?.key != boosted?.key, "a dictionary edit changes the key")
+        try Data("tampered".utf8).write(to: ctc.appendingPathComponent("e"))
+        precondition(HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: ctc)?.dictionaryArguments == [], "an unverified dictionary model is not used, and transcription still runs")
+        print("Helper launch checks passed (dictionary arguments only when verified, key follows the dictionary).")
     }
 
     /// Cut picker, join rule, ⌃⌘C match and ChunkJob, without audio hardware or the model.
@@ -171,10 +205,11 @@ import AppKit
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         func file(_ name: String) throws -> URL { let url = dir.appendingPathComponent(name); try Data().write(to: url); return url }
+        /// `answers`: chunk text, or for a boundary clip a raw JSON answer.
         func run(_ events: [Chunker.Event], answers: [String: String?]) -> String?? {
-            let job = ChunkJob { url, done in
+            let job = ChunkJob { url, boundary, done in
                 let text = answers[url.lastPathComponent] ?? nil
-                DispatchQueue.global().async { done(text.map { Data("{\"text\":\"\($0)\"}".utf8) }) }
+                DispatchQueue.global().async { done(text.map { Data((boundary ? $0 : "{\"text\":\"\($0)\"}").utf8) }) }
             }
             events.forEach(job.receive)
             guard job.isEnded else { return .none }
@@ -195,7 +230,7 @@ import AppKit
         // One chunk at a time: after the first failure, queued chunks are dropped unsent.
         var sent: [String] = []
         let sendLock = NSLock()
-        let serial = ChunkJob { url, done in
+        let serial = ChunkJob { url, _, done in
             sendLock.withLock { sent.append(url.lastPathComponent) }
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { done(nil) }
         }
@@ -206,11 +241,24 @@ import AppKit
         gotSerial.wait(); Thread.sleep(forTimeInterval: 0.2)
         precondition(serialAnswer == nil && sendLock.withLock({ sent }) == ["h.wav"], "only the first chunk was sent: \(sent)")
         precondition(![h, i, j].contains { FileManager.default.fileExists(atPath: $0.path) }, "dropped chunk files are deleted")
-        let discarded = ChunkJob { _, done in done(nil) }
+        let discarded = ChunkJob { _, _, done in done(nil) }
         discarded.discard()
         let g = try file("g.wav")
         discarded.receive(.chunk(g, last: true, sentenceEnd: false))
         precondition(!FileManager.default.fileExists(atPath: g.path), "a discarded job deletes later chunks unread")
-        print("Chunk checks passed (quiet cut, pause length, join rule, copy chord, ordered join, one-at-a-time with drop on failure, failure fallback, cleanup).")
+        // Dictionary terms split by a cut: repaired from the boundary clip's replacements.
+        precondition(Chunker.repair(tail: "Route calls through open.", head: "Router, then deploy.", from: "open router", to: "OpenRouter")! == ("Route calls through OpenRouter,", "then deploy."), "two-word term split by a cut")
+        precondition(Chunker.repair(tail: "Deploy it to Cooper.", head: "Netties today.", from: "coopernetties", to: "Kubernetes")! == ("Deploy it to Kubernetes", "today."), "one word split mid-word")
+        precondition(Chunker.repair(tail: "Ask about it.", head: "Then go.", from: "open router", to: "OpenRouter") == nil, "a replacement that does not cross the cut is ignored")
+        precondition(Chunker.repair(tail: "", head: "open router", from: "open router", to: "OpenRouter") == nil, "empty side never traps")
+        let k = try file("k.wav"), kb = try file("kb.wav"), l = try file("l.wav")
+        precondition(run([.chunk(k, last: false, sentenceEnd: false), .boundary(kb), .chunk(l, last: true, sentenceEnd: false)],
+                         answers: ["k.wav": "Route calls through open.", "kb.wav": #"{"replacements":[{"from":"open router","to":"OpenRouter"}]}"#, "l.wav": "Router, then deploy."])
+                  == .some("Route calls through OpenRouter, then deploy."), "boundary repair joins the term")
+        let m = try file("m.wav"), mb = try file("mb.wav"), n = try file("n.wav")
+        precondition(run([.chunk(m, last: false, sentenceEnd: false), .boundary(mb), .chunk(n, last: true, sentenceEnd: false)], answers: ["m.wav": "One two", "n.wav": "three."])
+                  == .some("One two three."), "a failed boundary only skips its repair")
+        precondition(![k, kb, l, m, mb, n].contains { FileManager.default.fileExists(atPath: $0.path) }, "boundary clips are deleted once read")
+        print("Chunk checks passed (quiet cut, pause length, join rule, copy chord, ordered join, one-at-a-time with drop on failure, failure fallback, cleanup, boundary repair).")
     }
 }

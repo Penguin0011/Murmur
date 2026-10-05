@@ -185,6 +185,32 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         p.cloudCleaner = spelled
         await expect(p, "Um, run kubectl now.", .insert("Run kubectl now."), "provider output keeping a dictionary term passes guard")
 
+        // A preferred-only term the transcriber misheard reaches the prompt as a near match,
+        // and the guard accepts the respelling, including words joined into one term.
+        let clouddev = try p.addEntry(preferred: "clouddev", variants: "")
+        let joined = MockCloudCleaner(.success("Ship clouddev today."))
+        p.cloudCleaner = joined
+        await expect(p, "Um, ship cloud dev today.", .insert("Ship clouddev today."), "near-matched joined term passes guard")
+        check(joined.messages.first?.system.contains("clouddev") == true, "near-matched term in prompt")
+        check(joined.messages.first?.system.contains("Akme") == false, "unrelated term still not in prompt")
+        try p.deleteEntry(id: clouddev.id)
+        // Live Gemini wrote "shelf made" for Shelfmate: misheard and split, still accepted.
+        let shelfmate = try p.addEntry(preferred: "Shelfmate", variants: "")
+        p.cloudCleaner = MockCloudCleaner(.success("Send a Shelfmate report to Dana."))
+        await expect(p, "Send a shelf made report to Dana.", .insert("Send a Shelfmate report to Dana."), "sound-alike split term passes guard")
+        try p.deleteEntry(id: shelfmate.id)
+
+        // Editing: in place, disable stops apply, a variant owned by another enabled entry is refused.
+        let edited = try p.addEntry(preferred: "Postgress", variants: "post gres")
+        try p.updateEntry(id: edited.id, preferred: "Postgres", variants: "post gres, postgre sequel", enabled: true)
+        check(p.dictionary.apply(to: "use postgre sequel") == "use Postgres", "edited entry applies new variant")
+        check(p.dictionary.entries.first { $0.id == edited.id }?.source == .manual, "edit keeps source")
+        try p.updateEntry(id: edited.id, preferred: "Postgres", variants: "post gres", enabled: false)
+        check(p.dictionary.apply(to: "use post gres") == "use post gres", "disabled entry not applied")
+        do { try p.updateEntry(id: edited.id, preferred: "Postgres", variants: "acme", enabled: true); check(false, "conflicting variant accepted") }
+        catch { check(error is DictionaryError, "conflicting variant refused with a message") }
+        try p.deleteEntry(id: edited.id)
+
         // Provider failure: held, local cleaner never consulted.
         p.cloudCleaner = MockCloudCleaner(.failure(.timeout(.gemini)))
         await expect(p, "Um, call acme.", .heldForRecovery(raw: "Um, call acme.", reason: .cleanerFailed), "cloud failure held")

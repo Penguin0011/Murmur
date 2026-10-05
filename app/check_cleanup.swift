@@ -253,6 +253,11 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(off.system.contains("Return the transcript exactly as given"), "all-off prompt asks for identity")
         // Dictionary respelling is allowed only for supplied terms.
         expect(CleanupGuard.check(raw: "Email acme about the order.", cleaned: "Email Akme about the order.", options: .standard, allowedTerms: ["Akme"]) == .pass, "allowed dictionary term passes")
+        // A term must replace its own sound-alike words, never pay for deleting an unrelated one.
+        expect(CleanupGuard.check(raw: "Shelf made the report concise.", cleaned: "Shelf made the Shelfmate concise.", options: .standard, allowedTerms: ["Shelfmate"]) != .pass, "term cannot replace an unrelated word")
+        expect(CleanupGuard.check(raw: "Send the report now.", cleaned: "Send the Shelfmate report now.", options: .standard, allowedTerms: ["Shelfmate"]) != .pass, "term cannot be inserted from nothing")
+        expect(CleanupGuard.check(raw: "Ship cloud dev today.", cleaned: "Ship clouddev today.", options: .standard, allowedTerms: ["clouddev"]) == .pass, "term joins the words that spell it")
+        expect(CleanupGuard.check(raw: "Send a shelf made report.", cleaned: "Send a Shelfmate report.", options: .standard, allowedTerms: ["Shelfmate"]) == .pass, "term replaces its sound-alike span")
         expect(CleanupGuard.check(raw: "Email acme about the order.", cleaned: "Email Akme about the order.", options: .standard) != .pass, "unsupplied respelling is rejected")
         // Failure reasons are content-free identifiers.
         for r in CleanupFailureReason.allCases { expect(r.rawValue.allSatisfy { $0.isLetter }, "reason \(r.rawValue) is a bare identifier") }

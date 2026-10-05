@@ -54,6 +54,46 @@ enum ModelFacts {
     }
 }
 
+/// The CTC model that rescores on-device transcripts toward the dictionary (FluidAudio vocabulary
+/// boosting). It lives in FluidAudio's own cache folder, because FluidAudio's rescorer reads the CTC
+/// tokenizer only from there; that folder can be shared with other apps built on FluidAudio, so
+/// Murmur checks it against the pinned hashes before every use and runs without it otherwise.
+enum DictionaryModelFacts {
+    static let displayName = "Dictionary support for on-device transcription"
+    static let modelName = "Parakeet CTC 110M"
+
+    static func directory(home: URL) -> URL {
+        home.appendingPathComponent("Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml")
+    }
+
+    /// "Parakeet CTC 110M · 103 MB download · Runs on this Mac"
+    static func summary(downloadSize: Int64) -> String {
+        "\(modelName) · \(ModelFacts.formatBytes(downloadSize)) download · \(ModelFacts.location)"
+    }
+
+    static let explanation = "Helps on-device transcription spell your dictionary words. It checks what was heard against your words and changes only words that are not ordinary English, so everyday speech is left alone. Your words stay on this Mac."
+
+    static func confirmation(downloadSize: Int64, license: ModelLicenseInfo, folder: URL) -> (title: String, body: String) {
+        ("Download \(modelName) (\(ModelFacts.formatBytes(downloadSize)))?",
+         "Murmur downloads \(ModelFacts.formatBytes(downloadSize)) from Hugging Face and checks every file against its pinned checksum. It is saved in FluidAudio's shared model folder (\(folder.path)); a copy another app put there is replaced.\n\nLicense:\n\(ModelFacts.licenseText(license))")
+    }
+
+    static let removeTitle = "Remove dictionary support?"
+    static func removeBody(folder: URL) -> String {
+        "On-device transcription stops using your dictionary until you download it again. This deletes \(folder.path), which other apps built on FluidAudio may also use."
+    }
+
+    static func completionMessage(_ result: Result<Void, ModelDownloadError>) -> String {
+        switch result {
+        case .success: return "Dictionary support is downloaded and verified. On-device transcription now uses your dictionary."
+        case .failure(.cancelled): return "The download was cancelled. Retry continues from the files already downloaded."
+        case .failure(let error): return error.userMessage
+        }
+    }
+
+    static let unavailableMessage = "Dictionary support could not start, so on-device transcription is running without your dictionary. Remove it and download it again."
+}
+
 enum ModelRowAction: Equatable { case download, cancel, retry, remove }
 
 struct ModelRowPresentation: Equatable {

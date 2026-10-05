@@ -285,15 +285,17 @@ enum CloudTranscription {
     static let unreadableAudio = "The recording could not be read."
     static let unknownFailure = "Cloud transcription failed."
 
-    /// Reads the recording off the main thread and runs `run(provider:audioData:)`.
-    static func run(provider: TranscriptionProvider, audioFile: URL) async -> CloudTranscriptionOutcome {
+    /// Reads the recording off the main thread and runs `run(provider:audioData:vocabulary:)`.
+    static func run(provider: TranscriptionProvider, audioFile: URL, vocabulary: [String] = []) async -> CloudTranscriptionOutcome {
         guard let data = try? Data(contentsOf: audioFile) else { return .failed(message: unreadableAudio, keepAudio: true) }
-        return await run(provider: provider, audioData: data)
+        return await run(provider: provider, audioData: data, vocabulary: vocabulary)
     }
 
     /// One provider call at most: silence pre-check, then one request, no retry, no fallback.
-    static func run(provider: TranscriptionProvider, audioData: Data) async -> CloudTranscriptionOutcome {
-        let prepared = CloudAudio.prepare(audioData)
+    /// `vocabulary` (dictionary spellings) goes as the hint; providers that ignore hints drop it.
+    static func run(provider: TranscriptionProvider, audioData: Data, vocabulary: [String] = []) async -> CloudTranscriptionOutcome {
+        var prepared = CloudAudio.prepare(audioData)
+        if !vocabulary.isEmpty { prepared.payload.vocabularyHint = vocabulary.joined(separator: ", ") }
         if let checker = provider as? SilencePrecheckedTranscriber, let peak = prepared.peak,
            checker.shouldSkip(peakLevel: peak, durationSeconds: prepared.duration) {
             return .noSpeech(skipped: true)
