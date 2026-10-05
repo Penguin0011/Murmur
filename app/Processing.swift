@@ -189,12 +189,13 @@ final class ProcessingCoordinator {
 
     /// Only the words that changed: the filter rejects punctuation, so the unchanged words and the
     /// punctuation around them ("Hi, my name is Akash." -> "...Aakash.") are dropped as context.
-    /// Nil when no word changed (undo, or a punctuation/spacing-only edit).
+    /// Nil when no word changed (undo, or a punctuation, spacing or case-only edit).
     static func changedWords(_ original: String, _ current: String) -> (String, String)? {
         let a = Array(original), b = Array(current)
         var s = TermText.tokens(a), t = TermText.tokens(b)
-        while let x = s.first, let y = t.first, x.text == y.text { s.removeFirst(); t.removeFirst() }
-        while let x = s.last, let y = t.last, x.text == y.text { s.removeLast(); t.removeLast() }
+        // Case-folded like the filter's context words, so a capitalization fix nearby is context too.
+        while let x = s.first, let y = t.first, x.folded == y.folded { s.removeFirst(); t.removeFirst() }
+        while let x = s.last, let y = t.last, x.folded == y.folded { s.removeLast(); t.removeLast() }
         guard !s.isEmpty || !t.isEmpty else { return nil }
         func words(_ chars: [Character], _ tokens: [TermText.Token]) -> String {
             guard let first = tokens.first, let last = tokens.last else { return "" }

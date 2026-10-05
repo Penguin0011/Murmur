@@ -301,6 +301,11 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try named.observeSpan(sessionID: punctuationOnly, original: "Akash, hi.", current: "Akash; hi!")
         check(named.ledger.evidence.isEmpty && ProcessingCoordinator.changedWords("Akash, hi.", "Akash; hi!") == nil, "a punctuation-only edit records nothing")
         check(ProcessingCoordinator.changedWords("Call Akash.", "Call Aakash, now.")! == ("Akash", "Aakash, now"), "changed words keep inner punctuation for the filter to judge")
+        check(ProcessingCoordinator.changedWords("hello, Akash.", "Hello, Aakash.")! == ("Akash", "Aakash"), "a capitalization fix nearby stays context")
+        let recased = UUID()
+        try named.observeSpan(sessionID: recased, original: "hello, Akash.", current: "Hello, Aakash.")
+        check(named.ledger.evidence.contains { $0.sessionID == recased && $0.target == "Aakash" }, "a name fix survives a nearby capitalization fix")
+        try named.ledger.revert(sessionID: recased)
 
         // Unreadable fields: keystrokes rebuild the span (AppController's tap feeds KeystrokeSpan).
         let keyed = try ProcessingCoordinator(directory: dir.appendingPathComponent("keys"), defaults: defaults)
