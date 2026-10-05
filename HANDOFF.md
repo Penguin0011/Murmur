@@ -4,7 +4,7 @@ Branch `aakash/dictionary-learning-exploration-6182a5`. User decisions: replicat
 
 - Insertion: `insertText` always pastes (clipboard preserved and restored as before), then reads the field back to verify and to hand it to AX observation. The AX selected-text write, the unchanged-write paste fallback and the per-app method table are gone. [Certain]
 - Learning: one settled correction adds a vocabulary hint (learned entry, no variants: reaches Parakeet's vocabulary file and cloud vocabulary, `apply()` changes nothing) and shows "Added “X” to dictionary" with Undo for 5 s; the second consistent correction adds the misheard form as a variant of the same entry. Deleted or reversed words are never re-learned from any mishearing. Version-1 ledgers load unchanged. [Certain]
-- All documented checks pass on the Mac; `check_ui.sh --saved --learned --bubble-only` shows the notice. The live TextEdit probe was not run: it needs TextEdit frontmost, and the screen-takeover approval was not available. Paste-only delivery is unverified live. [Certain]
+- Passing on the Mac: launch, history, controller, dictionary, processing, providers, updates, boost filter, routes, app services, model download, cleanup corpus and `spike --check`. Of the UI fixtures only `check_ui.sh --saved --learned --bubble-only` was run (notice renders; Undo click not exercised). The live TextEdit probe was not run: it needs TextEdit frontmost, and the screen-takeover approval was not available. Paste-only delivery is unverified live. [Certain]
 - Still open (from the exploration): fixing a word and then typing on drops the fix; clicking a word in keystroke-watched fields (Chrome, VS Code, Docs) ends the watch; two fixes in one dictation become one phrase; case-only, spacing and sub-4-letter fixes are not learned; a suppressed source is invisible in Settings. [Certain]
 
 # Dictionary feature — October 4, 2026
@@ -153,7 +153,7 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 8. The Fn binding, physical key timing and first-word preservation with real speech are untested live.
 
 **Insertion and observation**
-9. The paste fallback's fixed 300 ms settle can double-insert if an app applies an AX write later.
+9. ~~The paste fallback's fixed 300 ms settle can double-insert if an app applies an AX write later.~~ Resolved October 4, 2026: no AX write any more, paste only.
 10. A browser password field not marked secure would receive a paste (accepted risk).
 11. Learning is unsupported in Arc fields, default Google Docs and VS Code; permission revocation mid-session, clipboard-manager races and cross-session learning are untested.
 
