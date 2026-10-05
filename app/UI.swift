@@ -367,7 +367,7 @@ struct SettingsView: View {
             .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
             toggleRow("Press once to start, again to stop", "Off: hold to record; double-press to keep recording. On: holding still works.", isOn: $controller.pressToToggle)
             toggleRow("Insert at the cursor", "Types into the focused field when dictation ends. If that fails, press ⌃⌘V to paste. Your clipboard is restored; Murmur never sends a message.", isOn: $controller.automaticInsertion)
-            toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
+            toggleRow("Add a leading space when needed", "Adds separation without changing existing spaces, punctuation, or selected text.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
 
             eyebrow("Permissions").padding(.top, 28)
@@ -432,7 +432,7 @@ struct SettingsView: View {
             eyebrow("Where transcription runs").padding(.top, 28)
             segmented([(TranscriptionRoute.local, "On this Mac (Parakeet)"), (TranscriptionRoute.cloud, "Cloud")], $controller.transcriptionRoute).padding(.top, 8)
             if controller.transcriptionRoute == .local {
-                help("Audio stays on this Mac. Downloading the model uses the network once; dictation does not.").padding(.top, 12)
+                help("Audio stays on this Mac. Only the model download needs internet.").padding(.top, 12)
             } else {
                 segmented(CloudTranscriber.allCases.map { ($0, short($0.displayName)) }, $controller.cloudTranscriber, size: 14).padding(.top, 16)
                     .help(controller.cloudTranscriber.displayName)
@@ -459,7 +459,6 @@ struct SettingsView: View {
                     Button("Choose Folder…", action: controller.chooseModelDirectory).buttonStyle(InkButtonStyle(kind: .outline))
                 }
                 .padding(.vertical, 16).overlay(alignment: .top) { rule }
-                help("A folder you choose takes effect at once.")
             }
         }
     }
@@ -523,7 +522,7 @@ struct SettingsView: View {
                         .buttonStyle(InkButtonStyle(kind: .accent)).disabled(customAPIKeyDraft.isEmpty)
                     }
                     if let message = controller.keyMessages[.customAPI], !message.isEmpty { help(message) }
-                    help("Use a base URL and exact model ID. The endpoint must support OpenAI-compatible POST /v1/chat/completions. Keys go only over HTTPS; local endpoints can omit a key.")
+                    help("Use the provider's base URL and exact model ID. It must support POST /v1/chat/completions. Keys go only over HTTPS; local endpoints can omit one.")
                 }
                 .padding(.top, 16)
             }
@@ -565,7 +564,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "After a correction within a minute, Murmur learns the spelling. The same fix in two dictations also adds the misheard form as a replacement. In apps that hide text, Murmur watches your keystrokes for that minute; it never saves them. Learned entries stay active until deleted or reset.", isOn: $controller.learningEnabled)
+            toggleRow("Learn from my corrections", "Corrections within a minute teach Murmur the spelling; the same fix in two dictations also teaches the misheard form. In apps with hidden text, keystrokes are watched for that minute and never saved. Learned entries stay active until deleted or reset.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
@@ -939,9 +938,9 @@ struct SettingsView: View {
 
     private var setup: some View {
         let steps: [(title: String, detail: String, done: Bool, action: String, run: () -> Void)] = [
-            ("Microphone", "So Murmur can hear you while the shortcut is held.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
-            ("Accessibility", "So Murmur can type into the field you are using.", controller.accessibilityAuthorized, "Open Settings…", { controller.openPermissionSettings("accessibility") }),
-            ("Input Monitoring", "So the global shortcut works in every app.", controller.inputMonitoringAuthorized, "Open Settings…", { controller.openPermissionSettings("input-monitoring") }),
+            ("Microphone", "Lets Murmur hear dictation while you hold the shortcut.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
+            ("Accessibility", "Lets Murmur type into the focused field.", controller.accessibilityAuthorized, "Open Settings…", { controller.openPermissionSettings("accessibility") }),
+            ("Input Monitoring", "Lets the shortcut work in every app.", controller.inputMonitoringAuthorized, "Open Settings…", { controller.openPermissionSettings("input-monitoring") }),
             ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed with cloud transcription." : ModelFacts.displayName + (controller.modelSummary.isEmpty ? "" : " · " + controller.modelSummary), modelSatisfied,
              controller.modelRow.actions.contains(.retry) ? "Retry…" : "Download…", controller.downloadModel)
         ]
