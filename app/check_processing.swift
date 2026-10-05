@@ -289,6 +289,24 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try dictate(["Call Acme today"], inserted: "Call Akme today")
         check(watched.dictionary.entries.isEmpty, "changing a learned replacement back withdraws it")
 
+        // Real dictations carry punctuation; only the changed words reach the filter.
+        let named = try ProcessingCoordinator(directory: dir.appendingPathComponent("punct"), defaults: defaults)
+        for _ in 0..<2 {
+            let session = UUID()
+            try named.observeSpan(sessionID: session, original: " Hi, my name is Akash.", current: " Hi, my name is Aakash.")
+            try named.settle(sessionID: session)
+        }
+        check(named.dictionary.entries.contains { $0.preferred == "Aakash" && $0.variants == ["Akash"] }, "a punctuated sentence learns the changed word")
+        let punctuationOnly = UUID()
+        try named.observeSpan(sessionID: punctuationOnly, original: "Akash, hi.", current: "Akash; hi!")
+        check(named.ledger.evidence.isEmpty && ProcessingCoordinator.changedWords("Akash, hi.", "Akash; hi!") == nil, "a punctuation-only edit records nothing")
+        check(ProcessingCoordinator.changedWords("Call Akash.", "Call Aakash, now.")! == ("Akash", "Aakash, now"), "changed words keep inner punctuation for the filter to judge")
+        check(ProcessingCoordinator.changedWords("hello, Akash.", "Hello, Aakash.")! == ("Akash", "Aakash"), "a capitalization fix nearby stays context")
+        let recased = UUID()
+        try named.observeSpan(sessionID: recased, original: "hello, Akash.", current: "Hello, Aakash.")
+        check(named.ledger.evidence.contains { $0.sessionID == recased && $0.target == "Aakash" }, "a name fix survives a nearby capitalization fix")
+        try named.ledger.revert(sessionID: recased)
+
         // Unreadable fields: keystrokes rebuild the span (AppController's tap feeds KeystrokeSpan).
         let keyed = try ProcessingCoordinator(directory: dir.appendingPathComponent("keys"), defaults: defaults)
         func typed(_ keys: [KeystrokeSpan.Key], click: Bool = false) throws {

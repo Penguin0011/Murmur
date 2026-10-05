@@ -183,8 +183,25 @@ final class ProcessingCoordinator {
     /// An edit becomes provisional evidence; back to the original (undo) or lost attribution
     /// (pass `original`) drops this session's evidence. Call `settle` when the window closes.
     func observeSpan(sessionID: UUID, original: String, current: String) throws {
-        if current == original { try ledger.revert(sessionID: sessionID) }
-        else { try observe(ObservedCorrection(sessionID: sessionID, source: original, target: current, observedAt: Date())) }
+        guard let (source, target) = Self.changedWords(original, current) else { try ledger.revert(sessionID: sessionID); return }
+        try observe(ObservedCorrection(sessionID: sessionID, source: source, target: target, observedAt: Date()))
+    }
+
+    /// Only the words that changed: the filter rejects punctuation, so the unchanged words and the
+    /// punctuation around them ("Hi, my name is Akash." -> "...Aakash.") are dropped as context.
+    /// Nil when no word changed (undo, or a punctuation, spacing or case-only edit).
+    static func changedWords(_ original: String, _ current: String) -> (String, String)? {
+        let a = Array(original), b = Array(current)
+        var s = TermText.tokens(a), t = TermText.tokens(b)
+        // Case-folded like the filter's context words, so a capitalization fix nearby is context too.
+        while let x = s.first, let y = t.first, x.folded == y.folded { s.removeFirst(); t.removeFirst() }
+        while let x = s.last, let y = t.last, x.folded == y.folded { s.removeLast(); t.removeLast() }
+        guard !s.isEmpty || !t.isEmpty else { return nil }
+        func words(_ chars: [Character], _ tokens: [TermText.Token]) -> String {
+            guard let first = tokens.first, let last = tokens.last else { return "" }
+            return String(chars[first.start..<last.end])
+        }
+        return (words(a, s), words(b, t))
     }
 
     /// Feeds one attributed correction while its observation window is open. With learning off
