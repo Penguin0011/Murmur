@@ -1,3 +1,9 @@
+# Insertion behavior review — October 5, 2026
+
+Posted pastes now return quietly to Ready, with a completion announcement for assistive technology. History hides verified/unverified badges and excludes unverified entries from Needs attention, while preserving diagnostic evidence in records/logs. Explicit paste-last recovery retains verified text and survives later unsuccessful recordings; deleting the matching transcript clears its paste/setup buffers after successful storage deletion. Manual paste now checks Accessibility permission, secure-field metadata, Secure Input, and app/field/window identity. [Certain]
+
+Native controller and spike checks passed. The History fixture confirmed badge-free delivered rows and an empty Needs attention filter for them. The development app built and passed deep/strict signature verification; it is at this worktree's `runtime/Murmur.app`, not installed. See [app/INSERTION_REVIEW.md](app/INSERTION_REVIEW.md) for the full review and Wispr Flow sources. Fixed keyboard positions, the 0.5-second clipboard lease/main-thread wait, and no-metadata focus races remain compatibility limits; no live microphone/provider/cross-app matrix was run. [Certain]
+
 # Buttonless popups and Custom Provider — October 5, 2026
 
 Removed Audio and Undo from floating popups. All error messages share the buttonless view; clicking the message still opens Settings with full details. Listening and processing have no controls, and saved/inserted states show no popup. Retained audio is accessible in Settings → History & Privacy; learned entries remain removable in Dictionary. Native screenshots/AX checks covered error, learned-word, listening, and processing popups, plus error-detail navigation and the recovery control. [Certain]
