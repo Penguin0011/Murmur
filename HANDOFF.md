@@ -32,6 +32,8 @@ Not done: a live Gemini call through this branch's sound-alike path; the earlier
 
 - Chunk cuts (October 4, later): measured that removing chunking costs far more than it saves with dictionary support on (release wait with rescoring: 0.29 s at 15 s, 1.33 s at 56 s, 2.51 s at 110 s, 4.90 s at 218 s of audio, against at most about 0.4 s for the last chunk), so chunking stays. Each cut now also emits a boundary clip; the helper returns its kept replacements and `Chunker.repair` applies only one that crosses the cut. With the cut forced inside the term (0.4 s pause), open router and cube cuddle were repaired to the whole-file result; super base, shelf mate and Kuber netties were not fixed by whole-file transcription either. 23 cuts on long control recordings: no change. [Certain] Installed in `~/Applications/Murmur.app` at 20:37 (previous build backed up at `~/Applications/Murmur-backups/20261004-203721/Murmur.app`); after relaunch the helper runs with `--ctc … --vocabulary …`. [Certain]
 
+- `2cb63a6` (from a Codex review on the PR): the cleanup guard let an inserted dictionary term excuse deleting any one unrelated word. Each term must now replace 1–3 raw words in its own alignment gap that spell it, are spelled at least half like it, or sound like it. Not yet in the installed app. [Certain]
+
 Limits: casing-only fixes (tailscale→Tailscale) are not made by the helper (cloud cleanup handles them); a cut inside a term still leaves a stray period when the term is not in the dictionary ("super. Base"); History's raw text is the rescored transcript; a CTC folder with the right sizes but wrong content shows "Downloaded" while being skipped. [Certain]
 
 Deferred: automatic learning from edits (`TODO(observation)` in Controller.swift). [Certain]
