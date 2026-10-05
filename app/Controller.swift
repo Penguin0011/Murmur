@@ -215,7 +215,7 @@ final class PreStart: @unchecked Sendable {
     private var pending: (capture: Capture, url: URL, id: UUID)?
     func begin(store: RetryAudio) {
         queue.async { [self] in
-            guard pending == nil, permission() == "authorized", let url = try? store.create() else { return }
+            guard pending == nil, !IsSecureEventInputEnabled(), permission() == "authorized", let url = try? store.create() else { return }
             let capture = Capture()
             do { try capture.start(url: url) } catch { try? store.delete(url); return }
             let id = UUID(); pending = (capture, url, id)
@@ -266,6 +266,7 @@ final class PreStart: @unchecked Sendable {
     @Published var cleanupLists: Bool
     @Published var cleanupPunctuation: Bool
     @Published var learningEnabled: Bool
+    @Published var learningRequiresReadableField: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
     @Published var dictionaryEntries: [DictionaryEntry] = []
     /// Forms and spellings learning skips (conflicting, undone or deleted fixes), for Settings.
@@ -428,6 +429,7 @@ final class PreStart: @unchecked Sendable {
         cleanupLists = processingSettings.options.lists
         cleanupPunctuation = processingSettings.options.punctuation
         learningEnabled = processingSettings.learningEnabled
+        learningRequiresReadableField = processingSettings.learningRequiresReadableField
         historyMode = processingSettings.historyMode
         appliedHistoryMode = processingSettings.historyMode
         updateChecksEnabled = processingSettings.updateChecksEnabled
@@ -616,6 +618,7 @@ final class PreStart: @unchecked Sendable {
             var next = processing.settings
             next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation)
             next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
+            next.learningRequiresReadableField = learningRequiresReadableField
             next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled
             do { try processing.update(next) } catch { setPhase("Error", "Could not save cleanup and learning settings.") }
         }
@@ -663,7 +666,7 @@ final class PreStart: @unchecked Sendable {
         // A press while the previous dictation processes records right away; its events replay
         // into the machine when that dictation finishes, which adopts this capture.
         next.onQueuedPress = { [weak self] in
-            guard let self, self.sessionAvailable else { return false }
+            guard let self, self.sessionAvailable, !IsSecureEventInputEnabled() else { return false }
             let shown = (self.phase, self.message)
             guard self.session.startEarly() else { return false }
             self.phaseBeforeEarly = shown; return true
@@ -708,6 +711,7 @@ final class PreStart: @unchecked Sendable {
         defer { if action == .start, let retry { prestart.discard(store: retry) } }
         guard sessionAvailable else { done(); return }
         if action == .start {
+            guard !IsSecureEventInputEnabled() else { session.resetShortcut?(); setPhase("Error", "Dictation is unavailable while Secure Input is active."); done(); return }
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
             // An unconfigured or unconfirmed cloud route refuses; it never falls back to local.
             let plan = routePlan(appliedRoutes, cleanupSendsText: processing?.settings.options.anyEnabled ?? false)
@@ -1164,6 +1168,7 @@ final class PreStart: @unchecked Sendable {
         var observation: DictationObservation
         let pid: pid_t
         let field: FocusSnapshot?
+        var keyFocus: LearningFocusIdentity? = nil
         var keys: KeystrokeSpan?
         var current: String
     }
@@ -1189,11 +1194,14 @@ final class PreStart: @unchecked Sendable {
            let observation = DictationObservation(value: value, insertedRange: NSRange(location: offset, length: length), now: now) {
             watch = Watch(observation: observation, pid: field.pid, field: field, keys: nil, current: text)
             timingLog.notice("watch route=ax")
-        } else if let pid, CGPreflightListenEventAccess(), startKeyTap(),
+        } else if processing?.settings.learningRequiresReadableField != true, !IsSecureEventInputEnabled(),
+                  let pid, CGPreflightListenEventAccess(), startKeyTap(),
                   let observation = DictationObservation(value: text, insertedRange: NSRange(location: 0, length: length), now: now) {
             var keys = KeystrokeSpan(text)
             keys.resolve = { CorrectionFilter.plausibleEdit(original: text, candidates: $0, isCommonWord: isCommonEnglishWord) }
-            watch = Watch(observation: observation, pid: pid, field: nil, keys: keys, current: text)
+            let identity = LearningFocusIdentity.capture(pid: pid)
+            guard !identity.secure else { stopWatching(); return }
+            watch = Watch(observation: observation, pid: pid, field: nil, keyFocus: identity, keys: keys, current: text)
             timingLog.notice("watch route=keys ax-miss=\(axMiss, privacy: .public)")
         } else {
             timingLog.notice("watch route=none ax-miss=\(axMiss, privacy: .public) input-monitoring=\(CGPreflightListenEventAccess(), privacy: .public)")
@@ -1208,8 +1216,9 @@ final class PreStart: @unchecked Sendable {
         let same: Bool, readable: Bool, value: String, selection: NSRange
         if var keys = w.keys {
             keys.refresh(); w.keys = keys; watch?.keys = keys
-            same = keys.state != .departed && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
-            readable = keys.state != .lost && !IsSecureEventInputEnabled()
+            let identity = LearningFocusIdentity.capture(pid: w.pid)
+            same = keys.state != .departed && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid && w.keyFocus?.matches(identity) == true
+            readable = keys.state != .lost && !IsSecureEventInputEnabled() && !identity.secure
             value = keys.value; selection = keys.selection
         } else if let field = w.field {
             let focus = try? captureFocus()
@@ -1278,7 +1287,9 @@ final class PreStart: @unchecked Sendable {
     }
     private func watchKey(_ type: CGEventType, _ event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: true) }; return }
-        guard var keys = watch?.keys else { return }
+        guard let w = watch, var keys = w.keys else { return }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid, !IsSecureEventInputEnabled(),
+              w.keyFocus?.matches(LearningFocusIdentity.capture(pid: w.pid)) == true else { watchTick(ending: true); return }
         if type == .keyDown { keys.apply(Self.watchedKey(event)) } else { keys.click() }
         watch?.keys = keys
     }
@@ -1435,6 +1446,7 @@ final class PreStart: @unchecked Sendable {
         guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
         guard let base = dataDirectory else { return }
         stopWatching()
+        warm.stop()
         generation = UUID()
         uninserted = nil; setupTestTranscript = ""
         let locations = MurmurDataLocations.standard(base: base)

@@ -391,7 +391,7 @@ struct SettingsView: View {
             }
             .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
             toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
-            toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. If it cannot, press ⌃⌘V to paste the dictation where your cursor is. Your clipboard is always put back. Murmur never sends a message.", isOn: $controller.automaticInsertion)
+            toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. If it cannot, press ⌃⌘V to paste the dictation where your cursor is. The previous clipboard is restored unless you copy something newer. Automatic paste is marked transient; other software may still read or retain it. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
             toggleRow("Open at login", "Starts Murmur in the background when you log in, so the shortcut is ready.", isOn: Binding(get: { controller.openAtLogin }, set: controller.setOpenAtLogin))
@@ -596,7 +596,8 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur adds the spelling to your dictionary; after the same fix in two dictations it also replaces the misheard form. Where an app hides its text, Murmur follows the keys you type in that app for that minute; they are never saved. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
+            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur adds the spelling to your dictionary; after the same fix in two dictations it also replaces the misheard form. Where an app hides its text, Murmur follows keys in that app for that minute. Raw key events stay in memory; filtered spellings are saved. Some editors hide field changes, so unrelated typing can be mistaken for a correction. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
+            toggleRow("Limit learning to readable fields", "Skips keystroke learning in editors whose text cannot be read back. Corrections in readable fields still learn; names in hidden editors must be added manually.", isOn: $controller.learningRequiresReadableField)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
@@ -1109,6 +1110,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupLists) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPunctuation) { controller.settingsChanged() }
             .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
+            .onChange(of: controller.learningRequiresReadableField) { controller.settingsChanged() }
             .onChange(of: controller.transcriptionRoute) { controller.settingsChanged() }
             .onChange(of: controller.cloudTranscriber) { controller.settingsChanged() }
             .onChange(of: controller.cleanupChoice) { controller.settingsChanged() }

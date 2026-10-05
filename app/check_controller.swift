@@ -1,9 +1,17 @@
 import CryptoKit
 import Foundation
 import AppKit
+import ApplicationServices
 
 @main struct ControllerChecks {
     static func main() throws {
+        let a = AXUIElementCreateApplication(getpid()), b = AXUIElementCreateApplication(getpid() + 10000)
+        let identity = LearningFocusIdentity(field: a, window: a)
+        precondition(identity.matches(LearningFocusIdentity(field: a, window: a)))
+        precondition(!identity.matches(LearningFocusIdentity(field: b, window: a)), "field departure refuses")
+        precondition(!identity.matches(LearningFocusIdentity(field: a, window: b)), "window departure refuses")
+        precondition(!identity.matches(LearningFocusIdentity(field: nil, window: a)), "lost identity refuses")
+        precondition(!identity.matches(LearningFocusIdentity(field: a, window: a, secure: true)), "secure metadata refuses")
         for size in [256 * 1024, 4 * 1024 * 1024 + 1] {
             let producer = Process(), pipe = Pipe()
             producer.executableURL = URL(fileURLWithPath: "/usr/bin/head")

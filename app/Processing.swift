@@ -31,6 +31,7 @@ struct ProcessingSettings: Equatable, Sendable {
     var options: CleanupOptions = .standard
     var route: CleanupRoute = .local
     var learningEnabled = true
+    var learningRequiresReadableField = false
     /// Applied by AppController, as soon as the setting changes, through HistoryRouter.
     var historyMode: HistoryMode = .on
     /// Read by AppController for the automatic update check.
@@ -43,6 +44,7 @@ struct ProcessingSettings: Equatable, Sendable {
         static let punctuation = "cleanupPunctuation"
         static let route = "cleanupRoute"
         static let learning = "learningEnabled"
+        static let readableLearning = "learningRequiresReadableField"
         static let historyMode = "historyMode"
         static let updateChecks = "updateChecksEnabled"
     }
@@ -54,6 +56,7 @@ struct ProcessingSettings: Equatable, Sendable {
         settings.options = CleanupOptions(fillers: flag(Key.fillers, true), corrections: flag(Key.corrections, true), lists: flag(Key.lists, true), punctuation: flag(Key.punctuation, true))
         settings.route = defaults.string(forKey: Key.route).flatMap(CleanupRoute.init(rawValue:)) ?? .local
         settings.learningEnabled = flag(Key.learning, true)
+        settings.learningRequiresReadableField = flag(Key.readableLearning, false)
         settings.historyMode = defaults.string(forKey: Key.historyMode).flatMap(HistoryMode.init(rawValue:)) ?? .on
         settings.updateChecksEnabled = flag(Key.updateChecks, true)
         return settings
@@ -66,6 +69,7 @@ struct ProcessingSettings: Equatable, Sendable {
         defaults.set(options.punctuation, forKey: Key.punctuation)
         defaults.set(route.rawValue, forKey: Key.route)
         defaults.set(learningEnabled, forKey: Key.learning)
+        defaults.set(learningRequiresReadableField, forKey: Key.readableLearning)
         defaults.set(historyMode.rawValue, forKey: Key.historyMode)
         defaults.set(updateChecksEnabled, forKey: Key.updateChecks)
     }

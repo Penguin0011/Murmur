@@ -77,9 +77,11 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(fresh.options == .standard && fresh.route == .local && fresh.learningEnabled && fresh.historyMode == .on && fresh.updateChecksEnabled, "defaults: all comforts on, local, learning on")
         var next = ProcessingSettings()
         next.options = CleanupOptions(fillers: false, corrections: true, lists: false)
-        next.route = .cloud; next.learningEnabled = false; next.historyMode = .off; next.updateChecksEnabled = false
+        next.route = .cloud; next.learningEnabled = false; next.learningRequiresReadableField = true; next.historyMode = .off; next.updateChecksEnabled = false
         next.save(to: defaults)
         check(ProcessingSettings.load(from: defaults) == next, "settings round-trip")
+        defaults.removeObject(forKey: ProcessingSettings.Key.readableLearning)
+        check(!ProcessingSettings.load(from: defaults).learningRequiresReadableField, "strict learning is opt-in")
         for key in ["cleanupFillers", "cleanupCorrections", "cleanupLists", "cleanupRoute", "learningEnabled", "historyMode", "updateChecksEnabled"] {
             check(defaults.object(forKey: key) != nil, "key \(key) written")
         }
