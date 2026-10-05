@@ -212,7 +212,7 @@ func checkWipe() throws {
 // MARK: Updates
 
 func checkUpdates() async throws {
-    let release = ReleaseInfo(version: SemanticVersion("0.2.0")!, tag: "v0.2.0", title: "Murmur 0.2.0", notes: "Fixes.", pageURL: URL(string: "https://github.com/Penguin0011/dictation/releases/tag/v0.2.0")!, publishedAt: nil)
+    let release = ReleaseInfo(version: SemanticVersion("0.2.0")!, tag: "v0.2.0", title: "Murmur 0.2.0", notes: "Fixes.", pageURL: URL(string: "https://github.com/Penguin0011/Murmur/releases/tag/v0.2.0")!, publishedAt: nil)
     let fixed: (Date) -> String = { _ in "10:00" }
     check(UpdateText.status(.updateAvailable(release), manual: false, currentVersion: "0.1.0", timeFormatter: fixed) == "Murmur 0.2.0 is available. This Mac has 0.1.0.", "update available names both versions")
     check(UpdateText.status(.upToDate(latest: nil), manual: true, currentVersion: "0.1.0") == "Murmur 0.1.0 is up to date.", "up to date")

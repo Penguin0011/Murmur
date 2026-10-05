@@ -31,8 +31,8 @@ final class TestClock: @unchecked Sendable {
 }
 
 func release(_ tag: String, draft: Bool = false, prerelease: Bool = false, url: String? = nil, notes: String = "Notes") -> [String: Any] {
-    ["url": "https://api.github.com/repos/Penguin0011/dictation/releases/1",
-     "html_url": url ?? "https://github.com/Penguin0011/dictation/releases/tag/\(tag)",
+    ["url": "https://api.github.com/repos/Penguin0011/Murmur/releases/1",
+     "html_url": url ?? "https://github.com/Penguin0011/Murmur/releases/tag/\(tag)",
      "id": 1, "tag_name": tag, "target_commitish": "main", "name": "Murmur \(tag)", "draft": draft, "prerelease": prerelease,
      "created_at": "2026-10-01T10:00:00Z", "published_at": "2026-10-01T10:05:00Z", "body": notes, "assets": []]
 }
@@ -75,29 +75,29 @@ func ok(_ items: [[String: Any]]) -> UpdateHTTPResponse { UpdateHTTPResponse(sta
 
     static func checkConfigurationAndURLs() {
         let config = try! UpdateConfiguration(currentVersion: "1.0.0")
-        check(config.owner == "Penguin0011" && config.repository == "dictation", "default repository")
-        check(config.releasesURL.absoluteString == "https://api.github.com/repos/Penguin0011/dictation/releases?per_page=30", "releases API URL")
+        check(config.owner == "Penguin0011" && config.repository == "Murmur", "default repository")
+        check(config.releasesURL.absoluteString == "https://api.github.com/repos/Penguin0011/Murmur/releases?per_page=30", "releases API URL")
         check((try? UpdateConfiguration(currentVersion: "1.0.0", owner: "evil/../x")) == nil, "owner with slash rejected")
         check((try? UpdateConfiguration(currentVersion: "1.0.0", repository: "..")) == nil, "dot-dot repository rejected")
         check((try? UpdateConfiguration(currentVersion: "not-a-version")) == nil, "invalid current version rejected")
         check((try? UpdateConfiguration(currentVersion: "1.0.0", owner: "someone", repository: "murmur"))?.releasesURL.path == "/repos/someone/murmur/releases", "configurable repository")
 
-        let good = ["https://github.com/Penguin0011/dictation/releases/tag/v1.2.0", "https://github.com/penguin0011/Dictation/releases/tag/v1.2.0"]
+        let good = ["https://github.com/Penguin0011/Murmur/releases/tag/v1.2.0", "https://github.com/penguin0011/Murmur/releases/tag/v1.2.0"]
         for s in good { check(config.isValidReleasePage(URL(string: s)!), "accepts \(s)") }
         let bad = [
-            "http://github.com/Penguin0011/dictation/releases/tag/v1.2.0",
-            "https://github.com.evil.example/Penguin0011/dictation/releases/tag/v1",
-            "https://github.com@evil.example/Penguin0011/dictation/releases/tag/v1",
-            "https://user:pass@github.com/Penguin0011/dictation/releases/tag/v1",
-            "https://github.com:8443/Penguin0011/dictation/releases/tag/v1",
+            "http://github.com/Penguin0011/Murmur/releases/tag/v1.2.0",
+            "https://github.com.evil.example/Penguin0011/Murmur/releases/tag/v1",
+            "https://github.com@evil.example/Penguin0011/Murmur/releases/tag/v1",
+            "https://user:pass@github.com/Penguin0011/Murmur/releases/tag/v1",
+            "https://github.com:8443/Penguin0011/Murmur/releases/tag/v1",
             "https://github.com/Other/dictation/releases/tag/v1",
-            "https://github.com/Penguin0011/dictation-fork/releases/tag/v1",
-            "https://github.com/Penguin0011/dictation/releases/",
-            "https://github.com/Penguin0011/dictation/issues/1",
-            "https://github.com/Penguin0011/dictation/releases/../../Other/x/releases/tag/v1",
-            "https://github.com/Penguin0011/dictation/releases/%2e%2e/%2e%2e/Other",
-            "https://github.com/Penguin0011/dictation/releases/tag/v1?redirect=https://evil.example",
-            "https://objects.githubusercontent.com/Penguin0011/dictation/releases/tag/v1",
+            "https://github.com/Penguin0011/Murmur-fork/releases/tag/v1",
+            "https://github.com/Penguin0011/Murmur/releases/",
+            "https://github.com/Penguin0011/Murmur/issues/1",
+            "https://github.com/Penguin0011/Murmur/releases/../../Other/x/releases/tag/v1",
+            "https://github.com/Penguin0011/Murmur/releases/%2e%2e/%2e%2e/Other",
+            "https://github.com/Penguin0011/Murmur/releases/tag/v1?redirect=https://evil.example",
+            "https://objects.githubusercontent.com/Penguin0011/Murmur/releases/tag/v1",
             "javascript:alert(1)",
         ]
         for s in bad { check(URL(string: s).map { !config.isValidReleasePage($0) } ?? true, "rejects \(s)") }
@@ -110,7 +110,7 @@ func ok(_ items: [[String: Any]]) -> UpdateHTTPResponse { UpdateHTTPResponse(sta
         }
         if case .updateAvailable(let info) = eval([release("v1.2.0"), release("v1.3.0", notes: "Fixes insertion."), release("v1.2.5")]) {
             check(info.version == v("1.3.0") && info.tag == "v1.3.0" && info.notes == "Fixes insertion.", "picks highest stable with notes")
-            check(info.pageURL.absoluteString == "https://github.com/Penguin0011/dictation/releases/tag/v1.3.0" && info.title == "Murmur v1.3.0", "carries URL and title")
+            check(info.pageURL.absoluteString == "https://github.com/Penguin0011/Murmur/releases/tag/v1.3.0" && info.title == "Murmur v1.3.0", "carries URL and title")
             check(info.publishedAt == ISO8601DateFormatter().date(from: "2026-10-01T10:05:00Z"), "published date parsed")
         } else { check(false, "update expected") }
         check(eval([release("v2.0.0", draft: true), release("v1.2.0")]) == .upToDate(latest: v("1.2.0")), "drafts ignored")
@@ -123,7 +123,7 @@ func ok(_ items: [[String: Any]]) -> UpdateHTTPResponse { UpdateHTTPResponse(sta
         } else { check(false, "prerelease update expected when opted in") }
         check(eval([release("nightly"), release("v1.1.9")]) == .upToDate(latest: v("1.1.9")), "unparseable tags skipped")
         check(eval([]) == .noReleases, "empty list → noReleases")
-        check(eval([release("v9.0.0", url: "https://evil.example/Penguin0011/dictation/releases/tag/v9.0.0")]) == .failed(.invalidReleaseURL), "newer release with foreign URL refused")
+        check(eval([release("v9.0.0", url: "https://evil.example/Penguin0011/Murmur/releases/tag/v9.0.0")]) == .failed(.invalidReleaseURL), "newer release with foreign URL refused")
         if case .updateAvailable(let info) = eval([release("v9.0.0", url: "https://evil.example/x"), release("v1.4.0")]) {
             check(info.version == v("1.4.0"), "invalid-link release skipped in favour of valid newer one")
         } else { check(false, "valid release expected") }

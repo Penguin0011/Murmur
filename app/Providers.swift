@@ -147,6 +147,8 @@ enum ProviderError: Error, Equatable, Sendable, CustomStringConvertible, Localiz
             return "\(name) rejected the request (HTTP \(status)). Check the model setting."
         case .invalidConfiguration(let p) where p == .localServer:
             return "The local model server isn't set up. Check the server address (http or https, no user name or password) and the model name in Settings."
+        case .invalidConfiguration(let p) where p == .customAPI:
+            return "The custom API provider isn't set up. Check the API base URL, model name and key in Settings."
         case .invalidConfiguration:
             return "\(name) isn't set up. Add an API key and model in Settings."
         case .serverNotRunning(_, let address):
@@ -1602,7 +1604,7 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     static let defaultTimeout: TimeInterval = 120
     static let maximumTimeout: TimeInterval = 300
 
-    let id = ProviderID.localServer
+    let id: ProviderID
     /// Normalized base without a trailing `/v1`.
     let baseURL: URL
     var model: String
@@ -1614,10 +1616,11 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     var transport: HTTPTransport = URLSessionTransport(followRedirects: false)
 
     /// Throws `invalidConfiguration(.localServer)` for a URL `LocalEndpoint.normalize` rejects.
-    init(baseURL: String, model: String, apiKey: APIKey? = nil) throws {
+    init(baseURL: String, model: String, apiKey: APIKey? = nil, provider: ProviderID = .localServer) throws {
         self.baseURL = try LocalEndpoint.normalize(baseURL)
         self.model = model
         self.apiKey = apiKey
+        id = provider
     }
 
     var locality: EndpointLocality { LocalEndpoint.locality(of: baseURL) }
@@ -1649,18 +1652,18 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
         }
     }
 
-    static func makeRequest(messages: CleanupMessages, endpoint: URL, model: String, apiKey: APIKey?, maxTokens: Int? = 4096) throws -> URLRequest {
-        try requireLocalModel(model)
+    static func makeRequest(messages: CleanupMessages, endpoint: URL, model: String, apiKey: APIKey?, maxTokens: Int? = 4096, provider: ProviderID = .localServer) throws -> URLRequest {
+        try requireLocalModel(model, provider: provider)
         return try OpenAIChatFormat.makeRequest(endpoint: endpoint, bearer: apiKey, model: model, messages: messages, maxTokens: maxTokens)
     }
 
-    static func parse(_ result: HTTPResult) throws -> String { try OpenAIChatFormat.parse(provider: .localServer, result: result) }
+    static func parse(_ result: HTTPResult, provider: ProviderID = .localServer) throws -> String { try OpenAIChatFormat.parse(provider: provider, result: result) }
 
     /// Model ids may contain characters such as `@` or `:` (LM Studio, Ollama tags). They are only
     /// sent inside the JSON body, so any printable ASCII up to 200 characters is accepted.
-    static func requireLocalModel(_ model: String) throws {
+    static func requireLocalModel(_ model: String, provider: ProviderID = .localServer) throws {
         guard !model.isEmpty, model.count <= 200, model.unicodeScalars.allSatisfy({ $0.value > 0x20 && $0.value < 0x7F })
-        else { throw ProviderError.invalidConfiguration(.localServer) }
+        else { throw ProviderError.invalidConfiguration(provider) }
     }
 
     func makeGetRequest(_ url: URL) -> URLRequest {
@@ -1693,8 +1696,8 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     }
 
     func cleanup(_ messages: CleanupMessages) async throws -> String {
-        let request = try Self.makeRequest(messages: messages, endpoint: chatCompletionsURL, model: model, apiKey: sendableKey, maxTokens: maxTokens)
-        return try Self.parse(try await ProviderHTTP(provider: id, transport: transport, deadline: effectiveTimeout).execute(request))
+        let request = try Self.makeRequest(messages: messages, endpoint: chatCompletionsURL, model: model, apiKey: sendableKey, maxTokens: maxTokens, provider: id)
+        return try Self.parse(try await ProviderHTTP(provider: id, transport: transport, deadline: effectiveTimeout).execute(request), provider: id)
     }
 
     /// Lists model ids. Tries `GET {base}/v1/models`; only if that returns 404, tries Ollama's

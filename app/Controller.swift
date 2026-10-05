@@ -293,14 +293,11 @@ final class PreStart: @unchecked Sendable {
     @Published var transcriptionRoute: TranscriptionRoute
     @Published var cloudTranscriber: CloudTranscriber
     @Published var cleanupChoice: CleanupChoice
-    @Published var localServerURL: String
-    @Published var localServerModel: String
-    @Published var localServerModels: [String] = []
-    @Published var localServerMessage = ""
-    @Published var findingModels = false
+    @Published var customAPIBaseURL: String
+    @Published var customAPIModel: String
     @Published var savedKeys: Set<ProviderID> = []
     @Published var keyMessages: [ProviderID: String] = [:]
-    var routeSettings: RouteSettings { RouteSettings(transcription: transcriptionRoute, cloudTranscriber: cloudTranscriber, cleanup: cleanupChoice, serverURL: localServerURL, serverModel: localServerModel) }
+    var routeSettings: RouteSettings { RouteSettings(transcription: transcriptionRoute, cloudTranscriber: cloudTranscriber, cleanup: cleanupChoice, customAPIBaseURL: customAPIBaseURL, customAPIModel: customAPIModel) }
     var appliedTranscriptionIsLocal: Bool { appliedRoutes.transcription == .local }
     var appliedCleanupIsLocal: Bool { appliedRoutes.cleanup == .localRules }
     /// What a stage would send off this Mac with the settings as edited, or nil when nothing leaves.
@@ -327,7 +324,7 @@ final class PreStart: @unchecked Sendable {
     private var started = false
     private let dictionaryModelDirectory = DictionaryModelFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser)
     private var lastAutomaticUpdateAttempt: Date?
-    // TODO(R12): UpdateConfiguration still defaults to Penguin0011/dictation; confirm the release repository before shipping.
+    // R12 uses the confirmed Penguin0011/Murmur release repository.
     private lazy var updateChecker: UpdateChecker? = (try? UpdateConfiguration(currentVersion: currentVersion)).map { UpdateChecker(configuration: $0) }
     private var retry: RetryAudio?
     private var processing: ProcessingCoordinator?
@@ -424,7 +421,7 @@ final class PreStart: @unchecked Sendable {
         updateChecksEnabled = processingSettings.updateChecksEnabled
         let routes = RouteSettings.load(from: defaults)
         transcriptionRoute = routes.transcription; cloudTranscriber = routes.cloudTranscriber; cleanupChoice = routes.cleanup
-        localServerURL = routes.serverURL; localServerModel = routes.serverModel; appliedRoutes = routes
+        customAPIBaseURL = routes.customAPIBaseURL; customAPIModel = routes.customAPIModel; appliedRoutes = routes
         self.preview = preview
         let isolatedStorage = isolatedStorage ?? preview
         do {
@@ -460,6 +457,10 @@ final class PreStart: @unchecked Sendable {
         modelStatus = downloader?.status() ?? .notDownloaded
         dictionaryModelStatus = dictionaryDownloader?.status() ?? .notDownloaded
         warm.onDictionaryStatus = { [weak self] failed in DispatchQueue.main.async { self?.dictionarySupportFailed = failed } }
+        if !preview {
+            do { try RouteSettings.migrateCustomAPI(in: defaults, credentials: credentials) }
+            catch { keyMessages[.customAPI] = KeyText.storeFailed }
+        }
         refreshKeys()
         // Choose Folder, Use Default and a finished download all change the folder, even with
         // Settings closed; apply each so the folder survives a relaunch.
@@ -616,7 +617,7 @@ final class PreStart: @unchecked Sendable {
     }
     private func revertRoutes() {
         transcriptionRoute = appliedRoutes.transcription; cloudTranscriber = appliedRoutes.cloudTranscriber; cleanupChoice = appliedRoutes.cleanup
-        localServerURL = appliedRoutes.serverURL; localServerModel = appliedRoutes.serverModel
+        customAPIBaseURL = appliedRoutes.customAPIBaseURL; customAPIModel = appliedRoutes.customAPIModel
     }
     private func routePlan(_ routes: RouteSettings, cleanupSendsText: Bool) -> RoutePlan {
         RoutePlan.make(routes, cleanupSendsText: cleanupSendsText) { try? self.credentials.read($0) }
@@ -1433,7 +1434,7 @@ final class PreStart: @unchecked Sendable {
         setPhase(outcome.succeeded ? "Ready" : "Error", outcome.text)
     }
 
-    // MARK: API keys (R5) and the local model server
+    // MARK: API keys (R5) and custom API provider
 
     /// Publishes which providers have a key. The key itself never leaves the Keychain store.
     func refreshKeys() { savedKeys = Set(KeyText.providers.filter { credentials.exists($0) }) }
@@ -1452,27 +1453,10 @@ final class PreStart: @unchecked Sendable {
         let key: APIKey?
         do { key = try credentials.read(provider) } catch { keyMessages[provider] = KeyText.unreadable; return }
         keyMessages[provider] = KeyText.checking
-        let server = localServerURL
+        let endpoint = customAPIBaseURL
         Task { @MainActor [weak self] in
-            let message = await KeyCheck.run(provider, key: key, serverURL: server)
+            let message = await KeyCheck.run(provider, key: key, apiBaseURL: endpoint)
             self?.keyMessages[provider] = message
-        }
-    }
-    /// Lists the local server's models (sends no transcript). Fills the model name if it is empty.
-    func findLocalModels() {
-        guard !findingModels else { return }
-        let key = try? credentials.read(.localServer)
-        findingModels = true; localServerMessage = KeyText.checking
-        let server = localServerURL
-        Task { @MainActor [weak self] in
-            let result = await KeyCheck.discoverModels(serverURL: server, key: key)
-            guard let self else { return }
-            self.findingModels = false
-            self.localServerMessage = KeyCheck.discoveryMessage(result)
-            if case .success(let models) = result {
-                self.localServerModels = models
-                if self.localServerModel.isEmpty, let first = models.first { self.localServerModel = first }
-            }
         }
     }
 

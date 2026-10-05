@@ -72,19 +72,16 @@ func makeTranscriptionProvider(id: CloudTranscriber, key: APIKey?) -> Transcript
 enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
     /// The built-in RuleCleaner. The default.
     case localRules = "local-rules"
-    /// A user-run OpenAI-compatible server (Ollama, LM Studio, llama-server, vLLM).
-    case localServer = "local-server"
     case gemini
-    case openrouter
+    case customAPI = "custom-api"
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
         case .localRules: return "Local rules (this Mac)"
-        case .localServer: return "Local model server"
-        case .gemini: return "Gemini, then Gemma when rate limited"
-        case .openrouter: return "OpenRouter"
+        case .gemini: return "Gemini"
+        case .customAPI: return "Custom API provider"
         }
     }
 
@@ -94,44 +91,62 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
     var providerID: ProviderID? {
         switch self {
         case .localRules: return nil
-        case .localServer: return .localServer
         case .gemini: return .gemini
-        case .openrouter: return .openrouter
+        case .customAPI: return .customAPI
         }
     }
 }
 
-/// The one place a cleanup provider is constructed. Nil for local rules, a missing cloud key, an
-/// invalid server address or an empty model name. The local server key is optional.
-func makeCleanupProvider(_ choice: CleanupChoice, key: APIKey?, serverURL: String, serverModel: String) -> CleanupProvider? {
+/// The one place a cleanup provider is constructed. Nil for local rules or invalid custom settings.
+func makeCleanupProvider(_ choice: CleanupChoice, key: APIKey?, apiBaseURL: String, model: String) -> CleanupProvider? {
     switch choice {
     case .localRules: return nil
-    case .localServer:
-        let model = serverModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !model.isEmpty else { return nil }
-        return try? OpenAICompatibleCleanupProvider(baseURL: serverURL, model: model, apiKey: key)
     case .gemini: return key.map { GeminiCleanupProvider(apiKey: $0) }
-    case .openrouter: return key.map { OpenRouterCleanupProvider(apiKey: $0) }
+    case .customAPI:
+        let name = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        return try? OpenAICompatibleCleanupProvider(baseURL: apiBaseURL, model: name, apiKey: key, provider: .customAPI)
     }
 }
 
 /// Route settings persisted in UserDefaults. Keys are never stored here (they live in the Keychain).
 struct RouteSettings: Equatable, Sendable {
-    static let defaultServerURL = OpenAICompatibleCleanupProvider.ollamaDefault
+    static let defaultCustomAPIURL = "https://api.cerebras.ai/v1"
+    static let defaultCustomAPIModel = "gpt-oss-120b"
 
     var transcription: TranscriptionRoute = .local
     var cloudTranscriber: CloudTranscriber = .geminiTranscribe
     var cleanup: CleanupChoice = .localRules
-    var serverURL: String = RouteSettings.defaultServerURL
-    var serverModel: String = ""
+    var customAPIBaseURL: String = RouteSettings.defaultCustomAPIURL
+    var customAPIModel: String = RouteSettings.defaultCustomAPIModel
 
     enum Key {
         static let transcription = "transcriptionRoute"
         static let cloudTranscriber = "cloudTranscriber"
         static let cleanup = "cleanupChoice"
-        static let serverURL = "localServerURL"
-        static let serverModel = "localServerModel"
+        static let customAPIBaseURL = "customAPIBaseURL"
+        static let customAPIModel = "customAPIModel"
+        static let legacyServerURL = "localServerURL"
+        static let legacyServerModel = "localServerModel"
         static let acknowledged = "acknowledgedCloudRoutes"
+    }
+
+    static func legacyCustomAPIKey(from choice: String?) -> ProviderID? {
+        switch choice {
+        case "local-server": return .localServer
+        case "openrouter": return .openrouter
+        case "cerebras": return .cerebras
+        default: return nil
+        }
+    }
+
+    /// Persist migration only after copying the selected route's key, so failure can be retried.
+    static func migrateCustomAPI(in defaults: UserDefaults, credentials: CredentialStore) throws {
+        guard let legacy = legacyCustomAPIKey(from: defaults.string(forKey: Key.cleanup)) else { return }
+        if !credentials.exists(.customAPI), let key = try credentials.read(legacy) {
+            try credentials.save(key, for: .customAPI)
+        }
+        load(from: defaults).save(to: defaults)
     }
 
     /// Missing or unknown values fall back to the approved local defaults.
@@ -139,9 +154,24 @@ struct RouteSettings: Equatable, Sendable {
         var settings = RouteSettings()
         settings.transcription = defaults.string(forKey: Key.transcription).flatMap(TranscriptionRoute.init(rawValue:)) ?? .local
         settings.cloudTranscriber = defaults.string(forKey: Key.cloudTranscriber).flatMap(CloudTranscriber.init(rawValue:)) ?? .geminiTranscribe
-        settings.cleanup = defaults.string(forKey: Key.cleanup).flatMap(CleanupChoice.init(rawValue:)) ?? .localRules
-        settings.serverURL = defaults.string(forKey: Key.serverURL) ?? defaultServerURL
-        settings.serverModel = defaults.string(forKey: Key.serverModel) ?? ""
+        let oldChoice = defaults.string(forKey: Key.cleanup)
+        settings.cleanup = oldChoice.flatMap(CleanupChoice.init(rawValue:)) ?? (legacyCustomAPIKey(from: oldChoice) == nil ? .localRules : .customAPI)
+        settings.customAPIBaseURL = defaults.string(forKey: Key.customAPIBaseURL) ?? {
+            switch oldChoice {
+            case "cerebras": return "https://api.cerebras.ai/v1"
+            case "openrouter": return "https://openrouter.ai/api/v1"
+            case "local-server": return defaults.string(forKey: Key.legacyServerURL) ?? OpenAICompatibleCleanupProvider.ollamaDefault
+            default: return defaultCustomAPIURL
+            }
+        }()
+        settings.customAPIModel = defaults.string(forKey: Key.customAPIModel) ?? {
+            switch oldChoice {
+            case "cerebras": return "gpt-oss-120b"
+            case "openrouter": return OpenRouterCleanupProvider.defaultModel
+            case "local-server": return defaults.string(forKey: Key.legacyServerModel) ?? ""
+            default: return defaultCustomAPIModel
+            }
+        }()
         return settings
     }
 
@@ -149,8 +179,8 @@ struct RouteSettings: Equatable, Sendable {
         defaults.set(transcription.rawValue, forKey: Key.transcription)
         defaults.set(cloudTranscriber.rawValue, forKey: Key.cloudTranscriber)
         defaults.set(cleanup.rawValue, forKey: Key.cleanup)
-        defaults.set(serverURL, forKey: Key.serverURL)
-        defaults.set(serverModel, forKey: Key.serverModel)
+        defaults.set(customAPIBaseURL, forKey: Key.customAPIBaseURL)
+        defaults.set(customAPIModel, forKey: Key.customAPIModel)
     }
 }
 
@@ -197,10 +227,10 @@ struct RoutePlan {
         var cleaner: CleanupProvider?
         if settings.cleanup != .localRules && cleanupSendsText, let provider = settings.cleanup.providerID {
             let storedKey = key(provider)
-            cleaner = makeCleanupProvider(settings.cleanup, key: storedKey, serverURL: settings.serverURL, serverModel: settings.serverModel)
+            cleaner = makeCleanupProvider(settings.cleanup, key: storedKey, apiBaseURL: settings.customAPIBaseURL, model: settings.customAPIModel)
             if cleaner == nil, refusal == nil { refusal = ProviderError.invalidConfiguration(provider).userMessage }
-            let preview = cleaner ?? makeCleanupProvider(settings.cleanup, key: storedKey ?? (provider == .localServer ? nil : placeholderKey),
-                                                        serverURL: settings.serverURL, serverModel: "disclosure-only")
+            let preview = cleaner ?? makeCleanupProvider(settings.cleanup, key: storedKey ?? placeholderKey,
+                                                        apiBaseURL: settings.customAPIBaseURL, model: settings.customAPIModel)
             if let disclosure = preview?.disclosure, !disclosure.staysOnThisMac {
                 stages.append(DisclosureStage(signature: "cleanup=\(settings.cleanup.rawValue)@\(disclosure.destinationHost)", disclosure: disclosure))
             }
@@ -211,23 +241,20 @@ struct RoutePlan {
 
 // MARK: - Disclosure acknowledgement
 
-/// Stores the signatures of the stages the user confirmed. A stage needs confirmation when its
-/// signature is not stored: on first cloud use, and again whenever its route, provider or
-/// endpoint changes (switching away and back also asks again, since the stored set is replaced).
+/// Stores cloud-transcription confirmations. Cleanup disclosures are shown inline in Settings.
 enum DisclosureAcknowledgement {
     static func acknowledged(_ defaults: UserDefaults) -> Set<String> {
         Set(defaults.stringArray(forKey: RouteSettings.Key.acknowledged) ?? [])
     }
 
-    /// Stages the user has not confirmed yet. Empty means no alert is needed.
+    /// Transcription stages needing confirmation. Cleanup disclosures stay visible inline.
     static func pending(_ plan: RoutePlan, acknowledged: Set<String>) -> [DisclosureStage] {
-        plan.stages.filter { !acknowledged.contains($0.signature) }
+        plan.stages.filter { $0.disclosure.stage == .transcription && !acknowledged.contains($0.signature) }
     }
 
-    /// Replaces the stored set with exactly this plan's stages: call after confirmation, and on
-    /// Apply when nothing was pending, so a stage that was switched away from asks again later.
+    /// Replaces the stored set with this plan's transcription stages, so switching routes asks again.
     static func record(_ plan: RoutePlan, in defaults: UserDefaults) {
-        defaults.set(plan.signatures, forKey: RouteSettings.Key.acknowledged)
+        defaults.set(plan.stages.filter { $0.disclosure.stage == .transcription }.map(\.signature), forKey: RouteSettings.Key.acknowledged)
     }
 }
 
@@ -489,18 +516,17 @@ enum KeyText {
     static let missing = "Save a key first."
     static let unreadable = "The saved key could not be read from the Keychain."
 
-    /// Providers that take a key in Settings. Fireworks is not offered.
-    static let providers: [ProviderID] = [.gemini, .openrouter, .localServer]
+    /// OpenRouter remains available for speech transcription; custom cleanup uses its own key.
+    static let providers: [ProviderID] = [.gemini, .openrouter, .customAPI]
 
     static func validated(_ provider: ProviderID) -> String {
-        provider == .localServer ? "The local model server answered." : "\(provider.displayName) accepted the key."
+        provider == .localServer ? "The local model server answered." : provider == .customAPI ? "The custom API endpoint answered." : "\(provider.displayName) accepted the key."
     }
 }
 
 enum KeyCheck {
     /// One validation request (no tokens used). Returns a message with no key or response body.
-    /// The local server's key is optional; it validates the server at `serverURL`.
-    static func run(_ provider: ProviderID, key: APIKey?, serverURL: String, transport: HTTPTransport? = nil) async -> String {
+    static func run(_ provider: ProviderID, key: APIKey?, apiBaseURL: String, transport: HTTPTransport? = nil) async -> String {
         do {
             switch provider {
             case .gemini:
@@ -511,9 +537,15 @@ enum KeyCheck {
                 guard let key else { return KeyText.missing }
                 var p = OpenRouterCleanupProvider(apiKey: key); if let transport { p.transport = transport }
                 try await p.validate()
-            case .localServer:
-                var p = try OpenAICompatibleCleanupProvider(baseURL: serverURL, model: "validation", apiKey: key); if let transport { p.transport = transport }
+            case .customAPI:
+                var p = try OpenAICompatibleCleanupProvider(baseURL: apiBaseURL, model: "validation", apiKey: key, provider: .customAPI)
+                if let transport { p.transport = transport }
                 try await p.validate()
+            case .localServer:
+                var p = try OpenAICompatibleCleanupProvider(baseURL: apiBaseURL, model: "validation", apiKey: key); if let transport { p.transport = transport }
+                try await p.validate()
+            case .cerebras:
+                return ProviderError.invalidConfiguration(provider).userMessage
             case .fireworks:
                 return ProviderError.invalidConfiguration(provider).userMessage
             }

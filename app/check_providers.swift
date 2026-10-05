@@ -189,7 +189,7 @@ func checkKeychainStore() {
         check((try? store.delete(.gemini)) != nil, "deleting missing key succeeds")
         try? store.deleteAll()
         check((try? store.read(.openrouter)) == .some(nil), "deleteAll removes every key")
-        check(ProviderID.allCases.map(\.rawValue) == ["fireworks", "gemini", "openrouter", "localServer"], "Keychain account names are provider ids")
+        check(ProviderID.allCases.map(\.rawValue) == ["fireworks", "gemini", "openrouter", "cerebras", "customAPI", "localServer"], "Keychain account names are provider ids")
         check(CredentialError.keychain(status: -25300).description == "Keychain operation failed (status -25300).", "credential error has status only")
     }
 

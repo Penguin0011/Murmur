@@ -10,9 +10,8 @@ Verified on **2026-10-03** from official documentation, fetched that day. Tags: 
 | Speech to text | OpenRouter | **Documented and current.** `POST https://openrouter.ai/api/v1/audio/transcriptions` accepts OpenAI-style multipart. [Certain] Recommended as the launch STT route, pending a live test with a real key. [Likely] |
 | Speech to text | Gemini (audio-in LLM) | `generateContent` with inline audio. **Implemented as an LLM transcriber** (`GeminiTranscriptionProvider`), with mitigations; see "Gemini audio transcription" below. It is not ASR. [Certain] |
 | Speech to text | Gemini 3.5 Transcribe | A dedicated ASR model, `gemini-3.5-transcribe`, documented only through the Beta Interactions API (`POST /v1beta/interactions`). [Certain] **Implemented** as `GeminiTranscribeProvider`, per the user's decision of 2026-10-03, with `store` on: Google keeps each interaction 55 days (paid tier) or 1 day (free tier), and it can be deleted by API. See "Gemini 3.5 Transcribe" below. |
-| Cleanup | Local OpenAI-compatible server | Ollama, LM Studio, llama.cpp `llama-server` and vLLM all document `POST /v1/chat/completions` and `GET /v1/models`. [Certain] Implemented as `OpenAICompatibleCleanupProvider`. |
+| Cleanup | Custom OpenAI-compatible API | Configurable base URL and model ID, `POST /v1/chat/completions`; may be hosted or a local server. Implemented as `OpenAICompatibleCleanupProvider`. |
 | Cleanup | Gemini | `models.generateContent` is documented and "remains fully supported". [Certain] Implemented. |
-| Cleanup | OpenRouter | `POST https://openrouter.ai/api/v1/chat/completions`. [Certain] Implemented. |
 
 `Providers.swift` still includes the Fireworks STT client, because the PRD named it and the endpoint may come back. It is marked deprecated and unverified, and its base URL is configurable. The integration lead should not offer it in settings unless a live test with a real key passes. [Certain]
 
