@@ -749,6 +749,11 @@ struct SettingsView: View {
             if let warning = controller.historyCapWarning {
                 Text(warning).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
             }
+            if controller.hasRecoveryAudio {
+                Button("Show Retained Audio…", action: controller.revealRecoveryAudio)
+                    .buttonStyle(InkButtonStyle(kind: .outline)).padding(.top, 20)
+                help("Failed recordings stay on this Mac for up to 24 hours.").padding(.top, 8)
+            }
             HStack(spacing: 20) {
                 titled("Delete all data", DeleteAllDataText.explanation)
                 Spacer()
@@ -1208,47 +1213,36 @@ private struct BubbleView: View {
         message.components(separatedBy: ". ").first ?? "Dictation failed."
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(.orange).accessibilityHidden(true).allowsHitTesting(false)
-                Text(summary).font(.system(size: 12, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                    .help(message).allowsHitTesting(false).accessibilityHidden(true)
-                Spacer(minLength: 4)
-            }
-            // These keep only the pop-up; saved audio stays reachable from Murmur's window.
-            if controller.recoveryAudio != nil || controller.hasRecoveryAudio,
-               !["No speech was detected", "No audio was captured", "Transcription failed", "Cleanup was held"].contains(where: message.hasPrefix) {
-                Button("Audio…", action: controller.revealRecoveryAudio)
-                    .buttonStyle(.bordered).controlSize(.small)
-            }
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle").font(.system(size: 12)).foregroundStyle(.orange).accessibilityHidden(true).allowsHitTesting(false)
+            Text(summary).font(.system(size: 12, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                .help(message).allowsHitTesting(false).accessibilityHidden(true)
+            Spacer(minLength: 4)
         }
         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            Button {
-                controller.showSettings()
-                DispatchQueue.main.async { NotificationCenter.default.post(name: .dictationShowError, object: nil) }
-            } label: {
-                Color.clear.contentShape(RoundedRectangle(cornerRadius: 18))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(summary)
-            .accessibilityHint("Open Murmur to view the full error.")
-        }
-        .accessibilityElement(children: .contain)
+        .contentShape(RoundedRectangle(cornerRadius: 18))
+        .onTapGesture { openError() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(summary)
+        .accessibilityHint("Open Murmur to view the full error.")
+        .accessibilityAction { openError() }
         .modifier(UtilityGlass(radius: 18))
+    }
+
+    private func openError() {
+        controller.showSettings()
+        DispatchQueue.main.async { NotificationCenter.default.post(name: .dictationShowError, object: nil) }
     }
 }
 
-/// Shown once when correction learning adds a word (Wispr Flow style): a short notice with Undo.
+/// A short, buttonless notice; learned entries can be removed in Settings → Dictionary.
 private struct LearnedNotice: View {
     let word: String
-    let undo: () -> Void
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "character.book.closed").font(.system(size: 12)).foregroundStyle(.secondary).accessibilityHidden(true)
             Text("Added “\(word)” to dictionary").font(.system(size: 12, weight: .medium)).lineLimit(1)
             Spacer(minLength: 4)
-            Button("Undo", action: undo).buttonStyle(.bordered).controlSize(.small)
         }
         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -1298,11 +1292,11 @@ final class BubblePresenter {
 
     private var notice: UUID?
     /// The learned-word notice; leaves after 5 s unless something else took the panel first.
-    func showLearned(_ word: String, screen: NSScreen?, undo: @escaping () -> Void) {
+    func showLearned(_ word: String, screen: NSScreen?) {
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let width = min(320, max(200, frame.width - 32))
         let shown = UUID()
-        let host = NSHostingView(rootView: LearnedNotice(word: word, undo: { [weak self] in undo(); self?.hide() }).frame(width: width))
+        let host = NSHostingView(rootView: LearnedNotice(word: word).frame(width: width))
         panel.contentView = host
         panel.hasShadow = true
         panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.minY + 24, width: width, height: host.fittingSize.height), display: true)

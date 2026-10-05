@@ -1275,7 +1275,7 @@ final class PreStart: @unchecked Sendable {
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
     }
     private func announceLearned(_ entry: DictionaryEntry) {
-        bubble.showLearned(entry.preferred, screen: destinationScreen) { [weak self] in self?.deleteDictionaryEntry(entry) }
+        bubble.showLearned(entry.preferred, screen: destinationScreen)
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: "Added \(entry.preferred) to your dictionary.", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
     private func stopWatching() {

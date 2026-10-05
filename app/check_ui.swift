@@ -46,9 +46,12 @@ import SwiftUI
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
-            controller.message = "Model verification failed. Choose the pinned model folder."
+            controller.message = CommandLine.arguments.contains("--credential-warning")
+                ? "Save the API key again for this server address."
+                : "Model verification failed. Choose the pinned model folder."
+            if CommandLine.arguments.contains("--recovery") { controller.hasRecoveryAudio = true }
             controller.bubble.show(phase: controller.phase, message: controller.message)
-            if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", screen: nil) { print("Undo pressed."); fflush(stdout) } }
+            if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", screen: nil) }
             if CommandLine.arguments.contains("--bubble-only") { window.orderOut(nil) }
             print("Fixture content: \(window.contentLayoutRect.size), full window: \(window.frame.size)"); fflush(stdout)
         }
