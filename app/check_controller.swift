@@ -4,6 +4,20 @@ import AppKit
 
 @main struct ControllerChecks {
     static func main() throws {
+        for size in [256 * 1024, 4 * 1024 * 1024 + 1] {
+            let producer = Process(), pipe = Pipe()
+            producer.executableURL = URL(fileURLWithPath: "/usr/bin/head")
+            producer.arguments = ["-c", "\(size)", "/dev/zero"]; producer.standardOutput = pipe
+            try producer.run(); try pipe.fileHandleForWriting.close()
+            do {
+                let data = try readHelperOutput(pipe.fileHandleForReading)
+                precondition(size == data.count && size < 4 * 1024 * 1024, "stdout larger than pipe capacity drains without a file")
+            } catch {
+                precondition(size > 4 * 1024 * 1024, "oversized helper output refuses")
+                if producer.isRunning { kill(producer.processIdentifier, SIGKILL) }
+            }
+            producer.waitUntilExit(); try pipe.fileHandleForReading.close()
+        }
         // Keys the correction watch follows: shifted letters keep their case even when a synthetic
         // event carries only the Shift flag; Cmd chords are not edits it can follow.
         func key(_ code: CGKeyCode, _ text: String, _ flags: CGEventFlags) -> KeystrokeSpan.Key {
@@ -115,6 +129,16 @@ import AppKit
         precondition(!controller.savedKeys.contains(.gemini))
         // The learning lexicon uses the real English spell checker.
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
+        controller.uninserted = "held synthetic text"; controller.setupTestTranscript = "setup synthetic text"
+        controller.phase = "Processing"
+        controller.deleteConfirmedData()
+        precondition(controller.uninserted != nil && !controller.setupTestTranscript.isEmpty && manager.fileExists(atPath: recovery.path), "busy wipe refuses")
+        controller.phase = "Ready"
+        controller.deleteConfirmedData()
+        precondition(controller.uninserted == nil && controller.setupTestTranscript.isEmpty, "wipe clears paste and setup buffers")
+        precondition(controller.history.isEmpty && !controller.hasRecoveryAudio && !manager.fileExists(atPath: recovery.path), "wipe refreshes empty storage")
+        controller.pasteUninserted()
+        precondition(controller.uninserted == nil, "deleted text cannot be pasted later")
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
         try warmRunnerChecks()
         try chunkChecks()

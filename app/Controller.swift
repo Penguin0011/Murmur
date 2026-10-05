@@ -13,6 +13,18 @@ import ServiceManagement
 /// Content-free timing and stop reasons, alongside the capture and shortcut timing.
 private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
 
+private let helperOutputLimit = 4 * 1024 * 1024
+
+/// Drain stdout while the helper runs; waiting for exit first can deadlock on a full pipe.
+func readHelperOutput(_ handle: FileHandle) throws -> Data {
+    var result = Data()
+    while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+        guard chunk.count <= helperOutputLimit - result.count else { throw CaptureError("Transcription output is too large") }
+        result.append(chunk)
+    }
+    return result
+}
+
 /// What the transcription helper loads: the model folder plus, when dictionary support is
 /// installed and verified and the dictionary has enabled entries, `--ctc DIR --vocabulary FILE`.
 /// `key` changes whenever any of those change, which restarts the warm helper. Built only by
@@ -92,6 +104,7 @@ final class WarmRunner: @unchecked Sendable {
             }
             let chunk = output.availableData
             if chunk.isEmpty { return nil }
+            guard chunk.count <= helperOutputLimit - buffered.count else { return nil }
             buffered.append(chunk)
         }
     }
@@ -355,7 +368,6 @@ final class PreStart: @unchecked Sendable {
     private var monitor: Timer?
     private var expiry: Timer?
     private var runner: Process?
-    private var runnerOutput: URL?
     private var recordingFailed = false
     private var generation = UUID()
     private var appliedRetention: String
@@ -859,24 +871,27 @@ final class PreStart: @unchecked Sendable {
         }
     }
     private func launchRunner(_ helper: URL, launch: HelperLaunch, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
-        let temp = audio.deletingLastPathComponent().appendingPathComponent(".result-" + UUID().uuidString)
-        let fd = open(temp.path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { setPhase("Error", "Could not prepare transcription. Audio is saved for retry."); done(); return }
-        let output = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        let pipe = Pipe(), output = pipe.fileHandleForReading
         let task = Process(); task.executableURL = helper; task.arguments = [launch.models.path, audio.path, "--single"] + launch.dictionaryArguments
-        task.standardOutput = output; task.standardError = FileHandle.nullDevice
-        do { try task.run(); runner = task; runnerOutput = temp } catch { try? output.close(); try? FileManager.default.removeItem(at: temp); setPhase("Error", "Transcription could not start. Audio is saved for retry."); done(); return }
+        task.standardOutput = pipe; task.standardError = FileHandle.nullDevice
+        do { try task.run(); runner = task; try? pipe.fileHandleForWriting.close() } catch { try? output.close(); try? pipe.fileHandleForWriting.close(); setPhase("Error", "Transcription could not start. Audio is saved for retry."); done(); return }
         let timeout = DispatchWorkItem { if task.isRunning { task.terminate(); DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if task.isRunning { kill(task.processIdentifier, SIGKILL) } } } }
         DispatchQueue.global().asyncAfter(deadline: .now() + 300, execute: timeout)
         let launched = ProcessInfo.processInfo.systemUptime
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            task.waitUntilExit(); timeout.cancel()
-            timingLog.notice("runner took=\(ProcessInfo.processInfo.systemUptime - launched, format: .fixed(precision: 3)) status=\(task.terminationStatus)")
-            defer { try? output.close(); try? FileManager.default.removeItem(at: temp) }
+            defer { timeout.cancel(); try? output.close() }
             let result = Result<Data, Error> {
+                let data: Data
+                do { data = try readHelperOutput(output) }
+                catch {
+                    if task.isRunning { kill(task.processIdentifier, SIGKILL) }
+                    task.waitUntilExit()
+                    throw error
+                }
+                task.waitUntilExit()
+                timingLog.notice("runner took=\(ProcessInfo.processInfo.systemUptime - launched, format: .fixed(precision: 3)) status=\(task.terminationStatus)")
                 guard task.terminationStatus == 0 else { throw CaptureError("Transcription failed") }
-                try output.synchronize(); try output.seek(toOffset: 0)
-                return try output.readToEnd() ?? Data()
+                return data
             }
             self?.handleTranscript(result, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
         }
@@ -895,12 +910,12 @@ final class PreStart: @unchecked Sendable {
             try? FileManager.default.removeItem(at: audio)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
-                self.runner = nil; self.runnerOutput = nil
+                self.runner = nil
                 self.deliver(savedEntry, store: store, token: token, done: done)
             }
         } catch {
             let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
-            DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.runnerOutput = nil; self.setPhase("Error", message); done() }
+            DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.setPhase("Error", message); done() }
         }
     }
     /// Cloud transcription (R4): one provider call in a cancellable Task, never the local model.
@@ -1021,7 +1036,7 @@ final class PreStart: @unchecked Sendable {
         destination = nil; historySaved(); done()
     }
     /// The latest dictation Murmur did not (or may not have) typed, kept in memory for ⌃⌘V.
-    private var uninserted: String?
+    var uninserted: String?
     /// ⌃⌘V anywhere: pastes that dictation at the cursor, then restores the clipboard. It stays
     /// available until the next dictation starts.
     func pasteUninserted() {
@@ -1410,11 +1425,18 @@ final class PreStart: @unchecked Sendable {
     }
     func deleteAllData() {
         guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
-        guard let base = dataDirectory else { return }
         let alert = NSAlert(); alert.messageText = DeleteAllDataText.title; alert.informativeText = DeleteAllDataText.body
         alert.addButton(withTitle: "Delete All Data"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        deleteConfirmedData()
+    }
+    /// Confirmation is kept outside the wipe so checks exercise the same reset as the UI.
+    func deleteConfirmedData() {
         guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
+        guard let base = dataDirectory else { return }
+        stopWatching()
+        generation = UUID()
+        uninserted = nil; setupTestTranscript = ""
         let locations = MurmurDataLocations.standard(base: base)
         // Preview and the developer probe never touch the login Keychain.
         let removeKeys: () throws -> [String] = preview ? { [] } : {
@@ -1520,7 +1542,6 @@ final class PreStart: @unchecked Sendable {
             if runner.isRunning { kill(runner.processIdentifier, SIGKILL) }
             runner.waitUntilExit()
         }
-        if let runnerOutput { try? FileManager.default.removeItem(at: runnerOutput) }
         warm.stopNow()
         bubble.hide()
         if let previewDirectory { try? FileManager.default.removeItem(at: previewDirectory) }
