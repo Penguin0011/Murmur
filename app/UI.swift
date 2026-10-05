@@ -1039,16 +1039,9 @@ struct SettingsView: View {
                     .accessibilityElement(children: .combine).padding(.top, 16)
                     Text("Your voice, on your Mac.").font(.system(size: 18)).foregroundStyle(Palette.ink80).padding(.top, 20)
                     Spacer()
-                    Canvas { context, size in
-                        var path = Path()
-                        for x in stride(from: -size.height, to: size.width, by: 9) {
-                            path.move(to: CGPoint(x: x, y: size.height)); path.addLine(to: CGPoint(x: x + size.height, y: 0))
-                        }
-                        context.stroke(path, with: .color(Palette.accent.opacity(0.55)), lineWidth: 2)
-                    }
-                    .frame(width: 140, height: 140).clipped()
-                    .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 2))
-                    .rotationEffect(.degrees(-1.5)).accessibilityHidden(true)
+                    // The full-colour mark: bars stay literal ink on accent in both appearances.
+                    Logo.path(in: CGSize(width: 140, height: 140)).fill(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x14 / 255))
+                        .frame(width: 140, height: 140).background(Palette.accent).accessibilityHidden(true)
                 }
                 .padding(40).frame(width: geometry.size.width * 5 / 12, alignment: .leading).frame(maxHeight: .infinity, alignment: .top)
                 .background(Palette.accent16)
@@ -1213,8 +1206,6 @@ private struct BubbleView: View {
                 Text(summary).font(.system(size: 12, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                     .help(message).allowsHitTesting(false).accessibilityHidden(true)
                 Spacer(minLength: 4)
-                Button(action: controller.dismissStatus) { Image(systemName: "xmark").font(.system(size: 11)) }
-                    .buttonStyle(.plain).help("Dismiss error").accessibilityLabel("Dismiss error")
             }
             // These keep only the pop-up; saved audio stays reachable from Murmur's window.
             if controller.recoveryAudio != nil || controller.hasRecoveryAudio,
