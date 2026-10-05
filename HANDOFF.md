@@ -1,3 +1,23 @@
+# Insertion verification checkpoint — October 5, 2026
+
+The insertion behavior review and isolated History UI fixture work are on `aakash-insertion-behavior`; the source fixture change is commit `a954d1f`. [Certain] The verification matrix, evidence links, outcomes, and remaining live-coverage limits are recorded in `VISUAL_VERIFICATION.md`. [Certain]
+
+The development app at `runtime/Murmur.app` passed `app/build.sh`, deep/strict signature verification, and `--preview --quit-after 2`; its Murmur executable SHA-256 is `424a560969b3dd40b33f5763c95a5df9c4a8d0681d8f7d10588d364352594997`. [Certain] The installed `/Users/aakash/Applications/Murmur.app` still has executable SHA-256 `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`, and its prior backup remains `/Users/aakash/Applications/Murmur-backups/20261005-132505/Murmur.app`. [Certain] This task's runtime code change is an access-level adjustment used by the isolated fixture; no insertion behavior changed, so the installed app was not replaced. [Certain]
+
+Synthetic fixture checks covered History statuses, session-only retention, search/empty states, light/dark/compact/opaque layouts, copy feedback, deletion, clear confirmation, accessibility focus, and status-bubble navigation/dismissal. [Certain] Live microphone and target-app insertion remain unverified because pinned Parakeet weight files are absent; see the explicit NOT RUN rows in `VISUAL_VERIFICATION.md`. [Certain]
+
+# Local insertion update installed — October 5, 2026
+
+Installed application code through `5ea3ce5` from `aakash-insertion-behavior` at `/Users/aakash/Applications/Murmur.app`. The installed executable matches the tested build: SHA-256 `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`. Deep/strict signature verification passed. Quit the previous app normally after observing Ready; backed it up at `/Users/aakash/Applications/Murmur-backups/20261005-132505/Murmur.app` before replacement. All 279 history filenames remained identical across installation. Relaunch showed Ready, new paste-last help text, and Microphone, Accessibility, and Input Monitoring allowed. The app remains running normally. [Certain]
+
+The user requested a next-agent verification file and explicitly requested PR creation and merging after that review. Follow [VISUAL_VERIFICATION.md](VISUAL_VERIFICATION.md) for the full visual/delivery/clipboard/recovery matrix, evidence requirements, remaining compatibility risks, and required PR/merge/final-install steps. This installation did not add live microphone, provider, or cross-app delivery evidence. [Certain]
+
+# Insertion behavior review — October 5, 2026
+
+Posted pastes now return quietly to Ready, with a completion announcement for assistive technology. History hides verified/unverified badges and excludes unverified entries from Needs attention, while preserving diagnostic evidence in records/logs. Explicit paste-last recovery retains verified text and survives later unsuccessful recordings; deleting the matching transcript clears its paste/setup buffers after successful storage deletion. Manual paste now checks Accessibility permission, secure-field metadata, Secure Input, and app/field/window identity. [Certain]
+
+Native controller and spike checks passed. The History fixture confirmed badge-free delivered rows and an empty Needs attention filter for them. The development app built and passed deep/strict signature verification; it is at this worktree's `runtime/Murmur.app`, not installed. See [app/INSERTION_REVIEW.md](app/INSERTION_REVIEW.md) for the full review and Wispr Flow sources. Fixed keyboard positions, the 0.5-second clipboard lease/main-thread wait, and no-metadata focus races remain compatibility limits; no live microphone/provider/cross-app matrix was run. [Certain]
+
 # Buttonless popups and Custom Provider — October 5, 2026
 
 Removed Audio and Undo from floating popups. All error messages share the buttonless view; clicking the message still opens Settings with full details. Listening and processing have no controls, and saved/inserted states show no popup. Retained audio is accessible in Settings → History & Privacy; learned entries remain removable in Dictionary. Native screenshots/AX checks covered error, learned-word, listening, and processing popups, plus error-detail navigation and the recovery control. [Certain]

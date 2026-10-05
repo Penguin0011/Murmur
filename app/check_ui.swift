@@ -18,7 +18,9 @@ import SwiftUI
         let menu = NSMenu(); let item = NSMenuItem(); let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Quit UI Check", action: #selector(FixtureDelegate.quit), keyEquivalent: "q").target = delegate
         item.submenu = appMenu; menu.addItem(item); menu.addItem(standardEditMenuItem()); application.mainMenu = menu
-        application.appearance = NSAppearance(named: CommandLine.arguments.contains("--light") ? .aqua : .darkAqua)
+        let light = CommandLine.arguments.contains("--light")
+        UserDefaults.standard.set(light ? "light" : "dark", forKey: "appearance")
+        application.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
         let controller = AppController(preview: true)
         if CommandLine.arguments.contains("--custom-transcription") {
             controller.transcriptionRoute = .cloud
@@ -33,13 +35,30 @@ import SwiftUI
         window.contentMinSize = NSSize(width: 760, height: 560)
         window.isReleasedWhenClosed = false
         window.center(); window.makeKeyAndOrderFront(nil)
-        let entries = [
-            HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "Synthetic transcript for an uncertain destination.", finalText: "Synthetic transcript for an uncertain destination.", insertionStatus: "unverified"),
+        var entries = [
+            HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "Synthetic transcript pasted into an unreadable field. Long text wraps for visual inspection.\nSecond synthetic paragraph keeps this fixture free of real transcript content.", finalText: "Synthetic transcript pasted into an unreadable field. Long text wraps for visual inspection.\nSecond synthetic paragraph keeps this fixture free of real transcript content.", insertionStatus: "unverified"),
             HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-3600), rawText: "Synthetic verified transcript.", finalText: "Synthetic verified transcript.", insertionStatus: "verified")
         ]
+        if CommandLine.arguments.contains("--empty") { entries = [] }
+        if CommandLine.arguments.contains("--matrix") && !CommandLine.arguments.contains("--empty") {
+            entries += [
+                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-7200), rawText: "Synthetic failed paste.", finalText: "Synthetic failed paste.", insertionStatus: "failed"),
+                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-10800), rawText: "Synthetic pending delivery. Check the target before recovering this text.\nSecond line for wrapping.", finalText: "Synthetic pending delivery. Check the target before recovering this text.\nSecond line for wrapping.", insertionStatus: "insertion-pending"),
+                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-14400), rawText: "Synthetic saved output.", finalText: "Synthetic saved output.", insertionStatus: "saved-not-inserted"),
+                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-18000), rawText: "Synthetic cleanup hold.", finalText: "", insertionStatus: "held-cleanup"),
+                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-21600), rawText: "Synthetic transcript hold.", finalText: "", insertionStatus: "held-transcript")
+            ]
+        }
+        let sessionOnlyID = entries.first(where: { $0.insertionStatus == "saved-not-inserted" })?.id
+        do {
+            guard let dataDirectory = controller.dataDirectory else { fatalError("Missing isolated fixture storage.") }
+            let store = try HistoryStore(directory: dataDirectory.appendingPathComponent("history"))
+            for entry in entries { try store.save(entry) }
+        } catch { fatalError("Could not seed isolated History fixture.") }
         DispatchQueue.main.async {
-            controller.history = entries
-            controller.recoveryEntryID = entries[0].id
+            controller.refreshHistory()
+            controller.recoveryEntryID = entries.first?.id
+            controller.sessionOnlyIDs = sessionOnlyID.map { Set([$0]) } ?? []
             if CommandLine.arguments.contains("--dictionary") {
                 controller.addDictionaryEntry(preferred: "Kubernetes", variants: "")
                 controller.addDictionaryEntry(preferred: "kubectl", variants: "cube cuddle, cube control")
@@ -67,7 +86,7 @@ import SwiftUI
         controller.openSettings = { application.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil) }
         controller.updateMenu = {
             if controller.phase == "Ready" {
-                precondition(controller.history.count == 2 && controller.recoveryEntryID == entries[0].id)
+                precondition(controller.history.count == entries.count && controller.recoveryEntryID == entries.first?.id)
                 print("UI dismissal preserved synthetic recovery history."); fflush(stdout)
             }
         }

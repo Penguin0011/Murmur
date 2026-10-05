@@ -48,7 +48,7 @@ Open `http://127.0.0.1:8765/fields.html` in the target browser. The page has a t
 
 The observer polls at 100 ms for up to 60 seconds, conservatively stops on changed outside anchors or unrelated selection, and does not apply dictionary mappings. Its ledger checks demonstrate two distinct-session evidence and conflict/undo handling with a supplied eligibility rule; generic semantic eligibility remains unresolved. Transient edits between polls can be missed. [Certain]
 
-Clipboard fallback snapshots all readable pasteboard types and stages a unique ownership token with its text. It verifies focus, token, and change count before posting Command-V and restores only while token and count remain its own. NSPasteboard has no atomic compare-and-post or compare-and-restore; those remaining races need live clipboard-manager testing. The fixed 200 ms paste wait can return unverified in slower apps and never triggers an automatic retry. [Certain]
+Clipboard fallback snapshots all readable pasteboard types and stages a unique ownership token with its text. It verifies focus, token, and change count before posting Command-V and restores only while token and count remain its own. NSPasteboard has no atomic compare-and-post or compare-and-restore; those remaining races need live clipboard-manager testing. The fixed 500 ms paste wait can return unverified in slower apps and never triggers an automatic retry. [Certain]
 
 Insertion and learning accept only AXTextField/AXTextArea roles. A readable AXWebArea or document root is not a supported destination. Unknown browser text-field types remain unverified and excluded from learning. [Certain]
 

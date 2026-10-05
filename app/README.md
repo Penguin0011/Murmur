@@ -15,7 +15,7 @@ Idle errors have a Dismiss control. Dismissal hides status without deleting hist
 
 Settings show the current state above the scrollable form, model file availability, individual permission rows, and an always-visible Apply Settings button. Model availability checks file sizes; full checksums are verified before inference. History supports search, delivery status, initial selection, and recovery-entry selection. [Certain]
 
-Recording and processing use a compact standalone glass-dot voice indicator on a transparent background by default. Saved output and successful insertion show no popup; delivery status remains in History. Only errors show a compact clickable message. Every floating popup is buttonless, including learned-word notices. Clicking an error opens Settings with the full error, even when History was selected. Retained audio is reachable through Settings → History & Privacy → Show Retained Audio; learned entries can be removed in Settings → Dictionary. [Certain]
+Recording and processing use a compact standalone glass-dot voice indicator on a transparent background by default. Posted pastes return quietly to Ready, with no Inserted or Delivery uncertain badge in History; read-back evidence stays in the local log and stored records. History shows actionable failures and interrupted delivery, with copy controls. Only errors show a compact clickable message. Every floating popup is buttonless, including learned-word notices. Clicking an error opens Settings with the full error, even when History was selected. Retained audio is reachable through Settings → History & Privacy → Show Retained Audio; learned entries can be removed in Settings → Dictionary. [Certain]
 
 Corrupt or mismatched history files produce an error and prevent retention from silently skipping data; corruption at startup currently blocks dictation. Automatic repair/quarantine is not implemented. [Certain]
 
@@ -119,6 +119,8 @@ app/check_ui.sh --light --dictionary
 ```
 
 `--dictionary` seeds three sample entries (one turned off); open Settings → Dictionary to see them. The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
+
+`--matrix` seeds the History delivery and held-result states in temporary storage, including one session-only row; `--empty` opens History with no entries. `--light` sets both the fixture window and Settings appearance. [Certain]
 
 The developer audio probe requires both flags and must target a disposable field:
 
@@ -297,3 +299,7 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 - `NSSpellChecker` with language "en";
 - the WAV format AVAudioFile actually writes;
 - every live provider call with a real key or a real local server. [Certain]
+
+### Insertion review — October 5, 2026
+
+See [INSERTION_REVIEW.md](INSERTION_REVIEW.md) for the complete delivery/recovery paths, Wispr Flow comparison, and remaining compatibility limits. The paste-last buffer now includes verified deliveries, survives canceled/empty/failed recordings, and is cleared when its transcript is deleted or all data is removed. Manual pastes check Accessibility permission, Secure Input, and accessible secure-field metadata, then recheck the focused field/window before posting. [Certain]

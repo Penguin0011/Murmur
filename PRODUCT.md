@@ -12,7 +12,7 @@ Swift, SwiftUI settings/history, AppKit menu bar and a nonactivating recording p
 
 ## Users and purpose
 
-People dictating English into existing Mac applications. Success means recording from a global shortcut, saving recoverable output, then inserting into the original focused field without sending a form/message. [Certain]
+People dictating English into existing Mac applications. Success means recording from a global shortcut, saving recoverable output, then pasting into the field focused at delivery without sending a form/message. [Certain]
 
 ## Operating context
 
