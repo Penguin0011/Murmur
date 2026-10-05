@@ -185,13 +185,11 @@ Each handoff includes owned files, inputs/outputs, acceptance criteria, assumpti
 
 Confirmed distribution intent: public GitHub source under MIT, with GitHub update checks and user-controlled updates. [Certain]
 
-The repository is currently private. The unauthenticated Releases API check returns 404, so release checks require the repository to be public or a different public update feed; visibility remains unchanged pending release authorization. [Certain]
-
 Proposed launch implementation: check stable GitHub Releases at launch and at most once daily, plus a manual “Check for Updates” action and an option to disable automatic checks. Show release notes and open the release page on user action; the user downloads and replaces the app. In-app installation is not assumed.
 
 Use proper version comparison, ignore drafts/prereleases by default, validate the configured repository and release link, and handle offline/rate-limited checks without interrupting dictation. Explain that release checks use the network even when inference is local. Never transmit transcripts, audio, dictionary, or API keys in update requests.
 
-Release handoff must include reproducible build instructions, architecture/macOS requirements, signed/notarized download artifacts where available, third-party notices, and source for the released version. The confirmed GitHub repository is `Penguin0011/Murmur`; signing identity remains to be supplied.
+Release handoff must include reproducible build instructions, architecture/macOS requirements, signed/notarized download artifacts where available, third-party notices, and source for the released version. The confirmed release repository is `Penguin0011/Murmur`; it is private, so the unauthenticated release check currently returns 404. The user deferred Apple Developer Program enrollment because it costs $99. Sparkle is deferred; retain user-controlled download-and-replace updates until signing and release packaging are ready. [Certain]
 
 ## 9. Release acceptance
 
@@ -212,8 +210,8 @@ Release handoff must include reproducible build instructions, architecture/macOS
 1. Minimum macOS 26 and Apple Silicon scope remain confirmed. M1/8 GB performance is deferred, with user-selected models and no validated minimum RAM guarantee. Intel remains deferred. [Certain]
 2. Select and benchmark local models on the available Mac; retain local transcription, cleanup-on, explicit cleanup-route choice, and user model selection. Do not silently substitute cloud processing. [Certain]
 3. Establish supported automatic-learning apps through the required feasibility spike, with unsupported categories disclosed rather than blocking launch (approved); the 60-second window and two-observation threshold are approved. [Certain]
-4. Product and GitHub repository name: **Murmur**; repository `Penguin0011/Murmur` confirmed and renamed October 4, 2026. Signing identity and approval of the update mechanism remain open. The user deferred Apple Developer Program enrollment until much later because it costs $99; development builds stay self-signed until enrollment. The user is the MIT copyright holder; LICENSE added October 3, 2026 with holder "Aakash" as supplied by the user. [Certain]
-5. Larger local cleanup model/runtime and a curated browser of quality-validated choices; verification of the named cloud providers (Fireworks, Gemini, OpenRouter); validation and exact artifact pinning for selected Parakeet Unified transcription. October 5, 2026 comparison: Qwen3.5-0.8B, Qwen3.5-2B, and LFM2.5-1.2B-Instruct all failed to establish a production-quality local recommendation on the synthetic corpus. See HANDOFF.md. Users choose Gemini/OpenRouter cloud cleanup or a validated larger local model; no silent fallback. [Certain]
+4. Product name and release repository: **Murmur**, `Penguin0011/Murmur`, renamed October 4, 2026. The repository is currently private. The user deferred Apple Developer Program enrollment because it costs $99; Developer ID signing and notarization remain later release work. Sparkle is deferred; continue user-controlled manual download-and-replace updates. The user is the MIT copyright holder; LICENSE added October 3, 2026 with holder "Aakash" as supplied by the user. [Certain]
+5. Larger local cleanup model/runtime and a curated browser of quality-validated choices; verification of the named cloud providers (Fireworks, Gemini, OpenRouter); validation and exact artifact pinning for selected Parakeet Unified transcription. October 5, 2026 comparison: Qwen3.5-0.8B, Qwen3.5-2B, and LFM2.5-1.2B-Instruct did not establish a production-quality local recommendation on the synthetic corpus. See HANDOFF.md. Users choose Gemini/OpenRouter cloud cleanup or a validated larger local model; no silent fallback. [Certain]
 
 This draft defines the confirmed product and proposed work boundaries; it is not yet a claim of full Wispr Flow feature parity. [Certain]
 

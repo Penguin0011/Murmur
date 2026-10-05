@@ -1,3 +1,38 @@
+# Project completion review — October 4, 2026
+
+Branch `aakash/remaining-gaps` (from `main` at `d6960df`). The user asked what is left and for autonomous work. This section is updated as work lands. [Certain]
+
+## Done in this session
+- `de9df4d`:
+  - **Damaged history no longer stops Murmur.** At launch, `HistoryStore.quarantineUnreadable()` moves undecodable or misnamed history files into `history/unreadable/`, and Settings → History & Privacy says how many were moved. `purge` expires those files by modification date, so their text still follows the retention setting. They sit inside `history/`, so Delete All Data removes them. `entries()` still fails closed. `check_history` covers the move and the expiry, and does not compile without the fix. [Certain]
+  - **Open at login** (Settings → General) uses `SMAppService.mainApp`. It's off by default. The toggle shows the system's own state and re-reads it whenever Murmur is reactivated. Toggled only in the preview fixture, which registers nothing; it has not been registered on the installed app. [Certain]
+  - **Microphone choice** (Settings → General): "System default" plus connected microphones from `AVCaptureDevice` (whose `uniqueID` is the CoreAudio UID). It's saved as `inputDeviceUID`. `Capture.start` pins the device with `kAudioOutputUnitProperty_CurrentDevice` before reading the format. A microphone that isn't connected falls back to the system default and shows as "Chosen microphone (not connected)". A silent probe (no capture started) pinned both "MacBook Air Microphone" and "iPhone Microphone", and an unknown UID fell back to the default. Not tested with recording. [Certain]
+- `547fe96` **First-run test dictation and faithful choice.** When all four setup steps are done, the setup window shows "Try it": a dictation made while Murmur's own window is in front is saved to History and shown in the box. Murmur still never types into itself (`setupShowing` plus a frontmost-pid check in `complete`). "Clean up my dictation" turns fillers, corrections and lists on together; off runs `useFaithfulTranscription`. Seen in the UI fixture with the step gate forced open for the screenshot only. The live test dictation is not exercised: it needs a human dictation with Murmur in front, since the `--test-audio` probe refuses Murmur as the destination. Installed: SHA-256 `31e73eb3f836be318181b26522aa41a6550d65930727744e7580f88c21f548e9`, previous build at `~/Applications/Murmur-backups/20261004-233536/Murmur.app`. [Certain]
+- `6916a52` **Spacing fixes after a click or drag are learned** in keystroke-watched fields (Chrome, VS Code, Docs). Two causes:
+  - Click guesses covered only caret positions and single words. They now also cover selections of 2–3 whole words, which is how a mouse drag across "git hub" looks.
+  - More importantly, `plausibleEdit`'s fast pre-filter ran with no lexicon, so case, spacing and short-word fixes were never resolved after any click, not even from a perfect guess. With a real lexicon it now uses a "nothing is an ordinary word" stand-in. The real lexicon only adds rejections, so that is a superset, and the real check still runs second.
+  - Measured with NSSpellChecker: git hub→GitHub and para keet→Parakeet were not resolved before and are now; Acme→Akme is unchanged.
+  - Worst-case refresh on a 400-character span (`-O`, click then 4 typed letters) went from 77 ms to 96 ms. It runs on the 0.25 s poll. A new `check_processing` case covers the drag (115 pass), and the dictionary (170), `spike --check` and controller checks pass. Not tested live. [Certain]
+- Same commit: the microphone list is cached on the controller and refreshed when Settings appears and when a device connects or disconnects. Settings re-renders with every 150 ms voice-level tick, so discovery had been running about 7 times a second. A dictation shown in the setup window also sets `uninserted`, so ⌃⌘V still works if the setup flag were ever left on. [Certain]
+- Installed `6916a52`: SHA-256 `1712305788ea5c180aa33f64e4b3479b18c2074fa7ae89d6605190e8eda6676d`, previous build at `~/Applications/Murmur-backups/20261004-234125/Murmur.app`. This install waited until the default input device was idle (CoreAudio `DeviceIsRunningSomewhere`) and Murmur's log had been quiet for 20 s. The first install of this session had no guard. The user was dictating around the second, which landed in a quiet gap. [Certain]
+- Checks passing: launch, history, controller, app services, dictionary (170), plus compiles of the session and capture spikes. In the UI fixture (`check_ui.sh --light`, General page) both new rows render and Open at login toggles. [Certain]
+- Installed `de9df4d` to `~/Applications/Murmur.app` (signed "clouddev Development"), executable SHA-256 `b157e4c6553bbbe458ac135d6fdd1da1f23e18c549cd72da26d96a9d185c59ac`. The previous build is at `~/Applications/Murmur-backups/20261004-233156/Murmur.app`. It was relaunched and the warm runner is ready. [Certain]
+
+## What is left
+Needs the user:
+- Apple Developer Program enrollment. It blocks Developer ID signing, notarization, the DMG and the first GitHub release (PRD §8, decision 4). [Certain]
+- Confirming the release repository. Update checks still point at `Penguin0011/dictation` (`TODO(R12)` in Controller.swift), and the PRD says the repo is to be renamed. [Certain]
+- The local cleanup model choice (PRD §5 item 5). `RuleCleaner` is the stopgap. [Certain]
+- Recording the spoken-correction and list thresholds from the corpus baseline as a decision (PRD §4). [Certain]
+- Approval of the PRD §5 cloud split. It is still labelled a proposal, even though Gemini is used live. [Certain]
+- An OpenRouter key for a live STT and cleanup test. [Certain]
+- Human-speech live checks: the first word with a physical Fn press, recording with a chosen non-default microphone, a live Gemini call on the sound-alike dictionary path, and click-to-fix in keystroke-watched fields. [Certain]
+- Benchmarks against Parakeet V2 and Whisper large-v3 turbo with real labeled speech (PRD §5 validation 1–4). [Certain]
+
+Could be built without the user (not started):
+- Deferred on purpose: right-click spelling suggestions and drag-selecting part of a word in keystroke-watched fields. Parakeet mostly emits real words, so the spell checker rarely flags dictated text, and following another app's context menu through AX is fragile. Sub-word selection guesses would cost about 1,000 extra guesses per click for a rare edit. [Likely]
+- Optional and not required by the PRD: deleting stored Gemini 3.5 Transcribe interactions early (`makeDeleteRequest` exists, but IDs are not persisted). Model selection with measured performance (`TODO(R2)`) waits for a second pinned model. [Certain]
+
 # Wispr Flow-style learning and paste-only insertion — October 4, 2026
 
 Branch `aakash/dictionary-learning-exploration-6182a5`. User decisions: replicate Wispr Flow's auto-add, and insert only with ⌘V paste. [Certain]
@@ -171,36 +206,30 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 **Product, release and housekeeping**
 12. ~~The PRD cleanup-failure conflict (section 3 vs section 4) is unresolved.~~ Resolved in PRD "Milestone 1 implementation decisions": cleanup errors and guard failures both save the raw transcript, show recovery, and require an explicit raw-text action before insertion.
 13. Builds are self-signed (`clouddev Development`); Developer ID signing and notarization need an Apple Developer Program account.
-14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders and notification names still use the old name.
+14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders, and notification names still use the old name. The GitHub repository was renamed `Penguin0011/Murmur`; the repo remains private until a release visibility decision.
 15. Test transcripts from live runs remain in Murmur's History.
 16. ~~No LICENSE file~~: added (MIT, Aakash). `README.md`, `CONTRIBUTING.md` and `THIRD_PARTY_NOTICES.md` now exist.
 17. The new modules have never been compiled on the Mac; the Keychain store has never been compiled at all.
 
-Repository rename (October 4, 2026): GitHub repository is now `Penguin0011/Murmur`, and the local `origin` remote and release-check default use that name. The repository remains private; anonymous GitHub Releases checks return 404 until publication or a different feed is chosen. Apple Developer Program enrollment is deferred until much later because of its $99 cost. [Certain]
-
 **Processing and providers**
-18. Gemini cleanup was called live on October 5 with 15 synthetic benchmark prompts using the stored key. No other cloud provider was called in this benchmark. Fireworks STT is deprecated upstream; the OpenRouter STT and Gemini/OpenRouter cleanup split remains a proposal pending user approval.
-19. Three sub-2B cleanup models were benchmarked October 5 and none is recommended for production; see the comparison record below. Cloud cleanup is the practical option until a larger local model passes the cleanup quality and safety gates. The synthetic corpus has no real ASR transcripts.
+18. Gemini cleanup was called live on October 5 with 15 synthetic benchmark prompts using the stored key. No other cloud provider was called in that benchmark. Fireworks STT is deprecated upstream; OpenRouter STT and cleanup remain untested.
+19. Three local cleanup models of 2B parameters or less were benchmarked October 5 and none is recommended for production. Cloud cleanup is the practical option until a larger local model passes cleanup quality and safety gates. The corpus has no real ASR transcripts.
 20. Learning's lexicon check needs NSSpellChecker on macOS before learning ships; the semantic promotion rule is approved.
 21. The Parakeet conversion's CC-BY-4.0 label conflicts with the upstream NVIDIA Open Model License; the app must show the model license before download.
 
-**Qwen local cleanup trial — October 5, 2026.** Installed `Qwen3.5-0.8B-Q4_K_M.gguf` (532,517,120 bytes) at `/Users/aakash/Library/Caches/Dictation/cleanup/Qwen3.5-0.8B-Q4_K_M.gguf`, revision `6ab461498e2023f6e3c1baea90a8f0fe38ab64d0`, SHA-256 `bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517`. Runtime: Homebrew `llama.cpp` 0.5.0; test host: Apple M3, 16 GB, macOS 26.6.2. The server had to run with reasoning disabled: default auto mode generated up to 4,096 tokens for a five-word cleanup case; reasoning-off returned the correct five-word cleanup. A compiled smoke call through `OpenAICompatibleCleanupProvider` passed `CleanupGuard`.
+**Local cleanup model comparison — October 5, 2026.** All candidates used the same production cleanup prompt, llama.cpp 0.5.0 with reasoning disabled, and the 425-case synthetic corpus on Apple M3 / 16 GB / macOS 26.6.2.
 
-On the 425-case synthetic cleanup corpus, 425/425 local API calls returned without errors or truncation. Exact output matched 228/425 (53.6%); case/punctuation-insensitive word sequences matched 260/425 (61.2%); `CleanupGuard` passed 394/425 (92.7%). Median end-to-end local latency was 637 ms (p95 1,249 ms); median generation throughput was 85.6 tokens/s. In 15 paired synthetic calls against the configured Gemini primary model `gemini-3.5-flash-lite` (fallback disabled), Qwen matched 6/15 and had 659 ms median latency; Gemini matched 12/15 and had 598 ms median latency, with 14/15 outputs passing `CleanupGuard`. This small paired sample is preliminary. Qwen was slower at median latency and less accurate in the paired subset; it is not selected. The 425 corpus has no real ASR transcripts. The test used the production prompt and guard, but did not exercise the full app UI or change app settings. The temporary local server is stopped. The 0.8B artifact was deleted after the larger trials; `llama.cpp` remains installed. [Certain]
-
-**Local cleanup comparison — October 5, 2026.** All models used the same production cleanup prompt, llama.cpp 0.5.0, reasoning disabled, and the 425-case synthetic corpus on Apple M3 / 16 GB / macOS 26.6.2. Full-corpus exact match, CleanupGuard acceptance, median/p95 end-to-end latency, and median decode speed:
-
-| Model | Exact | Guard accepted | Median / p95 | Decode |
+| Model | Exact | CleanupGuard accepted | Median / p95 latency | Median decode |
 |---|---:|---:|---:|---:|
 | Qwen3.5-0.8B Q4_K_M | 228/425 (53.6%) | 394/425 (92.7%) | 637 / 1,249 ms | 85.6 tok/s |
 | Qwen3.5-2B Q4_K_M | 250/425 (58.8%) | 391/425 (92.0%) | 1,090 / 2,161 ms | 46.1 tok/s |
 | LFM2.5-1.2B-Instruct Q4_K_M | 94/425 (22.1%) | 217/425 (51.1%) | 719 / 1,213 ms | 77.6 tok/s |
 
-On the same 15 Gemini paired prompts, Gemini `gemini-3.5-flash-lite` matched 12/15 (80%), passed the guard 14/15, and had 598 ms median latency. Qwen 0.8B matched 6/15 and had 659 ms median; Qwen 2B matched 8/15 and had 1,245 ms median; LFM 1.2B matched 1/15 and had 745 ms median. Qwen 2B passed 15/15 guards and LFM passed 10/15. These are small, synthetic comparisons, not human speech evaluation; the corpus has no real ASR transcripts. None of these models of 2B parameters or less is a production recommendation. A larger local model (around 8B as a starting point) needs its own quality, safety, latency, and memory benchmark before appearing as recommended in a model browser. [Certain]
+On the same 15 paired prompts, Gemini `gemini-3.5-flash-lite` matched 12/15, passed the guard 14/15, and had 598 ms median latency. Qwen 0.8B matched 6/15 (659 ms median); Qwen 2B matched 8/15 (1,245 ms median, guard 15/15); LFM 1.2B matched 1/15 (745 ms median, guard 10/15). The comparisons are synthetic and small; no real ASR transcripts were tested. None of these models is a production recommendation. Around 8B is a starting point for larger-model evaluation, not a quality or hardware guarantee. [Certain]
 
-Pinned artifacts: Qwen3.5-2B Q4_K_M from `unsloth/Qwen3.5-2B-GGUF`, revision `f6d5376be1edb4d416d56da11e5397a961aca8ae`, SHA-256 `aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223`; retained at `/Users/aakash/Library/Caches/Dictation/cleanup/Qwen3.5-2B-Q4_K_M.gguf`. LFM2.5-1.2B Q4_K_M from `LiquidAI/LFM2.5-1.2B-Instruct-GGUF`, revision `8ed288026e23958ad9dfa92d53ed773a8eee7125`, SHA-256 `b1b3de114215d9507409a662a501a631095a479a419584e8a2ded6304b19b4f5`; removed after its trial. The earlier 0.8B artifact was also removed. No app default or route settings changed; the benchmark did not exercise the full app UI. LFM is under the LFM Open License, not Apache/MIT; review its commercial-use threshold and redistribution terms before any product use. [Certain]
+Pinned Qwen3.5-2B Q4_K_M: `unsloth/Qwen3.5-2B-GGUF`, revision `f6d5376be1edb4d416d56da11e5397a961aca8ae`, SHA-256 `aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223`; retained at `/Users/aakash/Library/Caches/Dictation/cleanup/Qwen3.5-2B-Q4_K_M.gguf`. The old 0.8B and failed LFM 1.2B weights were removed; llama.cpp remains installed. LFM's license has a commercial-use revenue threshold and redistribution conditions; do not ship those weights without reviewing the terms. No app settings changed and the full UI route was not tested. [Certain]
 
-The Settings disclosure now explains that sub-2B local models did not match Gemini in this synthetic comparison, recommends starting around 8B for private local AI cleanup, and points users to the local model server or cloud routes. The PRD specifies a curated model browser limited to models that pass quality and safety gates; no model currently qualifies for that catalog. [Certain]
+Settings now includes a disclaimer: small local model trials were slower and less accurate than Gemini in this synthetic comparison; privacy-focused AI cleanup should start evaluation around 8B or use the explicit cloud route. The PRD calls for a curated 3–5 model browser and requires each option to pass quality and safety gates before it can be called adequate. No candidate currently qualifies. [Certain]
 
 ---
 

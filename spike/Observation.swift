@@ -138,7 +138,7 @@ struct DictationObservation {
 /// `value`/`selection` feed `DictationObservation` as snapshots with no text around the span.
 /// `lost` (a ⌘/⌃ chord such as undo, or an edit outside the span) drops the evidence; `departed`
 /// (Return, Tab, vertical caret keys, or the caret leaving the span) keeps it, like focus departure.
-/// After a click the caret could be anywhere: every caret position and every double-clicked word
+/// After a click the caret could be anywhere: every caret position and every selection of 1–3 whole words
 /// is followed at once, and the span reads as the single edit `resolve` finds plausible.
 /// ponytail: the target app's own autocorrect/autocomplete is invisible here; the ledger's filter
 /// and two-session rule are the backstop. Read the field instead wherever AX exposes it.
@@ -192,8 +192,16 @@ struct KeystrokeSpan {
         }
         typedSinceClick = false; unresolved = false
         let words = chars.indices.filter { isWord(chars[$0]) && ($0 == 0 || !isWord(chars[$0 - 1])) }
+        // Selections of 1–3 whole words cover a double-click and a mouse drag across a spacing fix
+        // (git hub → GitHub); the ledger learns at most 3 words per side.
         guesses = (0...chars.count).map { KeystrokeSpan(chars, anchor: $0, caret: $0) }
-            + words.map { KeystrokeSpan(chars, anchor: $0, caret: wordEnd(after: $0)) }
+            + words.flatMap { start in
+                var end = start
+                return (0..<3).compactMap { _ -> KeystrokeSpan? in
+                    end = wordEnd(after: end)
+                    return end <= chars.count ? KeystrokeSpan(chars, anchor: start, caret: end) : nil
+                }
+            }
     }
 
     mutating func apply(_ key: Key) {
