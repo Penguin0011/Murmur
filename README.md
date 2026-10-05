@@ -40,7 +40,9 @@ Summarized from [PRD.md](PRD.md) section 6. These are product rules. Rules for c
 
 ## Removing your data
 
-A "Delete all data" action is planned. Until it ships, remove data by hand after quitting Murmur: [Certain]
+Settings → Output and history → Delete All Data removes local history, retry audio, dictionary and learning data, held transcripts, and Murmur's API keys. Settings and downloaded models remain. It does not delete copies held by cloud providers, backups, or other applications. [Certain]
+
+For manual removal after quitting Murmur, including downloaded models: [Certain]
 
 ```sh
 # History, settings data, dictionary, learned entries and retry audio

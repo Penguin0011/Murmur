@@ -124,7 +124,7 @@ The developer audio probe requires both flags and must target a disposable field
 runtime/Murmur.app/Contents/MacOS/Murmur --test-audio /absolute/synthetic.wav --expected-app com.apple.TextEdit
 ```
 
-This explicitly performs transcription and one insertion attempt. It preserves the supplied audio, using a private retry copy, and writes durable history. It cannot be combined with preview or timed quit; malformed flags exit before storage/UI initialization. [Certain]
+This explicitly performs transcription and one insertion attempt. It preserves the supplied audio and uses temporary isolated history, retry audio, and dictionary storage, removed on exit. It does not modify the user's history or dictionary or use saved API keys. It cannot be combined with preview or timed quit; malformed flags exit before storage/UI initialization. [Certain]
 
 ## Model download
 
