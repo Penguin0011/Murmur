@@ -2,6 +2,27 @@
 
 Audit date: October 5, 2026, America/Los_Angeles. [Certain]
 
+## Remediation — October 5, 2026
+
+The evidence and findings below describe the original audited state; the following changes have since been implemented and checked. [Certain]
+
+| Finding | Current status |
+| --- | --- |
+| F1 | Fixed: custom keys are bound to the normalized destination; unbound keys and host/scheme/port/path changes require re-entry. Secrets remain in Keychain. Route checks passed (111). [Certain] |
+| F2 | Fixed: the shared sensitive-request transport refuses redirects. Loopback 307/308 checks confirmed the destination receives no request. Declared and streamed responses are limited to 8 MiB. [Certain] |
+| F3 | Fixed: the confirmed wipe clears paste/setup buffers and destination/provider references, stops observation, discards queued chunks, and removes abandoned chunk audio as well as existing data directories. Isolated native wipe checks passed. [Certain] |
+| F4 | Fixed: one-shot helper stdout uses a pipe with a 4 MiB limit; no transcript result file is created. A check drains output larger than pipe capacity and refuses excessive output. The warm reader is bounded too. History-off now discloses retry audio and learned spellings separately. [Certain] |
+| F5 | Mitigated: each event checks foreground, Secure Input, and observable field/window identity before decoding; departures end observation. The opt-in readable-field setting disables the heuristic fallback and stops an existing key watch when enabled. Identity/security and settings checks passed. Missing identities still permit the approved same-app heuristic by default, so universal field attribution is not guaranteed. [Certain] |
+| F6 | Fixed: startup and purge remove orphan pending writes under the same directory lock used by writers. The native regression confirms cleanup waits for an active writer and preserves committed history. Quarantined files now count toward the cap. [Certain] |
+| F7 | Partial: development app and helper builds now have Hardened Runtime; the app has only the audio-input entitlement. A release command requires valid Developer ID signing, timestamps, notarization, stapling, and Gatekeeper assessment. The missing-configuration/identity refusals passed. No valid Developer ID identity is available here; a notarized release remains outstanding. [Certain] |
+| F8 | Fixed: Settings and source comments describe cooperative clipboard markers and restoration without overwriting a newer copy. README documents the existing removal control and distinguishes local deletion from provider storage and backups. [Certain] |
+
+Additional checks passed: provider (581), dictionary/learning/retention (172), processing (117), model downloader (158), update (91), launch, app services, native history/controller, BoostFilter, and cleanup corpus/adversarial checks. [Certain] The hardened helper successfully transcribed synthetic speech with a synthetic dictionary while `sandbox-exec` denied networking. This establishes that tested inference can run with networking denied; it does not prove dependencies never attempt network access. [Certain]
+
+The final development build replaced the installed bundle after an idle check and backup. Both signatures passed deep/strict verification; normal launch retained all three permissions. The exact installed binary completed synthetic local transcription and verified insertion into a disposable TextEdit document. Live history filenames, dictionary/ledger metadata, and selected preferences matched the pre-probe snapshot. The current Custom API cleanup choice remains selected, with a visible warning to save its unbound key again; no live call with a newly bound key was made. [Certain]
+
+Remaining validation: a live secure-field/editor matrix, competing clipboard managers, and public-release notarization. Synthetic input and isolated storage were used for regression checks; no live credentials or dictated contents were sent by these checks. [Certain]
+
 ## Assessment
 
 The weakest boundary is the configurable API destination: changing the server can send an existing credential to the new server without a credential-specific confirmation. [Certain] I found eight actionable findings: one high priority, six medium priority, and one low priority; the priorities below reflect the consequences and prerequisites, rather than treating every privacy tradeoff as a vulnerability. [Certain]
