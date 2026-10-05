@@ -916,7 +916,7 @@ final class PreStart: @unchecked Sendable {
             let reason = processing?.lastProviderError.map { " " + $0.userMessage } ?? ""
             // Content-free: the guard's category, never the text.
             if case .heldForRecovery(_, let why) = outcome {
-                timingLog.notice("cleanup-held reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError != nil, privacy: .public)")
+                timingLog.notice("cleanup-held reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError.map { Mirror(reflecting: $0).children.first?.label ?? "\($0)" } ?? "none", privacy: .public)")
             }
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
             do { try store.save(entry); setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History. Press ⌃⌘C to copy it.") }
@@ -1107,21 +1107,34 @@ final class PreStart: @unchecked Sendable {
     private var watchTimer: Timer?
     private var keyTap: CFMachPort?
     private func watchCorrections(_ insertion: InsertionResult, text: String, at offset: Int?, pid: pid_t?) {
-        guard processing?.settings.learningEnabled == true, insertion.status != .failed else { return }
+        guard processing?.settings.learningEnabled == true else { timingLog.notice("watch route=none why=learning-off"); return }
+        guard insertion.status != .failed else { timingLog.notice("watch route=none why=insert-failed"); return }
         let now = ProcessInfo.processInfo.systemUptime
         // A snapshot exists only when the same field read back the dictated text (verified, or a
         // browser paste whose read-back is not trusted for delivery but is for observation).
-        if let field = insertion.snapshot, field.readableText, let value = field.value, let offset,
-           NSMaxRange(NSRange(location: offset, length: (text as NSString).length)) <= (value as NSString).length,
-           (value as NSString).substring(with: NSRange(location: offset, length: (text as NSString).length)) == text,
-           let observation = DictationObservation(value: value, insertedRange: NSRange(location: offset, length: (text as NSString).length), now: now) {
+        // Why the field route was not taken, content-free, for the log.
+        let length = (text as NSString).length
+        let axMiss: String
+        if let field = insertion.snapshot, field.readableText, let value = field.value, let offset {
+            if NSMaxRange(NSRange(location: offset, length: length)) <= (value as NSString).length,
+               (value as NSString).substring(with: NSRange(location: offset, length: length)) == text {
+                axMiss = DictationObservation(value: value, insertedRange: NSRange(location: offset, length: length), now: now) == nil ? "span-cuts-word" : ""
+            } else { axMiss = "text-not-at-offset" }
+        } else { axMiss = insertion.snapshot == nil ? "no-readback" : insertion.snapshot!.readableText ? "no-offset" : "unreadable" }
+        if axMiss.isEmpty, let field = insertion.snapshot, let value = field.value, let offset,
+           let observation = DictationObservation(value: value, insertedRange: NSRange(location: offset, length: length), now: now) {
             watch = Watch(observation: observation, pid: field.pid, field: field, keys: nil, current: text)
+            timingLog.notice("watch route=ax")
         } else if let pid, CGPreflightListenEventAccess(), startKeyTap(),
-                  let observation = DictationObservation(value: text, insertedRange: NSRange(location: 0, length: (text as NSString).length), now: now) {
+                  let observation = DictationObservation(value: text, insertedRange: NSRange(location: 0, length: length), now: now) {
             var keys = KeystrokeSpan(text)
             keys.resolve = { CorrectionFilter.plausibleEdit(original: text, candidates: $0, isCommonWord: isCommonEnglishWord) }
             watch = Watch(observation: observation, pid: pid, field: nil, keys: keys, current: text)
-        } else { stopWatching(); return }
+            timingLog.notice("watch route=keys ax-miss=\(axMiss, privacy: .public)")
+        } else {
+            timingLog.notice("watch route=none ax-miss=\(axMiss, privacy: .public) input-monitoring=\(CGPreflightListenEventAccess(), privacy: .public)")
+            stopWatching(); return
+        }
         watchTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.watchTick() }
         }
@@ -1150,13 +1163,28 @@ final class PreStart: @unchecked Sendable {
         if ending { w.observation.finish() }
         let session = w.observation.sessionID, current = w.observation.edited ?? w.observation.initial
         do {
-            if current != w.current { try processing?.observeSpan(sessionID: session, original: w.observation.initial, current: current); w.current = current }
+            if current != w.current {
+                let outcome = try processing?.observeSpan(sessionID: session, original: w.observation.initial, current: current)
+                // Shape only (word and letter counts, similarity), never the words themselves.
+                let shape: String
+                switch CorrectionFilter.replacements(w.observation.initial, current) {
+                case .failure(let why): shape = "\(why)"
+                case .success(let changes): shape = changes.map { change in
+                    let from = CorrectionFilter.letters(change.source), to = CorrectionFilter.letters(change.targets[0])
+                    return "\(TermText.tokens(change.source).count)w\(from.count)l->\(TermText.tokens(change.targets[0]).count)w\(to.count)l sim=\(String(format: "%.2f", CorrectionFilter.similarity(from, to)))"
+                }.joined(separator: ",")
+                }
+                timingLog.notice("watch edit outcome=\(outcome.map { "\($0)" } ?? "reverted", privacy: .public) changes=\(shape, privacy: .public)")
+                w.current = current
+            }
             watch = w
             if w.observation.stopped {
                 stopWatching()
                 // Settling can also delete learned entries (reversal, conflict), so always refresh.
                 defer { refreshDictionary() }
-                if let entry = try processing?.settle(sessionID: session).last { announceLearned(entry) }
+                let learned = try processing?.settle(sessionID: session) ?? []
+                timingLog.notice("watch end reason=\(w.observation.stopReason ?? "unknown", privacy: .public) keys=\(w.keys.map { "\($0.state)" } ?? "-", privacy: .public) learned=\(learned.count, privacy: .public)")
+                if let entry = learned.last { announceLearned(entry) }
             }
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
     }

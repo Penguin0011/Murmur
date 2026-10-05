@@ -182,10 +182,12 @@ final class ProcessingCoordinator {
     /// One change to a watched dictated span (AppController polls `DictationObservation`).
     /// An edit becomes provisional evidence; back to the original (undo) or lost attribution
     /// (pass `original`) drops this session's evidence. Call `settle` when the window closes.
-    func observeSpan(sessionID: UUID, original: String, current: String) throws {
+    /// Returns what the ledger made of it, or nil when the span went back to the original.
+    @discardableResult
+    func observeSpan(sessionID: UUID, original: String, current: String) throws -> CorrectionLedger.RecordOutcome? {
         // The ledger diffs the span word by word, so punctuation and unchanged words never reach the filter.
-        if current == original { try ledger.revert(sessionID: sessionID) }
-        else { try observe(ObservedCorrection(sessionID: sessionID, source: original, target: current, observedAt: Date())) }
+        if current == original { try ledger.revert(sessionID: sessionID); return nil }
+        return try observe(ObservedCorrection(sessionID: sessionID, source: original, target: current, observedAt: Date()))
     }
 
     /// Feeds one attributed correction while its observation window is open. With learning off
