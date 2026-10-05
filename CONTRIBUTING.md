@@ -28,7 +28,7 @@ App, history and controller (macOS):
 ```sh
 swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-check && /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check && /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check && /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check && /tmp/dictation-controller-check
 ```
 
 Foundation-only modules (macOS or Linux):
