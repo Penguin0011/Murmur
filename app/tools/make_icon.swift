@@ -2,11 +2,11 @@
 // Run from the repo root: swift app/tools/make_icon.swift
 import AppKit
 
-// The sheet's 96-unit icon: body at 1…95 (rx 21, 1.5 ink stroke), bars loud to quiet.
+// The sheet's 96-unit icon: body at 1…95 (rx 21, 1.5 ink stroke), bars rising and falling like a voice.
 let bars: [CGRect] = [
-    CGRect(x: 19, y: 21, width: 8, height: 54), CGRect(x: 32, y: 31, width: 8, height: 34),
-    CGRect(x: 45, y: 37, width: 8, height: 22), CGRect(x: 58, y: 41, width: 8, height: 14),
-    CGRect(x: 71, y: 44, width: 6, height: 8),
+    CGRect(x: 19, y: 36, width: 8, height: 24), CGRect(x: 32, y: 20, width: 8, height: 56),
+    CGRect(x: 45, y: 32, width: 8, height: 32), CGRect(x: 58, y: 25, width: 8, height: 46),
+    CGRect(x: 71, y: 37, width: 6, height: 22),
 ]
 let accent = NSColor(srgbRed: 0x59 / 255, green: 0x95 / 255, blue: 0xC9 / 255, alpha: 1)
 let ink = NSColor(srgbRed: 0x14 / 255, green: 0x14 / 255, blue: 0x14 / 255, alpha: 1)
