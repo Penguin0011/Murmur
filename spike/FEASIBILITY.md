@@ -227,7 +227,7 @@ Use synthetic text only. In each category, test verified insertion, an attributa
 ## Safety and remaining gates
 
 - AX read-back mismatch must retain the output without another insertion attempt, except one paste when a nonsecure field (browser fields included) reads exactly unchanged after the settle wait; otherwise paste only when the AX write is unsupported. Clipboard restoration must skip after another writer changes the clipboard. [Certain]
-- Known secure fields must be rejected. Browser fields of unknown type must remain unverified and excluded from learning even when text read-back matches. [Certain]
+- Known secure fields must be rejected. Browser fields of unknown type must remain unverified for delivery. Superseded for learning on October 4, 2026 (see PRD): they are observed once read-back shows the dictated text, and fields with no readable text are observed through keystrokes. [Certain]
 - Anchored range attribution does not prove semantic equivalence. A short replacement can change meaning, so candidates alone cannot justify automatic vocabulary promotion. [Certain]
 - Persisted recovery, audio capture, production learning eligibility, model inference, UI, signing, and packaging are outside this standalone spike. [Certain]
 - The recorded Right Option and native/chat observation evidence satisfies the narrow feasibility floor for starting milestone 1. The remaining safety checks and available-host model/audio validation remain acceptance gates; this report does not authorize a production-ready claim. [Certain]

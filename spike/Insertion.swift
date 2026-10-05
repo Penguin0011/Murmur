@@ -30,7 +30,10 @@ struct FocusSnapshot {
     let selection: CFRange?
     let secure: Bool
     let browserTypeUnknown: Bool
-    var learningEligible: Bool { insertionTextRole(role) && !secure && !browserTypeUnknown && value != nil && selection != nil }
+    var learningEligible: Bool { readableText && !browserTypeUnknown }
+    /// A nonsecure text role whose value and selection can be read. The app also watches browser
+    /// fields of unknown type once read-back shows the dictated text in plain (a masked field would not).
+    var readableText: Bool { insertionTextRole(role) && !secure && value != nil && selection != nil }
 }
 
 struct InsertionResult {

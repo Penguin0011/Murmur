@@ -9,7 +9,8 @@ struct TermCorrection: Hashable {
 /// Start only after verified insertion, in a nonsecure field with readable value/selection.
 struct DictationObservation {
     let sessionID: UUID
-    private let initial: String
+    /// The dictated span as inserted, original casing.
+    let initial: String
     private let prefix: String
     private let suffix: String
     private let start: TimeInterval
@@ -17,6 +18,9 @@ struct DictationObservation {
     private(set) var stopped = false
     private(set) var stopReason: String?
     private(set) var candidate: TermCorrection?
+    /// The span's current text, original casing; nil once attribution is lost. The app feeds
+    /// `initial` -> `edited` to the ledger, whose filter is broader than `candidate`'s one-letter rule.
+    private(set) var edited: String?
 
     init?(sessionID: UUID = UUID(), value: String, insertedRange: NSRange, now: TimeInterval) {
         let text = value as NSString
@@ -67,6 +71,7 @@ struct DictationObservation {
         // Any growth at the end could be ordinary appended typing. Do not attribute it as a correction.
         guard current == initial || !current.hasPrefix(initial) else { return stop("appended text") }
         range = updatedRange
+        edited = current
         candidate = Self.replacement(initial, current)
         return candidate
     }
@@ -77,9 +82,9 @@ struct DictationObservation {
     private mutating func stop(_ reason: String) -> TermCorrection? {
         stopped = true
         stopReason = reason
-        // A valid prior correction may survive a normal focus departure/expiry. An invalidating
-        // edit/selection change removes it because attribution is no longer established.
-        if reason != "window ended" && reason != "focus departed" { candidate = nil }
+        // A valid prior correction survives focus departure, expiry or the caret moving elsewhere
+        // (the text it was read from is unchanged). An invalidating edit removes it.
+        if !["window ended", "focus departed", "selection left dictated span"].contains(reason) { candidate = nil; edited = nil }
         return candidate
     }
 
@@ -124,6 +129,86 @@ struct DictationObservation {
               oneLetterEdit(source, target) else { return nil }
         // Structural candidate only. Even one letter can change meaning; ledger needs an eligibility gate.
         return TermCorrection(source: source, target: target)
+    }
+}
+
+/// Stand-in for a field with no readable text (VS Code's stub, web canvases): a virtual copy of
+/// the pasted span, edited by the keys typed after it, starting with the caret at its end. Its
+/// `value`/`selection` feed `DictationObservation` as snapshots with no text around the span.
+/// `lost` (any key it cannot model, or an edit outside the span) drops the evidence; `departed`
+/// (a click, or the caret leaving the span) keeps it, like focus departure.
+/// ponytail: the target app's own autocorrect/autocomplete is invisible here; the ledger's filter
+/// and two-session rule are the backstop. Read the field instead wherever AX exposes it.
+struct KeystrokeSpan {
+    enum Key: Equatable {
+        case text(String), backspace(word: Bool), forwardDelete
+        case left(word: Bool, extend: Bool), right(word: Bool, extend: Bool), other
+    }
+    enum State { case editing, departed, lost }
+    private(set) var chars: [Character]
+    private(set) var state = State.editing
+    private var anchor: Int, caret: Int
+
+    init(_ text: String) { chars = Array(text); anchor = chars.count; caret = chars.count }
+
+    var value: String { String(chars) }
+    /// UTF16 range, as AX reports selections.
+    var selection: NSRange {
+        func utf16(_ index: Int) -> Int { String(chars[..<index]).utf16.count }
+        let low = min(anchor, caret), high = max(anchor, caret)
+        return NSRange(location: utf16(low), length: utf16(high) - utf16(low))
+    }
+
+    mutating func depart() { if state == .editing { state = .departed } }
+
+    mutating func apply(_ key: Key) {
+        guard state == .editing else { return }
+        let low = min(anchor, caret), high = max(anchor, caret)
+        switch key {
+        case .text(let text):
+            // Return, Tab, Escape (control) and arrow/Home/End/Page keys (private-use U+F700...) are not edits it can follow.
+            guard !text.isEmpty, !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) || (0xF700...0xF8FF).contains($0.value) }) else { state = .lost; return }
+            chars.replaceSubrange(low..<high, with: Array(text)); caret = low + text.count; anchor = caret
+        case .backspace(let word):
+            if low < high { remove(low..<high); return }
+            let start = word ? wordStart(before: caret) : caret - 1
+            guard start >= 0, caret > 0 else { state = .lost; return }
+            remove(start..<caret)
+        case .forwardDelete:
+            if low < high { remove(low..<high); return }
+            guard caret < chars.count else { state = .lost; return }
+            remove(caret..<caret + 1)
+        case .left(let word, let extend):
+            var next = !extend && low < high ? low : caret
+            if word || extend || low == high { next = word ? wordStart(before: next) : next - 1 }
+            guard next >= 0 else { state = .departed; return }
+            caret = next; if !extend { anchor = next }
+        case .right(let word, let extend):
+            var next = !extend && low < high ? high : caret
+            if word || extend || low == high { next = word ? wordEnd(after: next) : next + 1 }
+            guard next <= chars.count else { state = .departed; return }
+            caret = next; if !extend { anchor = next }
+        case .other:
+            state = .lost
+        }
+    }
+
+    private mutating func remove(_ range: Range<Int>) { chars.removeSubrange(range); caret = range.lowerBound; anchor = caret }
+    private func isWord(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "'" || c == "\u{2019}" }
+    /// macOS Option-Left: skip separators, then the word. -1 when that would leave the span.
+    private func wordStart(before index: Int) -> Int {
+        var i = index
+        while i > 0, !isWord(chars[i - 1]) { i -= 1 }
+        guard i > 0 else { return -1 }
+        while i > 0, isWord(chars[i - 1]) { i -= 1 }
+        return i
+    }
+    private func wordEnd(after index: Int) -> Int {
+        var i = index
+        while i < chars.count, !isWord(chars[i]) { i += 1 }
+        guard i < chars.count else { return chars.count + 1 }
+        while i < chars.count, isWord(chars[i]) { i += 1 }
+        return i
     }
 }
 

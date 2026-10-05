@@ -561,7 +561,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "Automatic learning from edits is not available in this build yet. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
+            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur learns it after the same fix twice. Where an app hides its text, Murmur follows the keys you type in that app for that minute; they are never saved. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)

@@ -266,6 +266,55 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(on.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" }, "promoted after two sessions")
         check(on.process("call acme") == .insert("Call Akme"), "learned entry applies (punctuation capitalizes)")
 
+        // Watched spans (AppController's loop without AX): undo drops evidence; two corrected
+        // dictations promote with the user's casing, not the tracker's lowercased candidate.
+        let watched = try ProcessingCoordinator(directory: dir.appendingPathComponent("watch"), defaults: defaults)
+        func dictate(_ snapshots: [String], inserted: String = "Call Acme today") throws {
+            var o = DictationObservation(value: inserted, insertedRange: NSRange(location: 0, length: 15), now: 0)!
+            var last = o.initial
+            for (i, value) in snapshots.enumerated() {
+                _ = o.observe(value: value, selection: NSRange(location: 0, length: 0), now: Double(i + 1), sameFocusedField: true, readableNonsecure: true)
+                let current = o.edited ?? o.initial
+                if current != last { try watched.observeSpan(sessionID: o.sessionID, original: o.initial, current: current); last = current }
+            }
+            o.finish(); try watched.settle(sessionID: o.sessionID)
+        }
+        try dictate(["Call Akme today", "Call Acme today"])
+        try dictate(["Call Akme today", "Call Akme today and more"])
+        check(watched.ledger.evidence.isEmpty, "undo and appended text leave no evidence")
+        try dictate(["Call Akme today"])
+        check(watched.dictionary.entries.isEmpty, "one session does not promote")
+        try dictate(["Call Akme today"])
+        check(watched.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "watched corrections promote with casing")
+        try dictate(["Call Acme today"], inserted: "Call Akme today")
+        check(watched.dictionary.entries.isEmpty, "changing a learned replacement back withdraws it")
+
+        // Unreadable fields: keystrokes rebuild the span (AppController's tap feeds KeystrokeSpan).
+        let keyed = try ProcessingCoordinator(directory: dir.appendingPathComponent("keys"), defaults: defaults)
+        func typed(_ keys: [KeystrokeSpan.Key], click: Bool = false) throws {
+            var span = KeystrokeSpan("Call Acme today")
+            var o = DictationObservation(value: span.value, insertedRange: NSRange(location: 0, length: 15), now: 0)!
+            var last = o.initial
+            for (i, key) in (keys.map(Optional.some) + (click ? [nil] : [])).enumerated() {
+                if let key { span.apply(key) } else { span.depart() }
+                _ = o.observe(value: span.value, selection: span.selection, now: Double(i + 1),
+                              sameFocusedField: span.state != .departed, readableNonsecure: span.state != .lost)
+                let current = o.edited ?? o.initial
+                if current != last { try keyed.observeSpan(sessionID: o.sessionID, original: o.initial, current: current); last = current }
+            }
+            o.finish(); try keyed.settle(sessionID: o.sessionID)
+        }
+        let selectAcme: [KeystrokeSpan.Key] = [.left(word: true, extend: false), .left(word: true, extend: false), .right(word: true, extend: true)]
+        try typed(selectAcme + [.text("Akme")], click: true)
+        try typed(selectAcme + [.text("Akme"), .other])
+        try typed([.text(" and more")])
+        check(keyed.ledger.evidence.count == 1 && keyed.dictionary.entries.isEmpty, "keystroke fix kept; undo chord and appended text dropped")
+        try typed([.left(word: true, extend: false), .left(word: false, extend: false)] + Array(repeating: .backspace(word: false), count: 4) + "Akme".map { .text(String($0)) })
+        check(keyed.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "backspace-and-retype promotes")
+        var edge = KeystrokeSpan("Hi")
+        edge.apply(.backspace(word: true)); edge.apply(.backspace(word: true))
+        check(edge.state == .lost && edge.value == "", "deleting past the span start is lost")
+
         // Learning off: nothing recorded, nothing promoted.
         let off = try ProcessingCoordinator(directory: dir.appendingPathComponent("off"), defaults: defaults)
         var settings = off.settings

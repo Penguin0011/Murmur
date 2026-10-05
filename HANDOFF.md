@@ -48,7 +48,7 @@ Current checkout: `main` at `f077b53`; working tree was clean at start. The inst
 - Production `ProcessingCoordinator.processAsync` with Gemini cleanup preserved `ACME Robotics`, removed the filler, and retained the amount. A control with the configured variant `shelf mate` produced `Shelfmate`. Both audio cases missed `Shelfmate` because only `shelf mate`/`shelfmate` were registered, while Gemini returned `shelf-made`/`shelf made`. Dictionary replacement uses explicit whole-word variants, not fuzzy matching. [Certain]
 - The app currently passes no dictionary vocabulary hint to cloud transcription (`Controller.transcribeInCloud` → `CloudTranscription.run`). Dictionary replacement and relevant-term cloud cleanup run after transcription. Do not claim dictionary bias at recognition time. OpenRouter STT ignores prompts by design. [Certain]
 - Repeated real API tests with `shelf mate, shelfmate, shelf made, shelf-made` variants: **both Gemini 3.5 Transcribe and Gemini audio passed** dictionary replacement plus Gemini cleanup, producing `Shelfmate` and `ACME Robotics`, removing `Um`, and preserving `$42`. Gemini audio changed “the” to “a” in its raw transcript; the dictionary cannot repair unrelated transcription errors. [Certain]
-- `check_processing.swift`: 88 checks passed, zero failed. `check_providers.swift`: 553 assertions passed. Live OpenRouter remains untested because no OpenRouter key is saved. [Certain]
+- `check_processing.swift`: 92 checks passed, zero failed. `check_providers.swift`: 553 assertions passed. Live OpenRouter remains untested because no OpenRouter key is saved. [Certain]
 - **Human-speech installed-app test passed.** User physically pressed Fn, spoke the requested phrase, and pressed Fn again. TextEdit visibly contained `Send the Shelfmate report to Acme Robotics. The total is $42.`; the matching durable History record contains that text as both raw and final, with `insertionStatus: verified`. Gemini recognized Shelfmate directly in this human sample; replacement itself was independently proved by the synthetic API samples above. [Certain]
 - Settings at checkpoint: Gemini 3.5 Transcribe selected; Gemini cleanup with all four options enabled; original Fn shortcut restored. Added temporary manual Shelfmate with `shelf mate, shelf made, shelf-made` variants. The user began another recording while results were being inspected, so cloud transcription and the test entry were left in place to avoid disrupting active use. Original transcription route was Local; no original dictionary entries existed. Cleanup was already Gemini. [Certain]
 - Native automated shortcut input typed a space without starting recording, and modifier-only input was rejected by the tool. The physical-user test above resolves the full-path gate; automated shortcut input is not evidence of a production shortcut defect. [Certain]
@@ -92,7 +92,22 @@ Later the same day (through `e0b39b4`): [Certain]
 
 Every Controller/UI/main change is **uncompiled on the Mac**. Workers type-checked Controller and UI against stub AppKit/SwiftUI modules on Linux, which catches names and bindings but not real SDK signatures. Expect the first `app/build.sh` run to need fixes. [Certain]
 
-Still not wired: automatic observation feeding learning (`TODO(observation)`; spike `Observation.swift` is not in the app), onboarding, VoiceOver announcements, launch at login, input-device selection. Decided since: pursue `gemini-3.5-transcribe` with stored requests; promotion rule approved. [Certain]
+Still not wired: onboarding, VoiceOver announcements, launch at login, input-device selection. Decided since: pursue `gemini-3.5-transcribe` with stored requests; promotion rule approved. [Certain]
+
+Learning from corrections is wired in (October 4, 2026): verified insertions into learning-eligible fields are watched with `spike/Observation.swift`, and the ledger receives the original-case span so the approved filter decides. Live probe into TextEdit: "Please call ACME about the invoice" was inserted and edited to "Akme" by AX in two sessions. A further run that selected the word and typed over it with keystrokes also settled evidence. That promoted a learned `Akme` ← `ACME` entry, and the third dictation inserted "Akme". Test data, settings and documents were restored afterwards. Typing after the dictated span or editing outside it still drops that session's evidence. Fixing a word through a right-click spelling suggestion is untested (the menu may move AX focus and end the window early). `refreshDictionary()` runs after every settle, so learned entries reach the Parakeet vocabulary file (`writeHelperVocabulary`) as soon as they are promoted. [Certain]
+
+Learning in non-standard fields (October 4, 2026, user request): live probe runs, each dictating "Please call ACME about the invoice" and then fixing the word with System Events keystrokes (Option-Left ×4, Shift-Option-Right, type "Akme"), then activating Finder. Every case settled one `ACME` → `Akme` correction in the ledger. Settings, dictionary and test History were restored afterwards. [Certain]
+
+| App and field | Delivery | Observation route |
+|---|---|---|
+| Chrome, plain textarea | paste, unverified | keystrokes |
+| Chrome, contenteditable | paste, unverified | keystrokes |
+| Safari, textarea | unverified | AX read-back |
+| Arc, textarea | unverified | AX read-back |
+| VS Code, default settings | paste, unverified | keystrokes |
+| Google Docs in Chrome, default settings (a new doc from docs.new, left in the user's Drive) | paste, unverified | keystrokes |
+
+The first keystroke run recorded `akme`: System Events' synthetic keys carry only the Shift flag, not the shifted character. Shift and Caps Lock are now applied to letters; a rerun in Chrome and VS Code then recorded `Akme`. Untested: autocorrect in the target app, IME input, right-click spelling fixes, Slack/Discord. [Certain]
 
 **Mac-side next steps**
 1. Pull this branch, run `app/build.sh` and every check in `app/README.md` (including `check_ui.sh`) on the macOS 26 host. Fix anything that fails under Swift 6.3.3 and `-swift-version 5`. [Certain]

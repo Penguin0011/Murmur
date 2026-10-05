@@ -5,7 +5,7 @@ project_root="$(cd "$(dirname "$0")/.." && pwd)"
 fixture_path="$project_root/runtime/UIQA.app"
 mkdir -p "$fixture_path/Contents/MacOS"
 swiftc -swift-version 5 -target arm64-apple-macos26.0 \
-  "$project_root/spike/Shortcut.swift" "$project_root/spike/Insertion.swift" \
+  "$project_root/spike/Shortcut.swift" "$project_root/spike/Insertion.swift" "$project_root/spike/Observation.swift" \
   "$project_root/module-one/capture/Capture.swift" "$project_root/module-one/session/Session.swift" \
   "$project_root/app/History.swift" "$project_root/app/Controller.swift" \
   "$project_root/app/Cleanup.swift" "$project_root/app/Dictionary.swift" "$project_root/app/Learning.swift" \

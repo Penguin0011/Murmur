@@ -10,7 +10,7 @@ mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 # No assert() runs in the app (only spike test helpers it never calls use it), so -O drops no checks;
 # precondition, overflow traps and exclusivity checks stay on. check_ui.sh and the checks stay unoptimized.
 swiftc -O -swift-version 5 -target arm64-apple-macos26.0 \
-  "$project_root/spike/Shortcut.swift" "$project_root/spike/Insertion.swift" \
+  "$project_root/spike/Shortcut.swift" "$project_root/spike/Insertion.swift" "$project_root/spike/Observation.swift" \
   "$project_root/module-one/capture/Capture.swift" "$project_root/module-one/session/Session.swift" \
   "$project_root/app/History.swift" "$project_root/app/Controller.swift" \
   "$project_root/app/Cleanup.swift" "$project_root/app/Dictionary.swift" "$project_root/app/Learning.swift" \
