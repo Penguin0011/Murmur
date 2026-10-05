@@ -327,8 +327,6 @@ struct SettingsView: View {
                     .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
                 }
                 Spacer()
-                help(controller.isBusy ? "Finish dictating to change settings." : "Changes apply as soon as you make them.", color: Palette.ink64)
-                    .font(.system(size: 12)).padding(.horizontal, 24)
             }
             .padding(.vertical, 16).frame(width: 216)
             .overlay(alignment: .trailing) { Rectangle().fill(Palette.ink).frame(width: 1.5) }
@@ -479,7 +477,7 @@ struct SettingsView: View {
             toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
             toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
             HStack(spacing: 16) {
-                help("If cleanup fails or changes too much, the raw transcript stays in History and nothing is inserted. Faithful transcription turns cleanup off; dictionary spellings still apply.")
+                help("If cleanup fails or is unsafe, only the raw transcript is saved. Dictionary spellings still apply.")
                 Spacer()
                 Button("Faithful Transcription", action: controller.useFaithfulTranscription)
                     .buttonStyle(InkButtonStyle(kind: .outline))
@@ -554,7 +552,10 @@ struct SettingsView: View {
             if controller.dictionarySupportFailed { Text(DictionaryModelFacts.unavailableMessage).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
             if !controller.dictionaryModelMessage.isEmpty { help(controller.dictionaryModelMessage) }
             if let license = controller.dictionaryModelLicense, let declaration = license.declarations.first {
-                help("License: \(declaration.name) (\(declaration.url.absoluteString))", color: Palette.ink64)
+                Button { controller.openLink(declaration.url) } label: {
+                    Text("License: \(declaration.name)").underline()
+                }
+                .buttonStyle(.plain).font(.system(size: 13)).foregroundStyle(Palette.ink64).help(declaration.url.absoluteString)
             }
         }
         .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 20)
@@ -564,7 +565,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "Corrections within a minute teach Murmur the spelling; the same fix in two dictations also teaches the misheard form. In apps with hidden text, keystrokes are watched for that minute and never saved. Learned entries stay active until deleted or reset.", isOn: $controller.learningEnabled)
+            toggleRow("Learn from my corrections", "Correct a word within a minute to teach its spelling; the same correction in two dictations teaches the misheard form. In apps that hide text, Murmur watches keystrokes for a minute but never saves them.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
@@ -578,7 +579,7 @@ struct SettingsView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 if controller.dictionaryEntries.isEmpty {
-                    help("No words yet. Add names, jargon and acronyms Murmur gets wrong.").padding(.vertical, 16)
+                    help("Add words Murmur often mishears.").padding(.vertical, 16)
                 }
                 ForEach(controller.dictionaryEntries) { entry in
                     Group { if editingEntryID == entry.id { dictionaryEditRow(entry) } else { dictionaryRow(entry) } }
@@ -588,14 +589,14 @@ struct SettingsView: View {
             .overlay(alignment: .top) { rule }.padding(.top, 20)
             if !controller.blockedWords.isEmpty {
                 eyebrow("Not learned").padding(.top, 24)
-                help("Murmur skips these because your fixes for them conflicted, or you undid, reversed or deleted them.").padding(.top, 4)
+                help("Conflicting, undone, reversed, or deleted corrections aren't learned.").padding(.top, 4)
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(controller.blockedWords, id: \.self) { item in blockedRow(item).overlay(alignment: .bottom) { softRule } }
                 }
                 .overlay(alignment: .top) { rule }.padding(.top, 12)
             }
             HStack {
-                help("“Heard as” forms replace exact matches in every mode. With cleanup on, similar-sounding words and your spelling go to the cleanup route for correction. Edits save immediately.")
+                help("Exact “Heard as” matches are replaced in every mode. Cleanup can use your spellings to fix similar-sounding words. Changes save immediately.")
                 Spacer()
                 Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries).buttonStyle(InkButtonStyle(kind: .outline))
                     .disabled(!controller.dictionaryEntries.contains { $0.source == .learned } && controller.blockedWords.isEmpty)
@@ -677,6 +678,12 @@ struct SettingsView: View {
                  : HistoryMode.offDisclosure).padding(.top, 12)
             eyebrow("Keep transcripts for").padding(.top, 28)
             segmented([("30-days", "30 days"), ("six-months", "Six months"), ("forever", "Forever")], $controller.retention).padding(.top, 8)
+            HStack {
+                Spacer()
+                Button("Clear History…", role: .destructive, action: controller.clearHistory)
+                    .buttonStyle(InkButtonStyle(kind: .outline)).disabled(controller.history.isEmpty)
+            }
+            .padding(.top, 20)
             if let warning = controller.historyCapWarning {
                 Text(warning).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
             }
@@ -695,7 +702,6 @@ struct SettingsView: View {
                 ForEach(KeyText.providers.filter { $0 != .customAPI }, id: \.self) { provider in keyRow(provider) }
             }
             .overlay(alignment: .top) { rule }.padding(.top, 20)
-            help("Keys are stored in your Keychain and hidden after saving. OpenRouter's key is used for transcription; the custom API key is set in Cleanup.").padding(.top, 16)
         }
     }
 
@@ -831,22 +837,6 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 40)
             }
-
-            HStack {
-                help(controller.historyMode == .on ? "Saved on this Mac only. \(retentionText)" : controller.historySummary)
-                Spacer()
-                Button("Clear History…", role: .destructive, action: controller.clearHistory).buttonStyle(InkButtonStyle(kind: .outline))
-                    .disabled(controller.history.isEmpty)
-            }
-            .padding(.horizontal, 40).frame(height: 56).overlay(alignment: .top) { rule }
-        }
-    }
-
-    private var retentionText: String {
-        switch controller.retention {
-        case "six-months": return "Kept for six months."
-        case "forever": return "Kept forever."
-        default: return "Kept for 30 days."
         }
     }
 

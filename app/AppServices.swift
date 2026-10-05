@@ -59,7 +59,7 @@ enum ModelFacts {
 /// tokenizer only from there; that folder can be shared with other apps built on FluidAudio, so
 /// Murmur checks it against the pinned hashes before every use and runs without it otherwise.
 enum DictionaryModelFacts {
-    static let displayName = "Dictionary support for on-device transcription"
+    static let displayName = "On-device dictionary support"
     static let modelName = "Parakeet CTC 110M"
 
     static func directory(home: URL) -> URL {
@@ -71,7 +71,7 @@ enum DictionaryModelFacts {
         "\(modelName) · \(ModelFacts.formatBytes(downloadSize)) download · \(ModelFacts.location)"
     }
 
-    static let explanation = "Helps on-device transcription spell your dictionary words. It checks what was heard against your words and changes only words that are not ordinary English, so everyday speech is left alone. Your words stay on this Mac."
+    static let explanation = "Improves on-device spelling of dictionary words. Your words stay on this Mac."
 
     static func confirmation(downloadSize: Int64, license: ModelLicenseInfo, folder: URL) -> (title: String, body: String) {
         ("Download \(modelName) (\(ModelFacts.formatBytes(downloadSize)))?",
@@ -324,7 +324,7 @@ enum UpdateSchedule {
 }
 
 enum UpdateText {
-    static let explanation = "Murmur asks GitHub for new releases at launch and at most once a day. This uses the network even though transcription runs on this Mac. Nothing is downloaded or installed, and no transcripts, audio, dictionary or API keys are sent."
+    static let explanation = "Checks GitHub at launch and daily. This uses the network; sends no user data. Nothing is downloaded or installed."
 
     /// Status line for Settings. Nil means keep the current line (a skipped automatic check).
     static func status(_ result: UpdateCheckResult, manual: Bool, currentVersion: String,
