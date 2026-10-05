@@ -34,7 +34,7 @@ import SwiftUI
         window.isReleasedWhenClosed = false
         window.center(); window.makeKeyAndOrderFront(nil)
         let entries = [
-            HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "Synthetic transcript for an uncertain destination.", finalText: "Synthetic transcript for an uncertain destination.", insertionStatus: "unverified"),
+            HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "Synthetic transcript pasted into an unreadable field.", finalText: "Synthetic transcript pasted into an unreadable field.", insertionStatus: "unverified"),
             HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-3600), rawText: "Synthetic verified transcript.", finalText: "Synthetic verified transcript.", insertionStatus: "verified")
         ]
         DispatchQueue.main.async {

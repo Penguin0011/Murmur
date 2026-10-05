@@ -420,7 +420,7 @@ struct SettingsView: View {
             }
             .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
             toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
-            toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. If it cannot, press ⌃⌘V to paste the dictation where your cursor is. The previous clipboard is restored unless you copy something newer. Automatic paste is marked transient; other software may still read or retain it. Murmur never sends a message.", isOn: $controller.automaticInsertion)
+            toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. Press ⌃⌘V to paste the last dictation again if it is missing; check the field first to avoid a duplicate. The previous clipboard is restored unless you copy something newer. Automatic paste is marked transient; other software may still read or retain it. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
             toggleRow("Open at login", "Starts Murmur in the background when you log in, so the shortcut is ready.", isOn: Binding(get: { controller.openAtLogin }, set: controller.setOpenAtLogin))
@@ -830,7 +830,7 @@ struct SettingsView: View {
 
     private var visibleHistory: [HistoryEntry] {
         controller.history.filter { entry in
-            (!attentionOnly || needsAttention(entry.insertionStatus))
+            (!attentionOnly || Self.needsAttention(entry.insertionStatus))
                 && (searchText.isEmpty || entry.finalText.localizedCaseInsensitiveContains(searchText) || entry.rawText.localizedCaseInsensitiveContains(searchText))
         }
     }
@@ -921,8 +921,8 @@ struct SettingsView: View {
     }
 
     private func historyRow(_ entry: HistoryEntry) -> some View {
-        let open = selectedID == entry.id, attention = needsAttention(entry.insertionStatus)
-        let note = controller.sessionOnlyIDs.contains(entry.id) ? HistoryText.sessionOnlyNote : statusNote(entry.insertionStatus)
+        let open = selectedID == entry.id, attention = Self.needsAttention(entry.insertionStatus)
+        let note = controller.sessionOnlyIDs.contains(entry.id) ? HistoryText.sessionOnlyNote : Self.statusNote(entry.insertionStatus)
         return VStack(alignment: .leading, spacing: 0) {
             Button { selectedID = open ? nil : entry.id } label: {
                 HStack(alignment: .top, spacing: 16) {
@@ -930,9 +930,11 @@ struct SettingsView: View {
                         .font(.system(size: 13, design: .monospaced)).foregroundStyle(Palette.ink70).lineLimit(1).fixedSize().frame(width: 72, alignment: .leading).padding(.top, 2)
                     Text((entry.finalText.isEmpty ? entry.rawText : entry.finalText).replacingOccurrences(of: "\n", with: " "))
                         .font(.system(size: 16)).lineSpacing(2).lineLimit(open ? 1 : 2).frame(maxWidth: .infinity, alignment: .leading)
-                    mono(statusLabel(entry.insertionStatus), size: 11, color: attention ? Palette.paper : Palette.accentDeep)
-                        .lineLimit(1).fixedSize().padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(attention ? Palette.ink : Palette.accent16)
+                    if let label = Self.statusLabel(entry.insertionStatus) {
+                        mono(label, size: 11, color: attention ? Palette.paper : Palette.accentDeep)
+                            .lineLimit(1).fixedSize().padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(attention ? Palette.ink : Palette.accent16)
+                    }
                 }
                 .padding(.vertical, 12).frame(minHeight: 56).contentShape(Rectangle())
             }
@@ -978,14 +980,14 @@ struct SettingsView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copiedID == id { copiedID = nil } }
     }
 
-    private func needsAttention(_ status: String) -> Bool {
-        ["unverified", "insertion-pending", "failed", "held-cleanup", "held-transcript"].contains(status)
+    static func needsAttention(_ status: String) -> Bool {
+        ["insertion-pending", "failed", "held-cleanup", "held-transcript"].contains(status)
     }
 
-    private func statusLabel(_ status: String) -> String {
+    static func statusLabel(_ status: String) -> String? {
         switch status {
-        case "verified": return "Inserted ✓"
-        case "unverified", "insertion-pending": return "Delivery uncertain"
+        case "verified", "unverified": return nil
+        case "insertion-pending": return "Saved"
         case "failed": return "Not inserted"
         case "copied": return "Copied"
         case "held-cleanup": return "Cleanup held"
@@ -994,10 +996,10 @@ struct SettingsView: View {
         }
     }
 
-    private func statusNote(_ status: String) -> String? {
+    static func statusNote(_ status: String) -> String? {
         switch status {
-        case "unverified", "insertion-pending": return "Murmur could not confirm the text arrived. It is saved here in case it did not."
-        case "failed": return "Murmur could not type this into the original field. The text is saved here so you can copy it."
+        case "insertion-pending": return "Murmur stopped before saving the delivery result. Check the destination before copying this text to avoid a duplicate."
+        case "failed": return "Murmur could not paste this text. It is saved here so you can copy it."
         case "held-cleanup": return "Cleanup changed too much, so only the raw transcript was saved and nothing was inserted."
         case "held-transcript": return "The transcript was held for review, so nothing was inserted."
         default: return nil

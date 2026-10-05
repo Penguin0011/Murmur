@@ -667,7 +667,7 @@ final class PreStart: @unchecked Sendable {
         guard let tap = next.createTap(), let nextSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { message = "The shortcut could not start. Check Input Monitoring and Accessibility."; return }
         next.onEscapeWhileProcessing = { [weak self] in self?.cancelCloudRequest() }
         next.onCopyChord = { [weak self] in self?.copyLatestRawTranscript() }
-        next.onPasteChord = { [weak self] in self?.pasteUninserted() }
+        next.onPasteChord = { [weak self] in self?.pasteLastDictation() }
         next.pressToToggle = pressToToggle
         // A press while the previous dictation processes records right away; its events replay
         // into the machine when that dictation finishes, which adopts this capture.
@@ -732,7 +732,7 @@ final class PreStart: @unchecked Sendable {
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }
-            uninserted = nil; insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
+            insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
             listeningStarted = Date(); generation = UUID(); recoveryEntryID = nil; recordingFailed = false
             destinationScreen = screenForDestination(destination)
         }
@@ -812,7 +812,7 @@ final class PreStart: @unchecked Sendable {
         setPhase("Ready", stage == .transcription ? CloudTranscription.message(.cancelled) ?? "Canceled." : "Canceled. The raw transcript is saved in History and was not inserted.")
         bubble.hide(); historySaved(); done()
     }
-    func setPhase(_ phase: String, _ message: String) {
+    func setPhase(_ phase: String, _ message: String, announcement: String? = nil) {
         self.phase = phase; self.message = message
         // Every finished status leaves on its own unless replaced: text stays in History and retry audio
         // stays on disk. "No speech" needs no action (2 s); errors get longer to read (8 s); the rest 5 s.
@@ -831,7 +831,7 @@ final class PreStart: @unchecked Sendable {
         refreshRecoveryAudio()
         updateMenu?()
         bubble.show(phase: phase, message: message, screen: destinationScreen)
-        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: announcement ?? message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
     private func transcribe(_ audio: URL, done: @escaping () -> Void) {
         if let provider = sessionTranscriber { transcribeInCloud(audio, with: provider, done: done); return }
@@ -1008,54 +1008,62 @@ final class PreStart: @unchecked Sendable {
         // First-run test dictation: Murmur never types into itself, so show the result on the setup screen.
         if setupShowing && NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
             // ⌃⌘V still works if this flag was left on with no setup window visible.
-            setupTestTranscript = processed; uninserted = processed; setPhase("Ready", "Test dictation worked."); bubble.hide()
+            setupTestTranscript = processed; lastDictationText = processed; setPhase("Ready", "Test dictation worked."); bubble.hide()
             destination = nil; historySaved(); done(); return
         }
+        lastDictationText = processed
         if insertThisSession {
             watchTick(ending: true)
             // Insert where the cursor is now, even if focus moved while recording or processing.
             let target = (try? captureFocus()).flatMap { $0.pid == getpid() ? nil : $0 }
-            if target?.secure == true {
-                setPhase("Saved", "\(saved) Password fields cannot receive dictation."); destination = nil; historySaved(); done(); return
-            }
             // Persist uncertainty before the one permitted delivery attempt.
             let insertionText = textWithLeadingSpace(processed, value: target?.value, selection: target?.selection, enabled: leadingSpaceThisSession)
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
+            var attempted = false
             do {
                 try store.save(entry)
                 // The text appearing is the signal; insertion's verification waits block the main
                 // thread, so take the indicator down first instead of freezing it.
                 bubble.hide()
                 let inserting = ProcessInfo.processInfo.systemUptime
-                // A readable text field is written and read back; anything else (a web editor, a
+                // A readable text field is pasted into and read back; anything else (a web editor, a
                 // custom text view, no accessible focus) gets a plain paste.
                 let readable = target.map { insertionTextRole($0.role) && $0.value != nil && $0.selection != nil } ?? false
                 let insertion = readable ? insertText(entry.finalText, into: target!) : pasteIntoFrontmostApp(entry.finalText)
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
+                attempted = true
+                lastDictationText = entry.finalText
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
                 watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
-                switch insertion.status {
-                case .verified: setPhase("Inserted", "Inserted.")
-                case .unverified: setPhase("Saved", "\(saved) Delivery could not be verified. Press ⌃⌘V to paste it if it is missing.")
-                case .failed: uninserted = entry.finalText; setPhase("Saved", "This field could not take the text. Press ⌃⌘V to paste it where your cursor is.")
-                }
-                if insertion.status == .unverified { uninserted = entry.finalText }
-            } catch { setPhase("Saved", "\(saved) Insertion status could not be saved.") }
+                showInsertionResult(insertion)
+            } catch {
+                setPhase("Error", attempted
+                    ? "\(saved) Delivery status could not be saved. Check the destination before pasting again."
+                    : "\(saved) Could not save the text for insertion, so nothing was pasted. Copy it from History.")
+            }
         } else {
-            uninserted = processed
             setPhase("Saved", "\(saved) Press ⌃⌘V to paste it where your cursor is.")
         }
         destination = nil; historySaved(); done()
     }
-    /// The latest dictation Murmur did not (or may not have) typed, kept in memory for ⌃⌘V.
-    var uninserted: String?
-    /// ⌃⌘V anywhere: pastes that dictation at the cursor, then restores the clipboard. It stays
-    /// available until the next dictation starts.
-    func pasteUninserted() {
-        guard let text = uninserted, !isBusy else { return }
+    /// Latest insertable dictation, including verified deliveries, kept in memory for ⌃⌘V.
+    var lastDictationText: String?
+    /// ⌃⌘V explicitly pastes again; never triggered by a read-back mismatch.
+    /// Keep the last usable text through canceled, empty, or failed recordings.
+    func pasteLastDictation() {
+        guard let text = lastDictationText, !isBusy else { return }
+        watchTick(ending: true)
         let result = pasteIntoFrontmostApp(text)
         timingLog.notice("paste-chord status=\(result.status.rawValue, privacy: .public) detail=\(result.detail, privacy: .public)")
+        showInsertionResult(result)
+    }
+    /// Read-back is diagnostic evidence, not a reason to warn or paste twice.
+    func showInsertionResult(_ result: InsertionResult) {
+        switch result.status {
+        case .verified, .unverified: setPhase("Ready", idleMessage, announcement: "Dictation finished.")
+        case .failed: setPhase("Error", "Could not paste the dictation. Select a text field and press ⌃⌘V, or copy it from History. Check the field first to avoid a duplicate.")
+        }
     }
     // Explicit developer check of the production pipeline, using a synthetic file
     // and an exact disposable destination. Never enabled during ordinary launch.
@@ -1326,12 +1334,18 @@ final class PreStart: @unchecked Sendable {
             return .text(shifted && text.allSatisfy(\.isLetter) ? text.uppercased() : text)
         }
     }
-    func deleteEntry(_ entry: HistoryEntry) { do { try records?.delete(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
+    private func deleteTranscript(_ entry: HistoryEntry) throws {
+        try records?.delete(entry)
+        if lastDictationText == entry.finalText { lastDictationText = nil }
+        if setupTestTranscript == entry.finalText { setupTestTranscript = "" }
+        if recoveryEntryID == entry.id { recoveryEntryID = nil }
+    }
+    func deleteEntry(_ entry: HistoryEntry) { do { try deleteTranscript(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
     func clearHistory() {
         let alert = NSAlert(); alert.messageText = "Delete all saved transcripts?"; alert.informativeText = "This cannot be undone."
         alert.addButton(withTitle: "Delete All"); alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
-            do { for entry in history { try records?.delete(entry) } }
+            do { for entry in history { try deleteTranscript(entry) } }
             catch { message = "Could not delete all transcripts. Remaining entries are shown in History." }
             refreshHistory()
         }
@@ -1464,7 +1478,7 @@ final class PreStart: @unchecked Sendable {
         chunkJobs.values.forEach { $0.discard() }; chunkJobs.removeAll()
         warm.stop()
         generation = UUID()
-        uninserted = nil; setupTestTranscript = ""
+        lastDictationText = nil; setupTestTranscript = ""
         destination = nil; sessionTranscriber = nil
         let locations = MurmurDataLocations.standard(base: base)
         // Preview and the developer probe never touch the login Keychain.

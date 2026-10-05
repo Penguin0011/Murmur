@@ -5,6 +5,7 @@ import ApplicationServices
 
 @main struct ControllerChecks {
     static func main() throws {
+        runInsertionChecks()
         let a = AXUIElementCreateApplication(getpid()), b = AXUIElementCreateApplication(getpid() + 10000)
         let identity = LearningFocusIdentity(field: a, window: a)
         precondition(identity.matches(LearningFocusIdentity(field: a, window: a)))
@@ -96,6 +97,28 @@ import ApplicationServices
         try Data([1, 2, 3]).write(to: recovery)
         let entry = HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "retained", finalText: "retained", insertionStatus: "saved-not-inserted")
         controller.history = [entry]; controller.recoveryEntryID = entry.id
+        controller.lastDictationText = entry.finalText
+        for status in [InsertionResult.Status.verified, .unverified] {
+            controller.setPhase("Processing", "Processing synthetic dictation")
+            controller.showInsertionResult(InsertionResult(status: status, detail: "synthetic", snapshot: nil))
+            precondition(controller.phase == "Ready" && !controller.hasStatusToShow, "posted pastes finish quietly regardless of read-back")
+            precondition(controller.lastDictationText == entry.finalText, "paste-last remains available after delivery")
+            precondition(SettingsView.statusLabel(status.rawValue) == nil && SettingsView.statusNote(status.rawValue) == nil)
+            precondition(!SettingsView.needsAttention(status.rawValue), "unreadable fields do not trigger the attention filter")
+        }
+        controller.showInsertionResult(InsertionResult(status: .failed, detail: "synthetic", snapshot: nil))
+        precondition(controller.phase == "Error" && controller.message.contains("⌃⌘V") && controller.lastDictationText == entry.finalText)
+        precondition(SettingsView.needsAttention("failed") && SettingsView.statusLabel("failed") == "Not inserted")
+        precondition(SettingsView.needsAttention("insertion-pending") && SettingsView.statusLabel("insertion-pending") == "Saved")
+        precondition(SettingsView.statusNote("insertion-pending")?.contains("avoid a duplicate") == true)
+        controller.setupTestTranscript = entry.finalText
+        controller.deleteEntry(entry)
+        precondition(controller.lastDictationText == entry.finalText && controller.recoveryEntryID == entry.id, "failed deletion preserves recovery")
+        let historyStore = try HistoryStore(directory: temp.appendingPathComponent(name).appendingPathComponent("history"))
+        try historyStore.save(entry)
+        controller.deleteEntry(entry)
+        precondition(controller.lastDictationText == nil && controller.setupTestTranscript.isEmpty && controller.recoveryEntryID == nil, "deleting the transcript clears recovery buffers")
+        controller.history = [entry]; controller.recoveryEntryID = entry.id
         controller.shortcut = "fn"; controller.phase = "Error"
         controller.dismissStatus()
         precondition(controller.phase == "Ready" && !controller.message.contains("Right Option"))
@@ -122,7 +145,7 @@ import ApplicationServices
         RunLoop.main.run(until: Date().addingTimeInterval(1.5))
         precondition(controller.phase == "Error" && controller.message.hasPrefix("Transcription failed"), "a newer error is not dismissed")
         controller.history = [entry]; controller.recoveryEntryID = entry.id
-        controller.setPhase("Saved", "Saved in History. Delivery could not be verified. Press ⌃⌘V to paste it if it is missing.")
+        controller.setPhase("Saved", "Saved in History. Press ⌃⌘V to paste it where your cursor is.")
         RunLoop.main.run(until: Date().addingTimeInterval(2.5))
         precondition(controller.phase == "Saved", "saved notice stays visible before five seconds")
         RunLoop.main.run(until: Date().addingTimeInterval(2.8))
@@ -164,19 +187,19 @@ import ApplicationServices
         controller.removeKey(.customAPI)
         // The learning lexicon uses the real English spell checker.
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
-        controller.uninserted = "held synthetic text"; controller.setupTestTranscript = "setup synthetic text"
+        controller.lastDictationText = "held synthetic text"; controller.setupTestTranscript = "setup synthetic text"
         let chunk = temp.appendingPathComponent(name).appendingPathComponent("chunks/abandoned.wav")
         try Data([4, 5, 6]).write(to: chunk)
         controller.phase = "Processing"
         controller.deleteConfirmedData()
-        precondition(controller.uninserted != nil && !controller.setupTestTranscript.isEmpty && manager.fileExists(atPath: recovery.path), "busy wipe refuses")
+        precondition(controller.lastDictationText != nil && !controller.setupTestTranscript.isEmpty && manager.fileExists(atPath: recovery.path), "busy wipe refuses")
         controller.phase = "Ready"
         controller.deleteConfirmedData()
-        precondition(controller.uninserted == nil && controller.setupTestTranscript.isEmpty, "wipe clears paste and setup buffers")
+        precondition(controller.lastDictationText == nil && controller.setupTestTranscript.isEmpty, "wipe clears paste and setup buffers")
         precondition(controller.history.isEmpty && !controller.hasRecoveryAudio && !manager.fileExists(atPath: recovery.path), "wipe refreshes empty storage")
         precondition(!manager.fileExists(atPath: chunk.path), "wipe removes abandoned chunk audio")
-        controller.pasteUninserted()
-        precondition(controller.uninserted == nil, "deleted text cannot be pasted later")
+        controller.pasteLastDictation()
+        precondition(controller.lastDictationText == nil, "deleted text cannot be pasted later")
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
         try warmRunnerChecks()
         try chunkChecks()
