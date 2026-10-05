@@ -206,16 +206,30 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 **Product, release and housekeeping**
 12. ~~The PRD cleanup-failure conflict (section 3 vs section 4) is unresolved.~~ Resolved in PRD "Milestone 1 implementation decisions": cleanup errors and guard failures both save the raw transcript, show recovery, and require an explicit raw-text action before insertion.
 13. Builds are self-signed (`clouddev Development`); Developer ID signing and notarization need an Apple Developer Program account.
-14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders, notification names and the repository still use the old name.
+14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders, and notification names still use the old name. The GitHub repository was renamed `Penguin0011/Murmur`; the repo remains private until a release visibility decision.
 15. Test transcripts from live runs remain in Murmur's History.
 16. ~~No LICENSE file~~: added (MIT, Aakash). `README.md`, `CONTRIBUTING.md` and `THIRD_PARTY_NOTICES.md` now exist.
 17. The new modules have never been compiled on the Mac; the Keychain store has never been compiled at all.
 
 **Processing and providers**
-18. No provider has been called with a real API key. Fireworks STT is deprecated upstream; the OpenRouter STT and Gemini/OpenRouter cleanup split is a proposal pending user approval.
-19. The local cleanup model is unselected. `RuleCleaner` is a baseline; its corpus has no real ASR transcripts, and the guard will hold more real LLM output than baseline output.
+18. Gemini cleanup was called live on October 5 with 15 synthetic benchmark prompts using the stored key. No other cloud provider was called in that benchmark. Fireworks STT is deprecated upstream; OpenRouter STT and cleanup remain untested.
+19. Three local cleanup models of 2B parameters or less were benchmarked October 5 and none is recommended for production. Cloud cleanup is the practical option until a larger local model passes cleanup quality and safety gates. The corpus has no real ASR transcripts.
 20. Learning's lexicon check needs NSSpellChecker on macOS before learning ships; the semantic promotion rule is approved.
 21. The Parakeet conversion's CC-BY-4.0 label conflicts with the upstream NVIDIA Open Model License; the app must show the model license before download.
+
+**Local cleanup model comparison — October 5, 2026.** All candidates used the same production cleanup prompt, llama.cpp 0.5.0 with reasoning disabled, and the 425-case synthetic corpus on Apple M3 / 16 GB / macOS 26.6.2.
+
+| Model | Exact | CleanupGuard accepted | Median / p95 latency | Median decode |
+|---|---:|---:|---:|---:|
+| Qwen3.5-0.8B Q4_K_M | 228/425 (53.6%) | 394/425 (92.7%) | 637 / 1,249 ms | 85.6 tok/s |
+| Qwen3.5-2B Q4_K_M | 250/425 (58.8%) | 391/425 (92.0%) | 1,090 / 2,161 ms | 46.1 tok/s |
+| LFM2.5-1.2B-Instruct Q4_K_M | 94/425 (22.1%) | 217/425 (51.1%) | 719 / 1,213 ms | 77.6 tok/s |
+
+On the same 15 paired prompts, Gemini `gemini-3.5-flash-lite` matched 12/15, passed the guard 14/15, and had 598 ms median latency. Qwen 0.8B matched 6/15 (659 ms median); Qwen 2B matched 8/15 (1,245 ms median, guard 15/15); LFM 1.2B matched 1/15 (745 ms median, guard 10/15). The comparisons are synthetic and small; no real ASR transcripts were tested. None of these models is a production recommendation. Around 8B is a starting point for larger-model evaluation, not a quality or hardware guarantee. [Certain]
+
+Pinned Qwen3.5-2B Q4_K_M: `unsloth/Qwen3.5-2B-GGUF`, revision `f6d5376be1edb4d416d56da11e5397a961aca8ae`, SHA-256 `aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223`; retained at `/Users/aakash/Library/Caches/Dictation/cleanup/Qwen3.5-2B-Q4_K_M.gguf`. The old 0.8B and failed LFM 1.2B weights were removed; llama.cpp remains installed. LFM's license has a commercial-use revenue threshold and redistribution conditions; do not ship those weights without reviewing the terms. No app settings changed and the full UI route was not tested. [Certain]
+
+Settings now includes a disclaimer: small local model trials were slower and less accurate than Gemini in this synthetic comparison; privacy-focused AI cleanup should start evaluation around 8B or use the explicit cloud route. The PRD calls for a curated 3–5 model browser and requires each option to pass quality and safety gates before it can be called adequate. No candidate currently qualifies. [Certain]
 
 ---
 
