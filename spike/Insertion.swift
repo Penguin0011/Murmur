@@ -158,6 +158,7 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
         InsertionResult(status: status, detail: detail, snapshot: nil)
     }
     guard !text.isEmpty else { return result(.failed, "Empty output; no insertion attempted") }
+    guard !IsSecureEventInputEnabled() else { return result(.failed, "Secure input is on; no paste attempted") }
     guard !destination.secure else { return result(.failed, "Secure field rejected") }
     guard insertionTextRole(destination.role) else { return result(.failed, "Focused element is not a supported text field") }
     guard destination.value != nil, destination.selection != nil else {
@@ -252,12 +253,16 @@ func pasteThroughClipboard(_ text: String, restore: Bool, settle: TimeInterval, 
 func pasteIntoFrontmostApp(_ text: String) -> InsertionResult {
     func failed(_ detail: String) -> InsertionResult { InsertionResult(status: .failed, detail: detail, snapshot: nil) }
     guard !text.isEmpty else { return failed("Empty output; no insertion attempted") }
+    guard AXIsProcessTrusted() else { return failed("Accessibility permission is unavailable; no paste attempted") }
     guard !IsSecureEventInputEnabled() else { return failed("Secure input is on; no paste attempted") }
     RunLoop.current.run(until: Date())
     guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier, pid != getpid() else { return failed("No other app is frontmost") }
+    let focus = LearningFocusIdentity.capture(pid: pid)
+    guard !focus.secure else { return failed("Secure field rejected") }
     if let failure = pasteThroughClipboard(text, restore: true, settle: 0.5, stillTarget: {
         RunLoop.current.run(until: Date())
         return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid && !IsSecureEventInputEnabled()
+            && focus.matches(LearningFocusIdentity.capture(pid: pid))
     }) { return failed(failure) }
     return InsertionResult(status: .unverified, detail: "clipboard paste into an unreadable field", snapshot: nil)
 }
