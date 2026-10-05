@@ -3,6 +3,15 @@ set -eu
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 app_path="$project_root/runtime/Murmur.app"
 runner_path="$project_root/module-one/models/Runner/.build/release/ModelBench"
+identity="${MURMUR_SIGN_IDENTITY:-clouddev Development}"
+signing_flags=(--options runtime --timestamp=none)
+if [[ "${MURMUR_RELEASE:-0}" == 1 ]]; then
+  [[ "$identity" == "Developer ID Application:"* && -n "${MURMUR_NOTARY_PROFILE:-}" ]] || { echo "Release builds require a Developer ID Application identity and MURMUR_NOTARY_PROFILE." >&2; exit 1; }
+  security find-identity -v -p codesigning | grep -Fq "\"$identity\"" || { echo "The release signing identity is unavailable." >&2; exit 1; }
+  signing_flags=(--options runtime --timestamp)
+else
+  security find-identity -p codesigning | grep -Fq "\"$identity\"" || identity=-
+fi
 # Always build: it is incremental, and a stale helper would reject newer arguments (--ctc).
 swift build --package-path "$project_root/module-one/models/Runner" -c release
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
@@ -28,8 +37,15 @@ if [[ -d "$project_root/module-one/models/Runner/.build/release/FluidAudio_Fluid
   cp -R "$project_root/module-one/models/Runner/.build/release/FluidAudio_FluidAudio.bundle" "$app_path/Contents/Resources/"
 fi
 # A stable identity keeps macOS privacy permissions across rebuilds; ad-hoc signing loses them every build.
-identity="${MURMUR_SIGN_IDENTITY:-clouddev Development}"
-security find-identity -p codesigning | grep -q "\"$identity\"" || identity=-
-codesign --force --sign "$identity" "$app_path/Contents/MacOS/ModelBench"
-codesign --force --sign "$identity" "$app_path"
+codesign --force --sign "$identity" "${signing_flags[@]}" "$app_path/Contents/MacOS/ModelBench"
+codesign --force --sign "$identity" "${signing_flags[@]}" --entitlements "$project_root/app/Murmur.entitlements" "$app_path"
+codesign --verify --deep --strict "$app_path"
+if [[ "${MURMUR_RELEASE:-0}" == 1 ]]; then
+  archive="$project_root/runtime/Murmur-notarization.zip"
+  ditto -c -k --keepParent "$app_path" "$archive"
+  xcrun notarytool submit "$archive" --keychain-profile "$MURMUR_NOTARY_PROFILE" --wait
+  xcrun stapler staple "$app_path"
+  xcrun stapler validate "$app_path"
+  spctl --assess --type execute "$app_path"
+fi
 echo "$app_path"

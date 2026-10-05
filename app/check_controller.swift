@@ -1,9 +1,31 @@
 import CryptoKit
 import Foundation
 import AppKit
+import ApplicationServices
 
 @main struct ControllerChecks {
     static func main() throws {
+        let a = AXUIElementCreateApplication(getpid()), b = AXUIElementCreateApplication(getpid() + 10000)
+        let identity = LearningFocusIdentity(field: a, window: a)
+        precondition(identity.matches(LearningFocusIdentity(field: a, window: a)))
+        precondition(!identity.matches(LearningFocusIdentity(field: b, window: a)), "field departure refuses")
+        precondition(!identity.matches(LearningFocusIdentity(field: a, window: b)), "window departure refuses")
+        precondition(!identity.matches(LearningFocusIdentity(field: nil, window: a)), "lost identity refuses")
+        precondition(!identity.matches(LearningFocusIdentity(field: a, window: a, secure: true)), "secure metadata refuses")
+        for size in [256 * 1024, 4 * 1024 * 1024 + 1] {
+            let producer = Process(), pipe = Pipe()
+            producer.executableURL = URL(fileURLWithPath: "/usr/bin/head")
+            producer.arguments = ["-c", "\(size)", "/dev/zero"]; producer.standardOutput = pipe
+            try producer.run(); try pipe.fileHandleForWriting.close()
+            do {
+                let data = try readHelperOutput(pipe.fileHandleForReading)
+                precondition(size == data.count && size < 4 * 1024 * 1024, "stdout larger than pipe capacity drains without a file")
+            } catch {
+                precondition(size > 4 * 1024 * 1024, "oversized helper output refuses")
+                if producer.isRunning { kill(producer.processIdentifier, SIGKILL) }
+            }
+            producer.waitUntilExit(); try pipe.fileHandleForReading.close()
+        }
         // Keys the correction watch follows: shifted letters keep their case even when a synthetic
         // event carries only the Shift flag; Cmd chords are not edits it can follow.
         func key(_ code: CGKeyCode, _ text: String, _ flags: CGEventFlags) -> KeystrokeSpan.Key {
@@ -133,8 +155,28 @@ import AppKit
         precondition(controller.saveKey(.gemini, "test-key-123") && controller.savedKeys.contains(.gemini) && controller.keyMessages[.gemini] == KeyText.saved)
         controller.removeKey(.gemini)
         precondition(!controller.savedKeys.contains(.gemini))
+        controller.customAPIBaseURL = "https://first.example/v1"
+        precondition(controller.saveKey(.customAPI, "synthetic-api-key") && !controller.customAPIKeyNeedsConfirmation)
+        controller.customAPIBaseURL = "https://second.example/v1"
+        precondition(controller.customAPIKeyNeedsConfirmation, "changed destination shows a key confirmation warning")
+        controller.validateKey(.customAPI)
+        precondition(controller.keyMessages[.customAPI] == CredentialError.destinationMismatch.description, "validation refuses an unconfirmed destination without HTTP")
+        controller.removeKey(.customAPI)
         // The learning lexicon uses the real English spell checker.
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
+        controller.uninserted = "held synthetic text"; controller.setupTestTranscript = "setup synthetic text"
+        let chunk = temp.appendingPathComponent(name).appendingPathComponent("chunks/abandoned.wav")
+        try Data([4, 5, 6]).write(to: chunk)
+        controller.phase = "Processing"
+        controller.deleteConfirmedData()
+        precondition(controller.uninserted != nil && !controller.setupTestTranscript.isEmpty && manager.fileExists(atPath: recovery.path), "busy wipe refuses")
+        controller.phase = "Ready"
+        controller.deleteConfirmedData()
+        precondition(controller.uninserted == nil && controller.setupTestTranscript.isEmpty, "wipe clears paste and setup buffers")
+        precondition(controller.history.isEmpty && !controller.hasRecoveryAudio && !manager.fileExists(atPath: recovery.path), "wipe refreshes empty storage")
+        precondition(!manager.fileExists(atPath: chunk.path), "wipe removes abandoned chunk audio")
+        controller.pasteUninserted()
+        precondition(controller.uninserted == nil, "deleted text cannot be pasted later")
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
         try warmRunnerChecks()
         try chunkChecks()

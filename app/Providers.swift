@@ -201,48 +201,74 @@ protocol HTTPTransport: Sendable {
     func send(_ request: URLRequest) async throws -> HTTPResult
 }
 
-/// URLSession transport with no cookies, cache or credential storage. Cancelling the calling
-/// Task cancels the underlying data task.
+/// Sensitive requests refuse redirects, cookies, cached data and oversized responses.
 final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
-    private let session: URLSession
+    private let configuration: URLSessionConfiguration
+    private let maximumResponseBytes: Int
 
-    /// `followRedirects: false` returns a 3xx as-is instead of following it, so a server cannot
-    /// bounce a request (and its transcript) to a host the disclosure did not name.
-    init(followRedirects: Bool = true) {
+    init(maximumResponseBytes: Int = 8 * 1024 * 1024) {
+        self.maximumResponseBytes = max(1, maximumResponseBytes)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.urlCredentialStorage = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        session = URLSession(configuration: configuration, delegate: followRedirects ? nil : RedirectRefuser(), delegateQueue: nil)
+        self.configuration = configuration
     }
 
     func send(_ request: URLRequest) async throws -> HTTPResult {
         let holder = DataTaskHolder()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HTTPResult, Error>) in
-                let task = session.dataTask(with: request) { data, response, error in
-                    if let error = error { continuation.resume(throwing: error); return }
-                    guard let http = response as? HTTPURLResponse else { continuation.resume(throwing: URLError(.badServerResponse)); return }
-                    var headers: [String: String] = [:]
-                    for (key, value) in http.allHeaderFields {
-                        if let k = key as? String { headers[k] = "\(value)" }
-                    }
-                    continuation.resume(returning: HTTPResult(status: http.statusCode, headers: headers, body: data ?? Data()))
-                }
-                holder.start(task)
+                let receiver = ResponseReceiver(limit: maximumResponseBytes) { continuation.resume(with: $0) }
+                let session = URLSession(configuration: configuration, delegate: receiver, delegateQueue: nil)
+                holder.start(session.dataTask(with: request))
             }
-        } onCancel: {
-            holder.cancel()
-        }
+        } onCancel: { holder.cancel() }
     }
 }
 
-private final class RedirectRefuser: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+/// Each session serializes its callbacks; each request owns its receiver and bounded buffer.
+private final class ResponseReceiver: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    let limit: Int
+    let complete: (Result<HTTPResult, Error>) -> Void
+    private var response: HTTPURLResponse?
+    private var body = Data()
+    private var failure: Error?
+
+    init(limit: Int, complete: @escaping (Result<HTTPResult, Error>) -> Void) {
+        self.limit = limit; self.complete = complete
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        self.response = response as? HTTPURLResponse
+        if response.expectedContentLength > Int64(limit) {
+            failure = URLError(.dataLengthExceedsMaximum); completionHandler(.cancel)
+        } else { completionHandler(.allow) }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard failure == nil else { return }
+        guard data.count <= limit - body.count else {
+            failure = URLError(.dataLengthExceedsMaximum); dataTask.cancel(); return
+        }
+        body.append(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        defer { session.finishTasksAndInvalidate() }
+        if let error = failure ?? error { complete(.failure(error)); return }
+        guard let response else { complete(.failure(URLError(.badServerResponse))); return }
+        var headers: [String: String] = [:]
+        for (key, value) in response.allHeaderFields { if let key = key as? String { headers[key] = "\(value)" } }
+        complete(.success(HTTPResult(status: response.statusCode, headers: headers, body: body)))
     }
 }
 
@@ -310,6 +336,7 @@ enum ProviderErrorClassifier {
             switch urlError.code {
             case .cancelled: return .cancelled
             case .timedOut: return .timeout(provider)
+            case .dataLengthExceedsMaximum: return .malformedResponse(provider)
             case .cannotConnectToHost where provider == .localServer:
                 return .serverNotRunning(provider, address: url.map(LocalEndpoint.address(of:)) ?? "the configured address")
             default: return .network(provider)
@@ -1613,7 +1640,7 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     /// Clamped to 1...`maximumTimeout` when used.
     var timeout: TimeInterval = OpenAICompatibleCleanupProvider.defaultTimeout
     var maxTokens: Int? = 4096
-    var transport: HTTPTransport = URLSessionTransport(followRedirects: false)
+    var transport: HTTPTransport = URLSessionTransport()
 
     /// Throws `invalidConfiguration(.localServer)` for a URL `LocalEndpoint.normalize` rejects.
     init(baseURL: String, model: String, apiKey: APIKey? = nil, provider: ProviderID = .localServer) throws {

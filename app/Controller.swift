@@ -13,6 +13,18 @@ import ServiceManagement
 /// Content-free timing and stop reasons, alongside the capture and shortcut timing.
 private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
 
+private let helperOutputLimit = 4 * 1024 * 1024
+
+/// Drain stdout while the helper runs; waiting for exit first can deadlock on a full pipe.
+func readHelperOutput(_ handle: FileHandle) throws -> Data {
+    var result = Data()
+    while let chunk = try handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+        guard chunk.count <= helperOutputLimit - result.count else { throw CaptureError("Transcription output is too large") }
+        result.append(chunk)
+    }
+    return result
+}
+
 /// What the transcription helper loads: the model folder plus, when dictionary support is
 /// installed and verified and the dictionary has enabled entries, `--ctc DIR --vocabulary FILE`.
 /// `key` changes whenever any of those change, which restarts the warm helper. Built only by
@@ -92,6 +104,7 @@ final class WarmRunner: @unchecked Sendable {
             }
             let chunk = output.availableData
             if chunk.isEmpty { return nil }
+            guard chunk.count <= helperOutputLimit - buffered.count else { return nil }
             buffered.append(chunk)
         }
     }
@@ -202,7 +215,7 @@ final class PreStart: @unchecked Sendable {
     private var pending: (capture: Capture, url: URL, id: UUID)?
     func begin(store: RetryAudio) {
         queue.async { [self] in
-            guard pending == nil, permission() == "authorized", let url = try? store.create() else { return }
+            guard pending == nil, !IsSecureEventInputEnabled(), permission() == "authorized", let url = try? store.create() else { return }
             let capture = Capture()
             do { try capture.start(url: url) } catch { try? store.delete(url); return }
             let id = UUID(); pending = (capture, url, id)
@@ -253,6 +266,7 @@ final class PreStart: @unchecked Sendable {
     @Published var cleanupLists: Bool
     @Published var cleanupPunctuation: Bool
     @Published var learningEnabled: Bool
+    @Published var learningRequiresReadableField: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
     @Published var dictionaryEntries: [DictionaryEntry] = []
     /// Forms and spellings learning skips (conflicting, undone or deleted fixes), for Settings.
@@ -355,7 +369,6 @@ final class PreStart: @unchecked Sendable {
     private var monitor: Timer?
     private var expiry: Timer?
     private var runner: Process?
-    private var runnerOutput: URL?
     private var recordingFailed = false
     private var generation = UUID()
     private var appliedRetention: String
@@ -416,6 +429,7 @@ final class PreStart: @unchecked Sendable {
         cleanupLists = processingSettings.options.lists
         cleanupPunctuation = processingSettings.options.punctuation
         learningEnabled = processingSettings.learningEnabled
+        learningRequiresReadableField = processingSettings.learningRequiresReadableField
         historyMode = processingSettings.historyMode
         appliedHistoryMode = processingSettings.historyMode
         updateChecksEnabled = processingSettings.updateChecksEnabled
@@ -601,14 +615,20 @@ final class PreStart: @unchecked Sendable {
         defaults.set(inputDeviceUID, forKey: "inputDeviceUID"); Capture.preferredInputUID = inputDeviceUID.isEmpty ? nil : inputDeviceUID
         defaults.set(retention, forKey: "retention")
         if let processing {
+            if !learningEnabled || (learningRequiresReadableField && watch?.keys != nil) {
+                if let watch { try? processing.ledger.revert(sessionID: watch.observation.sessionID) }
+                stopWatching()
+            }
             var next = processing.settings
             next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation)
             next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
+            next.learningRequiresReadableField = learningRequiresReadableField
             next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled
             do { try processing.update(next) } catch { setPhase("Error", "Could not save cleanup and learning settings.") }
         }
         // Also saved directly, so they persist when the dictionary (and so processing) is unavailable.
         defaults.set(historyMode.rawValue, forKey: ProcessingSettings.Key.historyMode)
+        defaults.set(learningRequiresReadableField, forKey: ProcessingSettings.Key.readableLearning)
         defaults.set(updateChecksEnabled, forKey: ProcessingSettings.Key.updateChecks)
         do { try store?.purge(retention: appliedRetention); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }
@@ -620,7 +640,18 @@ final class PreStart: @unchecked Sendable {
         customAPIBaseURL = appliedRoutes.customAPIBaseURL; customAPIModel = appliedRoutes.customAPIModel
     }
     private func routePlan(_ routes: RouteSettings, cleanupSendsText: Bool) -> RoutePlan {
-        RoutePlan.make(routes, cleanupSendsText: cleanupSendsText) { try? self.credentials.read($0) }
+        var refusal: String?
+        let plan = RoutePlan.make(routes, cleanupSendsText: cleanupSendsText) { provider in
+            do {
+                return try provider == .customAPI
+                    ? CustomAPIKeyBinding.read(at: routes.customAPIBaseURL, defaults: .standard, credentials: self.credentials)
+                    : self.credentials.read(provider)
+            } catch {
+                refusal = (error as? CredentialError)?.description ?? KeyText.unreadable
+                return nil
+            }
+        }
+        return RoutePlan(transcriber: plan.transcriber, cleaner: refusal == nil ? plan.cleaner : nil, refusal: refusal ?? plan.refusal, stages: plan.stages)
     }
     private func configureShortcut() {
         removeShortcut()
@@ -640,7 +671,7 @@ final class PreStart: @unchecked Sendable {
         // A press while the previous dictation processes records right away; its events replay
         // into the machine when that dictation finishes, which adopts this capture.
         next.onQueuedPress = { [weak self] in
-            guard let self, self.sessionAvailable else { return false }
+            guard let self, self.sessionAvailable, !IsSecureEventInputEnabled() else { return false }
             let shown = (self.phase, self.message)
             guard self.session.startEarly() else { return false }
             self.phaseBeforeEarly = shown; return true
@@ -685,6 +716,7 @@ final class PreStart: @unchecked Sendable {
         defer { if action == .start, let retry { prestart.discard(store: retry) } }
         guard sessionAvailable else { done(); return }
         if action == .start {
+            guard !IsSecureEventInputEnabled() else { session.resetShortcut?(); setPhase("Error", "Dictation is unavailable while Secure Input is active."); done(); return }
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
             // An unconfigured or unconfirmed cloud route refuses; it never falls back to local.
             let plan = routePlan(appliedRoutes, cleanupSendsText: processing?.settings.options.anyEnabled ?? false)
@@ -851,24 +883,27 @@ final class PreStart: @unchecked Sendable {
         }
     }
     private func launchRunner(_ helper: URL, launch: HelperLaunch, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
-        let temp = audio.deletingLastPathComponent().appendingPathComponent(".result-" + UUID().uuidString)
-        let fd = open(temp.path, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { setPhase("Error", "Could not prepare transcription. Audio is saved for retry."); done(); return }
-        let output = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        let pipe = Pipe(), output = pipe.fileHandleForReading
         let task = Process(); task.executableURL = helper; task.arguments = [launch.models.path, audio.path, "--single"] + launch.dictionaryArguments
-        task.standardOutput = output; task.standardError = FileHandle.nullDevice
-        do { try task.run(); runner = task; runnerOutput = temp } catch { try? output.close(); try? FileManager.default.removeItem(at: temp); setPhase("Error", "Transcription could not start. Audio is saved for retry."); done(); return }
+        task.standardOutput = pipe; task.standardError = FileHandle.nullDevice
+        do { try task.run(); runner = task; try? pipe.fileHandleForWriting.close() } catch { try? output.close(); try? pipe.fileHandleForWriting.close(); setPhase("Error", "Transcription could not start. Audio is saved for retry."); done(); return }
         let timeout = DispatchWorkItem { if task.isRunning { task.terminate(); DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if task.isRunning { kill(task.processIdentifier, SIGKILL) } } } }
         DispatchQueue.global().asyncAfter(deadline: .now() + 300, execute: timeout)
         let launched = ProcessInfo.processInfo.systemUptime
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            task.waitUntilExit(); timeout.cancel()
-            timingLog.notice("runner took=\(ProcessInfo.processInfo.systemUptime - launched, format: .fixed(precision: 3)) status=\(task.terminationStatus)")
-            defer { try? output.close(); try? FileManager.default.removeItem(at: temp) }
+            defer { timeout.cancel(); try? output.close() }
             let result = Result<Data, Error> {
+                let data: Data
+                do { data = try readHelperOutput(output) }
+                catch {
+                    if task.isRunning { kill(task.processIdentifier, SIGKILL) }
+                    task.waitUntilExit()
+                    throw error
+                }
+                task.waitUntilExit()
+                timingLog.notice("runner took=\(ProcessInfo.processInfo.systemUptime - launched, format: .fixed(precision: 3)) status=\(task.terminationStatus)")
                 guard task.terminationStatus == 0 else { throw CaptureError("Transcription failed") }
-                try output.synchronize(); try output.seek(toOffset: 0)
-                return try output.readToEnd() ?? Data()
+                return data
             }
             self?.handleTranscript(result, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
         }
@@ -887,12 +922,12 @@ final class PreStart: @unchecked Sendable {
             try? FileManager.default.removeItem(at: audio)
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
-                self.runner = nil; self.runnerOutput = nil
+                self.runner = nil
                 self.deliver(savedEntry, store: store, token: token, done: done)
             }
         } catch {
             let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
-            DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.runnerOutput = nil; self.setPhase("Error", message); done() }
+            DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.setPhase("Error", message); done() }
         }
     }
     /// Cloud transcription (R4): one provider call in a cancellable Task, never the local model.
@@ -1013,7 +1048,7 @@ final class PreStart: @unchecked Sendable {
         destination = nil; historySaved(); done()
     }
     /// The latest dictation Murmur did not (or may not have) typed, kept in memory for ⌃⌘V.
-    private var uninserted: String?
+    var uninserted: String?
     /// ⌃⌘V anywhere: pastes that dictation at the cursor, then restores the clipboard. It stays
     /// available until the next dictation starts.
     func pasteUninserted() {
@@ -1037,6 +1072,11 @@ final class PreStart: @unchecked Sendable {
             fputs("app-check=refused audio-copy-failed\n", stderr); completion(); return
         }
         // The probe is local only: it never sends audio or text to a provider.
+        if let processing {
+            var local = processing.settings; local.route = .local
+            do { try processing.update(local, persist: false) }
+            catch { fputs("app-check=refused local-settings-failed\n", stderr); completion(); return }
+        }
         sessionTranscriber = nil; processing?.cloudCleaner = nil
         destination = focused; insertThisSession = true; leadingSpaceThisSession = intelligentLeadingSpace
         activeModelDirectory = modelDirectory; listeningStarted = Date(); generation = UUID()
@@ -1141,6 +1181,7 @@ final class PreStart: @unchecked Sendable {
         var observation: DictationObservation
         let pid: pid_t
         let field: FocusSnapshot?
+        var keyFocus: LearningFocusIdentity? = nil
         var keys: KeystrokeSpan?
         var current: String
     }
@@ -1166,11 +1207,14 @@ final class PreStart: @unchecked Sendable {
            let observation = DictationObservation(value: value, insertedRange: NSRange(location: offset, length: length), now: now) {
             watch = Watch(observation: observation, pid: field.pid, field: field, keys: nil, current: text)
             timingLog.notice("watch route=ax")
-        } else if let pid, CGPreflightListenEventAccess(), startKeyTap(),
+        } else if processing?.settings.learningRequiresReadableField != true, !IsSecureEventInputEnabled(),
+                  let pid, CGPreflightListenEventAccess(), startKeyTap(),
                   let observation = DictationObservation(value: text, insertedRange: NSRange(location: 0, length: length), now: now) {
             var keys = KeystrokeSpan(text)
             keys.resolve = { CorrectionFilter.plausibleEdit(original: text, candidates: $0, isCommonWord: isCommonEnglishWord) }
-            watch = Watch(observation: observation, pid: pid, field: nil, keys: keys, current: text)
+            let identity = LearningFocusIdentity.capture(pid: pid)
+            guard !identity.secure else { stopWatching(); return }
+            watch = Watch(observation: observation, pid: pid, field: nil, keyFocus: identity, keys: keys, current: text)
             timingLog.notice("watch route=keys ax-miss=\(axMiss, privacy: .public)")
         } else {
             timingLog.notice("watch route=none ax-miss=\(axMiss, privacy: .public) input-monitoring=\(CGPreflightListenEventAccess(), privacy: .public)")
@@ -1185,8 +1229,9 @@ final class PreStart: @unchecked Sendable {
         let same: Bool, readable: Bool, value: String, selection: NSRange
         if var keys = w.keys {
             keys.refresh(); w.keys = keys; watch?.keys = keys
-            same = keys.state != .departed && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
-            readable = keys.state != .lost && !IsSecureEventInputEnabled()
+            let identity = LearningFocusIdentity.capture(pid: w.pid)
+            same = keys.state != .departed && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid && w.keyFocus?.matches(identity) == true
+            readable = keys.state != .lost && !IsSecureEventInputEnabled() && !identity.secure
             value = keys.value; selection = keys.selection
         } else if let field = w.field {
             let focus = try? captureFocus()
@@ -1255,7 +1300,9 @@ final class PreStart: @unchecked Sendable {
     }
     private func watchKey(_ type: CGEventType, _ event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: true) }; return }
-        guard var keys = watch?.keys else { return }
+        guard let w = watch, var keys = w.keys else { return }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid, !IsSecureEventInputEnabled(),
+              w.keyFocus?.matches(LearningFocusIdentity.capture(pid: w.pid)) == true else { watchTick(ending: true); return }
         if type == .keyDown { keys.apply(Self.watchedKey(event)) } else { keys.click() }
         watch?.keys = keys
     }
@@ -1402,11 +1449,22 @@ final class PreStart: @unchecked Sendable {
     }
     func deleteAllData() {
         guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
-        guard let base = dataDirectory else { return }
         let alert = NSAlert(); alert.messageText = DeleteAllDataText.title; alert.informativeText = DeleteAllDataText.body
         alert.addButton(withTitle: "Delete All Data"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        deleteConfirmedData()
+    }
+    /// Confirmation is kept outside the wipe so checks exercise the same reset as the UI.
+    func deleteConfirmedData() {
         guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
+        guard let base = dataDirectory else { return }
+        stopWatching()
+        if let retry { prestart.discard(store: retry) }
+        chunkJobs.values.forEach { $0.discard() }; chunkJobs.removeAll()
+        warm.stop()
+        generation = UUID()
+        uninserted = nil; setupTestTranscript = ""
+        destination = nil; sessionTranscriber = nil
         let locations = MurmurDataLocations.standard(base: base)
         // Preview and the developer probe never touch the login Keychain.
         let removeKeys: () throws -> [String] = preview ? { [] } : {
@@ -1425,6 +1483,8 @@ final class PreStart: @unchecked Sendable {
                 store = next; records = HistoryRouter(disk: historyDisk(next), persists: appliedHistoryMode.persistsTranscripts)
             case .recreateRetryAudio:
                 retry = try RetryAudio(directory: locations.retryAudio)
+                try FileManager.default.createDirectory(at: locations.chunks, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                Chunker.directory = locations.chunks
             case .reloadDictionary:
                 do { processing = try ProcessingCoordinator(directory: locations.dictionary, isCommonWord: isCommonEnglishWord); dictionaryMessage = "" }
                 catch { dictionaryMessage = "The dictionary could not be read. Dictations are held in History until it is repaired."; throw error }
@@ -1441,20 +1501,36 @@ final class PreStart: @unchecked Sendable {
 
     /// Publishes which providers have a key. The key itself never leaves the Keychain store.
     func refreshKeys() { savedKeys = Set(KeyText.providers.filter { credentials.exists($0) }) }
+    var customAPIKeyNeedsConfirmation: Bool {
+        guard savedKeys.contains(.customAPI), let destination = try? CustomAPIKeyBinding.endpoint(customAPIBaseURL) else { return false }
+        return UserDefaults.standard.string(forKey: CustomAPIKeyBinding.preference) != destination
+    }
     @discardableResult
     func saveKey(_ provider: ProviderID, _ raw: String) -> Bool {
         guard let key = APIKey(raw) else { keyMessages[provider] = KeyText.invalid; return false }
-        do { try credentials.save(key, for: provider); keyMessages[provider] = KeyText.saved }
+        do {
+            if provider == .customAPI { try CustomAPIKeyBinding.save(key, at: customAPIBaseURL, defaults: .standard, credentials: credentials) }
+            else { try credentials.save(key, for: provider) }
+            keyMessages[provider] = KeyText.saved
+        }
         catch { keyMessages[provider] = KeyText.storeFailed; return false }
         refreshKeys(); return true
     }
     func removeKey(_ provider: ProviderID) {
-        do { try credentials.delete(provider); keyMessages[provider] = KeyText.removed } catch { keyMessages[provider] = KeyText.removeFailed }
+        do {
+            try credentials.delete(provider)
+            if provider == .customAPI { UserDefaults.standard.removeObject(forKey: CustomAPIKeyBinding.preference) }
+            keyMessages[provider] = KeyText.removed
+        } catch { keyMessages[provider] = KeyText.removeFailed }
         refreshKeys()
     }
     func validateKey(_ provider: ProviderID) {
         let key: APIKey?
-        do { key = try credentials.read(provider) } catch { keyMessages[provider] = KeyText.unreadable; return }
+        do {
+            key = try provider == .customAPI
+                ? CustomAPIKeyBinding.read(at: customAPIBaseURL, defaults: .standard, credentials: credentials)
+                : credentials.read(provider)
+        } catch { keyMessages[provider] = (error as? CredentialError)?.description ?? KeyText.unreadable; return }
         keyMessages[provider] = KeyText.checking
         let endpoint = customAPIBaseURL
         Task { @MainActor [weak self] in
@@ -1500,7 +1576,6 @@ final class PreStart: @unchecked Sendable {
             if runner.isRunning { kill(runner.processIdentifier, SIGKILL) }
             runner.waitUntilExit()
         }
-        if let runnerOutput { try? FileManager.default.removeItem(at: runnerOutput) }
         warm.stopNow()
         bubble.hide()
         if let previewDirectory { try? FileManager.default.removeItem(at: previewDirectory) }

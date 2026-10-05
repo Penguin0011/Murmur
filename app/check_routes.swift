@@ -310,6 +310,21 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
     // MARK: Keys
 
     static func keyChecks() async {
+        let bindingSuite = "murmur-key-binding-" + UUID().uuidString
+        let binding = UserDefaults(suiteName: bindingSuite)!
+        defer { binding.removePersistentDomain(forName: bindingSuite) }
+        let boundKeys = InMemoryCredentialStore([.customAPI: testKey])
+        do { _ = try CustomAPIKeyBinding.read(at: "https://first.example/v1", defaults: binding, credentials: boundKeys); check(false, "unbound keys must not leave") }
+        catch { check(error as? CredentialError == .destinationMismatch, "legacy unbound key refuses") }
+        try! CustomAPIKeyBinding.save(testKey, at: "https://FIRST.example:443/v1/", defaults: binding, credentials: boundKeys)
+        check((try? CustomAPIKeyBinding.read(at: "https://first.example/v1", defaults: binding, credentials: boundKeys)) == testKey, "normalized destination accepts its key")
+        for address in ["https://second.example/v1", "http://first.example/v1", "https://first.example:8443/v1", "https://first.example/tenant/v1"] {
+            do { _ = try CustomAPIKeyBinding.read(at: address, defaults: binding, credentials: boundKeys); check(false, "changed destination must not reuse key") }
+            catch { check(error as? CredentialError == .destinationMismatch, "host, scheme, port and path changes refuse") }
+        }
+        let relaunched = UserDefaults(suiteName: bindingSuite)!
+        check((try? CustomAPIKeyBinding.read(at: "https://first.example/v1", defaults: relaunched, credentials: boundKeys)) == testKey, "binding survives relaunch")
+        check(!binding.dictionaryRepresentation().values.map { "\($0)" }.joined().contains(secret), "binding stores no secret")
         check(APIKey("sk bad 99") == nil && !KeyText.invalid.contains("sk bad 99"), "invalid key message does not echo input")
         check(KeyText.providers == [.gemini, .openrouter, .customAPI], "key rows")
         let migration = UserDefaults(suiteName: "murmur-migration-" + UUID().uuidString)!
@@ -321,9 +336,17 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         migration.set("openrouter", forKey: RouteSettings.Key.cleanup)
         try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
         check(keys.exists(.customAPI) && RouteSettings.load(from: migration).customAPIBaseURL == "https://openrouter.ai/api/v1", "selected legacy key and endpoint migrate together")
+        do { _ = try CustomAPIKeyBinding.read(at: RouteSettings.load(from: migration).customAPIBaseURL, defaults: migration, credentials: keys); check(false, "migration must not guess approval") }
+        catch { check(error as? CredentialError == .destinationMismatch, "migrated keys need destination confirmation") }
         try! keys.delete(.customAPI)
         try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
         check(!keys.exists(.customAPI), "removed migrated key stays removed after relaunch")
+        migration.set("cerebras", forKey: RouteSettings.Key.cleanup)
+        migration.set("https://changed.example/v1", forKey: RouteSettings.Key.customAPIBaseURL)
+        migration.set("https://changed.example", forKey: CustomAPIKeyBinding.preference)
+        try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
+        do { _ = try CustomAPIKeyBinding.read(at: "https://changed.example/v1", defaults: migration, credentials: keys); check(false, "migration must not inherit a stale binding") }
+        catch { check(error as? CredentialError == .destinationMismatch, "legacy migration clears stale bindings even when endpoint preferences were edited") }
         check("\(testKey)" == "APIKey(redacted)", "key is redacted when printed")
         let echo = HTTPResult(status: 401, body: Data("{\"error\":{\"message\":\"API key not valid: \(secret)\",\"code\":401}}".utf8))
         for provider in [ProviderID.gemini, .openrouter, .localServer, .customAPI] {

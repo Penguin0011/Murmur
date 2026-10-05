@@ -40,6 +40,35 @@ private func axString(_ element: AXUIElement, _ name: String) -> String? {
     axAttribute(element, name) as? String
 }
 
+/// Identity and security metadata only: this never reads another field's text.
+struct LearningFocusIdentity {
+    let field: AXUIElement?
+    let window: AXUIElement?
+    var secure = false
+
+    static func capture(pid: pid_t) -> LearningFocusIdentity {
+        let app = AXUIElementCreateApplication(pid)
+        func element(_ name: String) -> AXUIElement? {
+            guard let raw = axAttribute(app, name), CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+            return unsafeBitCast(raw, to: AXUIElement.self)
+        }
+        let field = element(kAXFocusedUIElementAttribute)
+        let secure = field.map {
+            axString($0, kAXSubroleAttribute) == kAXSecureTextFieldSubrole || axString($0, kAXRoleAttribute) == kAXSecureTextFieldSubrole
+                || axString($0, "AXDOMInputType")?.lowercased() == "password" || (axAttribute($0, "AXProtectedContent") as? Bool == true)
+        } ?? false
+        return LearningFocusIdentity(field: field, window: element(kAXFocusedWindowAttribute), secure: secure)
+    }
+
+    func matches(_ other: LearningFocusIdentity) -> Bool {
+        func same(_ a: AXUIElement?, _ b: AXUIElement?) -> Bool {
+            switch (a, b) { case (nil, nil): return true; case let (a?, b?): return CFEqual(a, b); default: return false }
+        }
+        // ponytail: two missing identities retain the approved same-app heuristic; strict learning disables it.
+        return !other.secure && same(field, other.field) && same(window, other.window)
+    }
+}
+
 func captureFocus() throws -> FocusSnapshot {
     guard AXIsProcessTrusted() else { throw InsertionError.unavailable("Accessibility permission is unavailable; no prompt requested") }
     // frontmostApplication only refreshes when the run loop delivers workspace notifications; polling callers sleep instead.
@@ -169,8 +198,8 @@ func pasteThroughClipboard(_ text: String, restore: Bool, settle: TimeInterval, 
     let stagedItem = NSPasteboardItem()
     let ownershipType = NSPasteboard.PasteboardType("org.dictation.spike.clipboard-owner")
     let ownershipToken = UUID().uuidString
-    // nspasteboard.org markers: clipboard managers skip transient, auto-generated items, so a
-    // dictation pasted through the clipboard never lands in clipboard history.
+    // Cooperative nspasteboard.org markers ask clipboard managers to skip automatic paste.
+    // Other software can still read or retain the clipboard contents.
     guard stagedItem.setString(text, forType: .string),
           stagedItem.setString(ownershipToken, forType: ownershipType),
           stagedItem.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType")),
