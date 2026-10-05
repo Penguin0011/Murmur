@@ -1,3 +1,31 @@
+# Project completion review — October 4, 2026
+
+Branch `aakash/remaining-gaps` (from `main` at `d6960df`). The user asked what is left and for autonomous work. This section is updated as work lands. [Certain]
+
+## Done in this session
+- `de9df4d`:
+  - **Damaged history no longer stops Murmur.** At launch, `HistoryStore.quarantineUnreadable()` moves undecodable or misnamed history files into `history/unreadable/`, and Settings → History & Privacy says how many were moved. `purge` expires those files by modification date, so their text still follows the retention setting. They sit inside `history/`, so Delete All Data removes them. `entries()` still fails closed. `check_history` covers the move and the expiry, and does not compile without the fix. [Certain]
+  - **Open at login** (Settings → General) uses `SMAppService.mainApp`. It's off by default. The toggle shows the system's own state and re-reads it whenever Murmur is reactivated. Toggled only in the preview fixture, which registers nothing; it has not been registered on the installed app. [Certain]
+  - **Microphone choice** (Settings → General): "System default" plus connected microphones from `AVCaptureDevice` (whose `uniqueID` is the CoreAudio UID). It's saved as `inputDeviceUID`. `Capture.start` pins the device with `kAudioOutputUnitProperty_CurrentDevice` before reading the format. A microphone that isn't connected falls back to the system default and shows as "Chosen microphone (not connected)". A silent probe (no capture started) pinned both "MacBook Air Microphone" and "iPhone Microphone", and an unknown UID fell back to the default. Not tested with recording. [Certain]
+- Checks passing: launch, history, controller, app services, dictionary (170), plus compiles of the session and capture spikes. In the UI fixture (`check_ui.sh --light`, General page) both new rows render and Open at login toggles. [Certain]
+- Installed `de9df4d` to `~/Applications/Murmur.app` (signed "clouddev Development"), executable SHA-256 `b157e4c6553bbbe458ac135d6fdd1da1f23e18c549cd72da26d96a9d185c59ac`. The previous build is at `~/Applications/Murmur-backups/20261004-233156/Murmur.app`. It was relaunched and the warm runner is ready. [Certain]
+
+## What is left
+Needs the user:
+- Apple Developer Program enrollment. It blocks Developer ID signing, notarization, the DMG and the first GitHub release (PRD §8, decision 4). [Certain]
+- Confirming the release repository. Update checks still point at `Penguin0011/dictation` (`TODO(R12)` in Controller.swift), and the PRD says the repo is to be renamed. [Certain]
+- The local cleanup model choice (PRD §5 item 5). `RuleCleaner` is the stopgap. [Certain]
+- Recording the spoken-correction and list thresholds from the corpus baseline as a decision (PRD §4). [Certain]
+- Approval of the PRD §5 cloud split. It is still labelled a proposal, even though Gemini is used live. [Certain]
+- An OpenRouter key for a live STT and cleanup test. [Certain]
+- Human-speech live checks: the first word with a physical Fn press, recording with a chosen non-default microphone, a live Gemini call on the sound-alike dictionary path, and click-to-fix in keystroke-watched fields. [Certain]
+- Benchmarks against Parakeet V2 and Whisper large-v3 turbo with real labeled speech (PRD §5 validation 1–4). [Certain]
+
+Could be built without the user (not started):
+- Right-click spelling suggestions and mouse drag-selection of part of a word in keystroke-watched fields. [Certain]
+- First run has no test dictation and no faithful-transcription offer. PRD §6 asks for both; the four-step setup screen exists. [Certain]
+- Optional and not required by the PRD: deleting stored Gemini 3.5 Transcribe interactions early (`makeDeleteRequest` exists, but IDs are not persisted). Model selection with measured performance (`TODO(R2)`) waits for a second pinned model. [Certain]
+
 # Wispr Flow-style learning and paste-only insertion — October 4, 2026
 
 Branch `aakash/dictionary-learning-exploration-6182a5`. User decisions: replicate Wispr Flow's auto-add, and insert only with ⌘V paste. [Certain]
