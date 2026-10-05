@@ -561,7 +561,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur learns it after the same fix twice. Where an app hides its text, Murmur follows the keys you type in that app for that minute; they are never saved. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
+            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur adds the spelling to your dictionary; after the same fix in two dictations it also replaces the misheard form. Where an app hides its text, Murmur follows the keys you type in that app for that minute; they are never saved. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
@@ -583,11 +583,19 @@ struct SettingsView: View {
                 }
             }
             .overlay(alignment: .top) { rule }.padding(.top, 20)
+            if !controller.blockedWords.isEmpty {
+                eyebrow("Not learned").padding(.top, 24)
+                help("Murmur skips these because your fixes for them conflicted, or you undid, reversed or deleted them.").padding(.top, 4)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(controller.blockedWords, id: \.self) { item in blockedRow(item).overlay(alignment: .bottom) { softRule } }
+                }
+                .overlay(alignment: .top) { rule }.padding(.top, 12)
+            }
             HStack {
                 help("“Heard as” forms are replaced exactly, in every mode. With cleanup on, a word that sounds like one of yours is sent to the cleanup route with its spelling, so it can be fixed. Edits save immediately.")
                 Spacer()
                 Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries).buttonStyle(InkButtonStyle(kind: .outline))
-                    .disabled(!controller.dictionaryEntries.contains { $0.source == .learned })
+                    .disabled(!controller.dictionaryEntries.contains { $0.source == .learned } && controller.blockedWords.isEmpty)
             }
             .padding(.top, 16)
         }
@@ -624,6 +632,23 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain).help("Delete \(entry.preferred)").accessibilityLabel("Delete \(entry.preferred)")
         }
+    }
+
+    private func blockedRow(_ item: CorrectionLedger.Blocked) -> some View {
+        let (word, why): (String, String) = switch item {
+        case .heard(let source): (source, "Fixes for this heard form are not learned")
+        case .spelling(let target): (target, "This spelling is not learned")
+        }
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(word).font(.system(size: 16, weight: .semibold))
+                Text(why).font(.system(size: 13)).foregroundStyle(Palette.ink70)
+            }
+            Spacer()
+            Button("Unblock") { controller.unblockWord(item) }.buttonStyle(InkButtonStyle(kind: .outline)).fixedSize()
+                .accessibilityLabel("Unblock \(word)")
+        }
+        .frame(minHeight: 56).padding(.vertical, 4)
     }
 
     private func dictionaryEditRow(_ entry: DictionaryEntry) -> some View {

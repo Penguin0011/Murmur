@@ -434,6 +434,24 @@ final class CorrectionLedger {
     var suppressedSources: Set<String> { state.suppressed }
     var tombstones: Set<Pair> { state.tombstones }
 
+    /// What learning will not touch, for Settings: a misheard form whose fixes conflicted or
+    /// that a fix reversed (`heard`), and a spelling the user deleted, undid or reversed (`spelling`).
+    enum Blocked: Hashable { case heard(String), spelling(String) }
+    var blocked: [Blocked] {
+        var seen = Set<String>()
+        let spellings = state.tombstones.map(\.target).sorted().filter { seen.insert(TermText.fold($0)).inserted }
+        return state.suppressed.sorted().map(Blocked.heard) + spellings.map(Blocked.spelling)
+    }
+
+    /// Lets learning use a blocked form or spelling again (old evidence for it was already cleared).
+    func unblock(_ item: Blocked) throws {
+        switch item {
+        case .heard(let source): state.suppressed.remove(source)
+        case .spelling(let target): state.tombstones = state.tombstones.filter { $0.folded != TermText.fold(target) }
+        }
+        try save()
+    }
+
     // MARK: Controls
 
     /// Off records nothing and drops in-flight provisional evidence. Existing learned entries keep

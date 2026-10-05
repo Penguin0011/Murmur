@@ -247,6 +247,8 @@ final class PreStart: @unchecked Sendable {
     @Published var learningEnabled: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
     @Published var dictionaryEntries: [DictionaryEntry] = []
+    /// Forms and spellings learning skips (conflicting, undone or deleted fixes), for Settings.
+    @Published var blockedWords: [CorrectionLedger.Blocked] = []
     @Published var dictionaryMessage = ""
     // Model download (R2). modelMessage reports the last download action, never interrupting dictation.
     @Published var modelStatus: ModelStatus = .notDownloaded
@@ -1033,6 +1035,7 @@ final class PreStart: @unchecked Sendable {
     /// the warm helper with it, so a wipe or edit never leaves old terms loaded.
     func refreshDictionary() {
         dictionaryEntries = processing?.dictionary.entries ?? []
+        blockedWords = processing?.ledger.blocked ?? []
         writeHelperVocabulary()
         if started { prewarm() }
     }
@@ -1076,9 +1079,13 @@ final class PreStart: @unchecked Sendable {
         do { try processing?.deleteEntry(id: entry.id); dictionaryMessage = "" } catch { dictionaryMessage = "Could not delete this dictionary entry." }
         refreshDictionary()
     }
+    func unblockWord(_ item: CorrectionLedger.Blocked) {
+        do { try processing?.ledger.unblock(item); dictionaryMessage = "" } catch { dictionaryMessage = "Could not save the learning data." }
+        refreshDictionary()
+    }
     func resetLearnedEntries() {
         let alert = NSAlert(); alert.messageText = "Reset learned dictionary entries?"
-        alert.informativeText = "This removes every learned entry and all learning evidence. Entries you added stay."
+        alert.informativeText = "This removes every learned entry and all learning evidence, and unblocks every word under Not learned. Entries you added stay."
         alert.addButton(withTitle: "Reset Learned"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do { try processing?.resetLearned(); dictionaryMessage = "" } catch { dictionaryMessage = "Could not reset learned entries." }

@@ -330,6 +330,11 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             check(dict.apply(to: "open jira now") == "open Jira now", "case fix applies")
             let r = UUID(); try ledger.record(obs(r, "Jira", "jira")); try ledger.settle(sessionID: r)
             check(learned(dict).isEmpty, "lowercasing it again withdraws it")
+            check(ledger.blocked == [.heard("jira"), .spelling("Jira")], "reversal blocks the heard form and the spelling")
+            try ledger.unblock(.spelling("jira")); try ledger.unblock(.heard("jira"))
+            check(ledger.blocked.isEmpty, "unblocked")
+            let s = UUID()
+            try check(ledger.record(obs(s, "call jira", "call Jira")) == .provisional, "learnable again after unblocking")
         }
 
         // Tiers: two mishearings of one spelling share one entry; a deleted word is never re-learned.
