@@ -336,9 +336,17 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         migration.set("openrouter", forKey: RouteSettings.Key.cleanup)
         try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
         check(keys.exists(.customAPI) && RouteSettings.load(from: migration).customAPIBaseURL == "https://openrouter.ai/api/v1", "selected legacy key and endpoint migrate together")
+        do { _ = try CustomAPIKeyBinding.read(at: RouteSettings.load(from: migration).customAPIBaseURL, defaults: migration, credentials: keys); check(false, "migration must not guess approval") }
+        catch { check(error as? CredentialError == .destinationMismatch, "migrated keys need destination confirmation") }
         try! keys.delete(.customAPI)
         try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
         check(!keys.exists(.customAPI), "removed migrated key stays removed after relaunch")
+        migration.set("cerebras", forKey: RouteSettings.Key.cleanup)
+        migration.set("https://changed.example/v1", forKey: RouteSettings.Key.customAPIBaseURL)
+        migration.set("https://changed.example", forKey: CustomAPIKeyBinding.preference)
+        try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
+        do { _ = try CustomAPIKeyBinding.read(at: "https://changed.example/v1", defaults: migration, credentials: keys); check(false, "migration must not inherit a stale binding") }
+        catch { check(error as? CredentialError == .destinationMismatch, "legacy migration clears stale bindings even when endpoint preferences were edited") }
         check("\(testKey)" == "APIKey(redacted)", "key is redacted when printed")
         let echo = HTTPResult(status: 401, body: Data("{\"error\":{\"message\":\"API key not valid: \(secret)\",\"code\":401}}".utf8))
         for provider in [ProviderID.gemini, .openrouter, .localServer, .customAPI] {

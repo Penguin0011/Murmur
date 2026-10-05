@@ -144,7 +144,9 @@ struct RouteSettings: Equatable, Sendable {
     static func migrateCustomAPI(in defaults: UserDefaults, credentials: CredentialStore) throws {
         guard let legacy = legacyCustomAPIKey(from: defaults.string(forKey: Key.cleanup)) else { return }
         if !credentials.exists(.customAPI), let key = try credentials.read(legacy) {
-            try CustomAPIKeyBinding.save(key, at: load(from: defaults).customAPIBaseURL, defaults: defaults, credentials: credentials)
+            // Old keys have no destination proof; edited preferences must not silently approve them.
+            defaults.removeObject(forKey: CustomAPIKeyBinding.preference)
+            try credentials.save(key, for: .customAPI)
         }
         load(from: defaults).save(to: defaults)
     }
