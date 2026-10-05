@@ -42,7 +42,7 @@ private final class MockCloudCleaner: CleanupProvider, @unchecked Sendable {
     init(_ response: Result<String, ProviderError>) { self.response = response }
     var messages: [CleanupMessages] { lock.lock(); defer { lock.unlock() }; return _messages }
     func cleanup(_ messages: CleanupMessages) async throws -> String {
-        lock.lock(); _messages.append(messages); lock.unlock()
+        lock.withLock { _messages.append(messages) }
         return try response.get()
     }
     func validate() async throws {}
@@ -297,6 +297,22 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(Set(pair.dictionary.entries.map(\.preferred)) == ["Akme", "Jira"], "each fix in one dictation is learned")
         try dictate(["I think we should ship the old plan today"], inserted: "Maybe the team wants a new plan for Monday", into: pair)
         check(pair.dictionary.entries.count == 2, "a rewrite teaches nothing")
+
+        // Real dictations carry punctuation; the ledger diffs words, so only changed words reach the filter.
+        let named = try ProcessingCoordinator(directory: dir.appendingPathComponent("punct"), defaults: defaults)
+        for _ in 0..<2 {
+            let session = UUID()
+            try named.observeSpan(sessionID: session, original: " Hi, my name is Akash.", current: " Hi, my name is Aakash.")
+            try named.settle(sessionID: session)
+        }
+        check(named.dictionary.entries.contains { $0.preferred == "Aakash" && $0.variants == ["Akash"] }, "a punctuated sentence learns the changed word")
+        let punctuationOnly = UUID()
+        try named.observeSpan(sessionID: punctuationOnly, original: "Akash, hi.", current: "Akash; hi!")
+        check(named.ledger.evidence.isEmpty, "a punctuation-only edit records nothing")
+        let recased = UUID()
+        try named.observeSpan(sessionID: recased, original: "hello, Akash.", current: "Hello, Aakash.")
+        check(named.ledger.evidence.contains { $0.sessionID == recased && $0.target == "Aakash" }, "a name fix survives a nearby capitalization fix")
+        try named.ledger.revert(sessionID: recased)
 
         // Unreadable fields: keystrokes rebuild the span (AppController's tap feeds KeystrokeSpan).
         let keyed = try ProcessingCoordinator(directory: dir.appendingPathComponent("keys"), defaults: defaults)

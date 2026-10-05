@@ -183,6 +183,7 @@ final class ProcessingCoordinator {
     /// An edit becomes provisional evidence; back to the original (undo) or lost attribution
     /// (pass `original`) drops this session's evidence. Call `settle` when the window closes.
     func observeSpan(sessionID: UUID, original: String, current: String) throws {
+        // The ledger diffs the span word by word, so punctuation and unchanged words never reach the filter.
         if current == original { try ledger.revert(sessionID: sessionID) }
         else { try observe(ObservedCorrection(sessionID: sessionID, source: original, target: current, observedAt: Date())) }
     }
