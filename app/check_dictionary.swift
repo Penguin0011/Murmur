@@ -155,17 +155,19 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         }
         func learned(_ dict: DictionaryStore) -> [DictionaryEntry] { dict.entries.filter { $0.source == .learned } }
 
-        // Once does not promote; twice in separate sessions does.
+        // Once adds a vocabulary hint; twice in separate sessions adds the replacement.
         do {
             let (dict, ledger) = try fresh("promote")
             let a = UUID(), b = UUID()
             try check(ledger.record(obs(a, "Acme", "Akme")) == .provisional, "first observation provisional")
-            try check(ledger.settle(sessionID: a).isEmpty, "one observation does not promote")
-            check(learned(dict).isEmpty, "no learned entry after one")
+            try check(ledger.settle(sessionID: a).map(\.preferred) == ["Akme"], "one observation adds a hint")
+            check(learned(dict).count == 1 && learned(dict)[0].variants.isEmpty, "hint has no variants")
+            check(dict.vocabularyTerms == ["Akme"], "hint reaches transcription vocabulary")
+            check(dict.apply(to: "Ask Acme today") == "Ask Acme today", "hint replaces nothing")
             try check(ledger.record(obs(b, "acme", "AKME", 10)) == .provisional, "second observation (case differs)")
             let promoted = try ledger.settle(sessionID: b)
-            check(promoted.count == 1 && learned(dict).count == 1, "two sessions promote")
-            check(dict.apply(to: "Ask Acme today") == "Ask AKME today", "learned entry applies (latest casing)")
+            check(promoted.isEmpty && learned(dict).count == 1 && learned(dict)[0].variants == ["acme"], "two sessions add the variant to the hint")
+            check(dict.apply(to: "Ask Acme today") == "Ask Akme today", "learned entry applies (first spelling kept)")
             check(ledger.evidence.isEmpty, "evidence consumed on promotion")
             // Ledger file holds only short strings.
             let raw = try String(contentsOf: dir.appendingPathComponent("promote/ledger.json"), encoding: .utf8)
@@ -183,7 +185,7 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             try ledger.settle(sessionID: a)
             try check(ledger.settle(sessionID: a).isEmpty, "settling twice is harmless")
             try check(ledger.record(obs(a, "Acme", "Akme", 6)) == .sessionClosed, "closed session ignored")
-            check(learned(dict).isEmpty && ledger.evidence.count == 1, "same session counts once")
+            check(learned(dict).count == 1 && learned(dict)[0].variants.isEmpty && ledger.evidence.count == 1, "same session counts once")
         }
 
         // accept -> decline never promotes.
@@ -241,12 +243,12 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             check(ledger.evidence.isEmpty, "revert removes provisional evidence")
             try ledger.settle(sessionID: a)
             try ledger.record(obs(b, "Acme", "Akme")); try ledger.settle(sessionID: b)
-            check(learned(dict).isEmpty, "reverted evidence does not count")
+            check(learned(dict).allSatisfy(\.variants.isEmpty), "reverted evidence does not count")
             let c = UUID()
             try ledger.record(obs(c, "Acme", "Akme")); try ledger.settle(sessionID: c)
             check(learned(dict).count == 1, "promoted with b and c")
             try ledger.revert(sessionID: c)
-            check(learned(dict).isEmpty, "revert after promotion withdraws the entry")
+            check(learned(dict).count == 1 && learned(dict)[0].variants.isEmpty, "revert after promotion withdraws the variant, b's hint stays")
             check(ledger.tombstones.isEmpty, "revert does not tombstone")
         }
 
@@ -292,6 +294,30 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             let r = UUID()
             try ledger.record(obs(r, "Akme", "Acme")); try ledger.settle(sessionID: r)
             check(learned(dict).isEmpty && ledger.tombstones.contains(.init(source: "acme", target: "akme")), "reversal withdraws and tombstones")
+        }
+
+        // Tiers: two mishearings of one spelling share one entry; a deleted word is never re-learned.
+        do {
+            let (dict, ledger) = try fresh("tiers")
+            for source in ["Akash", "Akash", "Aakesh", "Aakesh"] {
+                let s = UUID(); try ledger.record(obs(s, source, "Aakash")); try ledger.settle(sessionID: s)
+            }
+            check(learned(dict).count == 1 && learned(dict)[0].variants == ["Akash", "Aakesh"], "one entry gathers both mishearings")
+            try ledger.deleteLearned(id: learned(dict)[0].id)
+            let s = UUID()
+            try check(ledger.record(obs(s, "Akesh", "Aakash")) == .tombstoned, "deleted word not re-learned from a new mishearing")
+        }
+
+        // A version-1 ledger written before tiers (promotion without kind) still withdraws its entry.
+        do {
+            let d = dir.appendingPathComponent("legacy")
+            let dict = try DictionaryStore(directory: d)
+            let entry = try dict.add(preferred: "Akme", variants: ["Acme"], source: .learned)
+            let legacy = #"{"evidence":[],"learningEnabled":true,"promotions":[{"entryID":"\#(entry.id.uuidString)","pair":{"source":"acme","target":"akme"},"sessions":[]}],"suppressed":[],"tombstones":[],"version":1}"#
+            try PrivateFiles.write(Data(legacy.utf8), to: d.appendingPathComponent(CorrectionLedger.fileName))
+            let ledger = try CorrectionLedger(directory: d, dictionary: dict)
+            let r = UUID(); try ledger.record(obs(r, "Akme", "Acme")); try ledger.settle(sessionID: r)
+            check(learned(dict).isEmpty, "legacy promotion decodes and reversal withdraws it")
         }
 
         // Manual entry already owns the source: no duplicate learned entry.

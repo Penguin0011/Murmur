@@ -1127,6 +1127,23 @@ private struct BubbleView: View {
     }
 }
 
+/// Shown once when correction learning adds a word (Wispr Flow style): a short notice with Undo.
+private struct LearnedNotice: View {
+    let word: String
+    let undo: () -> Void
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "character.book.closed").font(.system(size: 12)).foregroundStyle(.secondary).accessibilityHidden(true)
+            Text("Added “\(word)” to dictionary").font(.system(size: 12, weight: .medium)).lineLimit(1)
+            Spacer(minLength: 4)
+            Button("Undo", action: undo).buttonStyle(.bordered).controlSize(.small)
+        }
+        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .modifier(UtilityGlass(radius: 18))
+    }
+}
+
 private final class DictationPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -1150,7 +1167,9 @@ final class BubblePresenter {
     }
 
     func show(phase: String, message: String, screen: NSScreen? = nil) {
-        guard showsFloatingIndicator(phase: phase) else { hide(); return }
+        // An idle status change leaves a learned-word notice up; anything shown replaces it.
+        guard showsFloatingIndicator(phase: phase) else { if notice == nil { hide() }; return }
+        notice = nil
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let minimal = phase != "Error"
         panel.hasShadow = !minimal
@@ -1163,5 +1182,23 @@ final class BubblePresenter {
         panel.orderFrontRegardless()
     }
 
-    func hide() { panel.orderOut(nil) }
+    func hide() { notice = nil; panel.orderOut(nil) }
+
+    private var notice: UUID?
+    /// The learned-word notice; leaves after 5 s unless something else took the panel first.
+    func showLearned(_ word: String, screen: NSScreen?, undo: @escaping () -> Void) {
+        let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        let width = min(320, max(200, frame.width - 32))
+        let shown = UUID()
+        let host = NSHostingView(rootView: LearnedNotice(word: word, undo: { [weak self] in undo(); self?.hide() }).frame(width: width))
+        panel.contentView = host
+        panel.hasShadow = true
+        panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.minY + 24, width: width, height: host.fittingSize.height), display: true)
+        panel.orderFrontRegardless()
+        notice = shown
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.notice == shown else { return }
+            self.hide()
+        }
+    }
 }

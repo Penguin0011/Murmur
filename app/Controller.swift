@@ -951,7 +951,7 @@ final class PreStart: @unchecked Sendable {
                 // A readable text field is written and read back; anything else (a web editor, a
                 // custom text view, no accessible focus) gets a plain paste.
                 let readable = target.map { insertionTextRole($0.role) && $0.value != nil && $0.selection != nil } ?? false
-                let insertion = readable ? insertText(entry.finalText, into: target!, policy: .singleAttempt) : pasteIntoFrontmostApp(entry.finalText)
+                let insertion = readable ? insertText(entry.finalText, into: target!) : pasteIntoFrontmostApp(entry.finalText)
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
@@ -1146,9 +1146,13 @@ final class PreStart: @unchecked Sendable {
                 stopWatching()
                 // Settling can also delete learned entries (reversal, conflict), so always refresh.
                 defer { refreshDictionary() }
-                try processing?.settle(sessionID: session)
+                if let entry = try processing?.settle(sessionID: session).last { announceLearned(entry) }
             }
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
+    }
+    private func announceLearned(_ entry: DictionaryEntry) {
+        bubble.showLearned(entry.preferred, screen: destinationScreen) { [weak self] in self?.deleteDictionaryEntry(entry) }
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: "Added \(entry.preferred) to your dictionary.", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
     private func stopWatching() {
         watchTimer?.invalidate(); watchTimer = nil; watch = nil

@@ -2,24 +2,6 @@ import AppKit
 import ApplicationServices
 import Carbon
 
-enum InsertionPolicy {
-    case experimentalFallback, singleAttempt
-}
-
-enum InsertionMethod { case accessibility, paste }
-
-/// Choose before writing: native AX and clipboard paste must never both run in app mode.
-func insertionMethod(bundleID: String, policy: InsertionPolicy) -> InsertionMethod {
-    let pasteApps: Set<String> = [
-        "com.apple.Safari", "com.apple.SafariTechnologyPreview", "com.google.Chrome",
-        "com.google.Chrome.canary", "org.mozilla.firefox", "com.microsoft.edgemac",
-        "company.thebrowser.Browser", "com.brave.Browser", "com.openai.codex",
-        "com.openai.chat", "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92",
-        "com.tinyspeck.slackmacgap", "com.hnc.Discord"
-    ]
-    return policy == .singleAttempt && pasteApps.contains(bundleID) ? .paste : .accessibility
-}
-
 struct FocusSnapshot {
     let element: AXUIElement
     let pid: pid_t
@@ -140,67 +122,28 @@ func textWithLeadingSpace(_ text: String, value: String?, selection: CFRange?, e
     return " " + text
 }
 
-/// Electron and Chromium text boxes often accept an AX selected-text write without applying it,
-/// so single-attempt insertion pastes into any app that embeds one of those engines.
-func embedsChromium(pid: pid_t) -> Bool {
-    guard let frameworks = NSRunningApplication(processIdentifier: pid)?.bundleURL?.appendingPathComponent("Contents/Frameworks") else { return false }
-    return ["Electron Framework.framework", "Chromium Embedded Framework.framework"].contains {
-        FileManager.default.fileExists(atPath: frameworks.appendingPathComponent($0).path)
-    }
-}
-
-func insertText(_ text: String, into destination: FocusSnapshot, policy: InsertionPolicy = .experimentalFallback) -> InsertionResult {
-    func result(_ status: InsertionResult.Status, _ detail: String, _ snapshot: FocusSnapshot? = nil) -> InsertionResult {
-        InsertionResult(status: status, detail: detail, snapshot: snapshot)
+/// One delivery method everywhere: paste with ⌘V, then read the field back. The read-back only
+/// verifies delivery and hands the field to correction learning; nothing is ever retried.
+func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionResult {
+    func result(_ status: InsertionResult.Status, _ detail: String) -> InsertionResult {
+        InsertionResult(status: status, detail: detail, snapshot: nil)
     }
     guard !text.isEmpty else { return result(.failed, "Empty output; no insertion attempted") }
     guard !destination.secure else { return result(.failed, "Secure field rejected") }
     guard insertionTextRole(destination.role) else { return result(.failed, "Focused element is not a supported text field") }
-    if policy == .singleAttempt && (destination.value == nil || destination.selection == nil) {
+    guard destination.value != nil, destination.selection != nil else {
         return result(.failed, "Destination cannot be compared safely; retain output for recovery")
     }
     guard let current = try? captureFocus(), sameDestination(destination, current) else {
         return result(.failed, "Focus, value, or selection changed; retain output for recovery")
     }
-    let expected = expectedInsertedValue(current.value, selection: current.selection, text: text)
-    if current.value != nil && current.selection != nil && expected == nil {
+    guard let expected = expectedInsertedValue(current.value, selection: current.selection, text: text) else {
         return result(.failed, "Invalid UTF16 selection; no insertion attempted")
     }
-    // Without an expected value, a successful write remains uncertain and must never be retried.
-    let method = policy == .singleAttempt && embedsChromium(pid: current.pid) ? .paste : insertionMethod(bundleID: current.bundleID, policy: policy)
-    var pasteMethod = "clipboard paste"
-    if method == .accessibility {
-        let write = AXUIElementSetAttributeValue(current.element, kAXSelectedTextAttribute as CFString, text as CFString)
-        if policy == .singleAttempt {
-            guard write == .success else {
-                return result(.unverified, "AX write returned \(write.rawValue); retain output, no paste retry")
-            }
-            Thread.sleep(forTimeInterval: 0.3)
-            return verifyInsertion(current, expected: expected, method: "AX selected-text write")
-        }
-        if write == .success {
-            let written = verifyInsertion(current, expected: expected, method: "AX selected-text write")
-            guard written.status == .unverified else { return written }
-            // Some Chromium/Electron fields accept the write and drop it. Paste only if the field still reads exactly as before.
-            // Browser fields of unknown type are included; secure fields were rejected above, and paste stays unverified there.
-            // ponytail: fixed 300 ms settle; a write applied later than this would double-insert. Use change notifications in the app.
-            Thread.sleep(forTimeInterval: 0.3)
-            guard let settled = try? captureFocus(), sameDestination(current, settled),
-                  silentWriteAllowsPaste(before: current.value, after: settled.value) else {
-                return written
-            }
-            pasteMethod = "clipboard paste after unchanged AX write"
-        } else if write != .attributeUnsupported && write != .notImplemented {
-            return result(.unverified, "AX write returned \(write.rawValue); delivery uncertain, no paste retry")
-        }
-    }
-    guard let rechecked = try? captureFocus(), sameDestination(current, rechecked) else {
-        return result(.failed, "Destination changed before paste; no paste attempted")
-    }
-    if let failure = pasteThroughClipboard(text, restore: true, settle: policy == .singleAttempt ? 0.5 : 0.2, stillTarget: {
+    if let failure = pasteThroughClipboard(text, restore: true, settle: 0.5, stillTarget: {
         (try? captureFocus()).map { sameDestination(current, $0) } ?? false
     }) { return result(.failed, failure) }
-    return verifyInsertion(current, expected: expected, method: pasteMethod)
+    return verifyInsertion(current, expected: expected, method: "clipboard paste")
 }
 
 /// Stages `text` on the clipboard and posts ⌘V, then waits `settle` seconds for the app to read it.
@@ -318,11 +261,6 @@ func readbackMatches(_ expected: String?, _ actual: String?) -> Bool {
     return normalized(expected) == normalized(actual)
 }
 
-/// A write reported successful may fall back to paste only when read-back proves nothing changed.
-func silentWriteAllowsPaste(before: String?, after: String?) -> Bool {
-    before != nil && after == before
-}
-
 func clipboardOwnershipVerified(expectedCount: Int, beforeCount: Int, afterCount: Int, expectedToken: String, actualToken: String?) -> Bool {
     beforeCount == expectedCount && afterCount == expectedCount && actualToken == expectedToken
 }
@@ -334,11 +272,6 @@ func insertionTextRole(_ role: String) -> Bool {
 func runInsertionChecks() {
     assert(readbackMatches("Hi there.", "Hi\u{00A0}there.\n") && readbackMatches(" a b", "a\u{200B} b"))
     assert(!readbackMatches("Hi there.", "Hi there. Hi there.") && !readbackMatches("ab", nil) && !readbackMatches(nil, "ab"))
-    assert(insertionMethod(bundleID: "com.openai.codex", policy: .singleAttempt) == .paste)
-    assert(insertionMethod(bundleID: "com.google.Chrome", policy: .singleAttempt) == .paste)
-    assert(insertionMethod(bundleID: "com.microsoft.VSCode", policy: .singleAttempt) == .paste)
-    assert(insertionMethod(bundleID: "com.apple.TextEdit", policy: .singleAttempt) == .accessibility)
-    assert(insertionMethod(bundleID: "com.google.Chrome", policy: .experimentalFallback) == .accessibility)
     let element = AXUIElementCreateApplication(123)
     func destination(pid: pid_t = 123, bundleID: String = "com.apple.TextEdit", value: String = "abc",
                      selection: CFRange = CFRange(location: 3, length: 0), secure: Bool = false) -> FocusSnapshot {
@@ -361,9 +294,6 @@ func runInsertionChecks() {
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 4, expectedToken: "ours", actualToken: nil))
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 5, afterCount: 5, expectedToken: "ours", actualToken: "ours"))
     assert(!clipboardOwnershipVerified(expectedCount: 4, beforeCount: 4, afterCount: 5, expectedToken: "ours", actualToken: "ours"))
-    assert(silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: "))
-    assert(!silentWriteAllowsPaste(before: "Chat probe: ", after: "Chat probe: Acme"))
-    assert(!silentWriteAllowsPaste(before: nil, after: nil))
     assert(insertionReadbackVerified(expected: "text", actual: "text", sameField: true, browserTypeUnknown: false))
     assert(!insertionReadbackVerified(expected: "text", actual: "text", sameField: true, browserTypeUnknown: true))
     assert(!insertionReadbackVerified(expected: "text", actual: "text", sameField: false, browserTypeUnknown: false))

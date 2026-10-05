@@ -47,6 +47,7 @@ import SwiftUI
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
             controller.message = "Model verification failed. Choose the pinned model folder."
             controller.bubble.show(phase: controller.phase, message: controller.message)
+            if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", screen: nil) { print("Undo pressed."); fflush(stdout) } }
             if CommandLine.arguments.contains("--bubble-only") { window.orderOut(nil) }
             print("Fixture content: \(window.contentLayoutRect.size), full window: \(window.frame.size)"); fflush(stdout)
         }

@@ -1,3 +1,12 @@
+# Wispr Flow-style learning and paste-only insertion — October 4, 2026
+
+Branch `aakash/dictionary-learning-exploration-6182a5`. User decisions: replicate Wispr Flow's auto-add, and insert only with ⌘V paste. [Certain]
+
+- Insertion: `insertText` always pastes (clipboard preserved and restored as before), then reads the field back to verify and to hand it to AX observation. The AX selected-text write, the unchanged-write paste fallback and the per-app method table are gone. [Certain]
+- Learning: one settled correction adds a vocabulary hint (learned entry, no variants: reaches Parakeet's vocabulary file and cloud vocabulary, `apply()` changes nothing) and shows "Added “X” to dictionary" with Undo for 5 s; the second consistent correction adds the misheard form as a variant of the same entry. Deleted or reversed words are never re-learned from any mishearing. Version-1 ledgers load unchanged. [Certain]
+- All documented checks pass on the Mac; `check_ui.sh --saved --learned --bubble-only` shows the notice. The live TextEdit probe was not run: it needs TextEdit frontmost, and the screen-takeover approval was not available. Paste-only delivery is unverified live. [Certain]
+- Still open (from the exploration): fixing a word and then typing on drops the fix; clicking a word in keystroke-watched fields (Chrome, VS Code, Docs) ends the watch; two fixes in one dictation become one phrase; case-only, spacing and sub-4-letter fixes are not learned; a suppressed source is invisible in Settings. [Certain]
+
 # Dictionary feature — October 4, 2026
 
 Branch `aakash/dictionary-feature-523123`. Goal: make the custom dictionary matter on the main route (local transcription, then Gemini cleanup) and finish the editor. [Certain]
