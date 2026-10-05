@@ -204,11 +204,9 @@ protocol HTTPTransport: Sendable {
 /// Sensitive requests refuse redirects, cookies, cached data and oversized responses.
 final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
     private let configuration: URLSessionConfiguration
-    private let followRedirects: Bool
     private let maximumResponseBytes: Int
 
-    init(followRedirects: Bool = false, maximumResponseBytes: Int = 8 * 1024 * 1024) {
-        self.followRedirects = followRedirects
+    init(maximumResponseBytes: Int = 8 * 1024 * 1024) {
         self.maximumResponseBytes = max(1, maximumResponseBytes)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
@@ -223,7 +221,7 @@ final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         let holder = DataTaskHolder()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HTTPResult, Error>) in
-                let receiver = ResponseReceiver(followRedirects: followRedirects, limit: maximumResponseBytes) { continuation.resume(with: $0) }
+                let receiver = ResponseReceiver(limit: maximumResponseBytes) { continuation.resume(with: $0) }
                 let session = URLSession(configuration: configuration, delegate: receiver, delegateQueue: nil)
                 holder.start(session.dataTask(with: request))
             }
@@ -233,20 +231,19 @@ final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
 
 /// Each session serializes its callbacks; each request owns its receiver and bounded buffer.
 private final class ResponseReceiver: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    let followRedirects: Bool
     let limit: Int
     let complete: (Result<HTTPResult, Error>) -> Void
     private var response: HTTPURLResponse?
     private var body = Data()
     private var failure: Error?
 
-    init(followRedirects: Bool, limit: Int, complete: @escaping (Result<HTTPResult, Error>) -> Void) {
-        self.followRedirects = followRedirects; self.limit = limit; self.complete = complete
+    init(limit: Int, complete: @escaping (Result<HTTPResult, Error>) -> Void) {
+        self.limit = limit; self.complete = complete
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        completionHandler(followRedirects ? request : nil)
+        completionHandler(nil)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
@@ -1643,7 +1640,7 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     /// Clamped to 1...`maximumTimeout` when used.
     var timeout: TimeInterval = OpenAICompatibleCleanupProvider.defaultTimeout
     var maxTokens: Int? = 4096
-    var transport: HTTPTransport = URLSessionTransport(followRedirects: false)
+    var transport: HTTPTransport = URLSessionTransport()
 
     /// Throws `invalidConfiguration(.localServer)` for a URL `LocalEndpoint.normalize` rejects.
     init(baseURL: String, model: String, apiKey: APIKey? = nil, provider: ProviderID = .localServer) throws {
