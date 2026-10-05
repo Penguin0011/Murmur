@@ -501,7 +501,7 @@ struct SettingsView: View {
             eyebrow("Cleanup runs with").padding(.top, 28)
             segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
-            help("Built-in local rules provide limited cleanup. For private AI cleanup, start with an instruction model around 8B parameters using a local model server; Murmur's tested models under 2B were slower and less accurate than Gemini in a synthetic comparison. Otherwise choose Gemini or OpenRouter. Murmur never switches routes on its own.")
+            help("Built-in local rules provide limited cleanup. For private AI cleanup, start with an instruction model around 8B parameters using a local model server; Murmur's tested models under 2B were slower and less accurate than Gemini in a synthetic comparison. Cloud choices include Gemini, OpenRouter and Cerebras GPT OSS 120B. Murmur never switches routes on its own.")
                 .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)

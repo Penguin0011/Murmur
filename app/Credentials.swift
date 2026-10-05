@@ -10,6 +10,7 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
     case fireworks
     case gemini
     case openrouter
+    case cerebras
     case localServer
 
     var displayName: String {
@@ -17,6 +18,7 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
         case .fireworks: return "Fireworks"
         case .gemini: return "Gemini"
         case .openrouter: return "OpenRouter"
+        case .cerebras: return "Cerebras"
         case .localServer: return "Local model server"
         }
     }

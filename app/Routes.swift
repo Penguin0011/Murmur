@@ -76,6 +76,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
     case localServer = "local-server"
     case gemini
     case openrouter
+    case cerebras
 
     var id: String { rawValue }
 
@@ -85,6 +86,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
         case .localServer: return "Local model server"
         case .gemini: return "Gemini, then Gemma when rate limited"
         case .openrouter: return "OpenRouter"
+        case .cerebras: return "Cerebras (GPT OSS 120B)"
         }
     }
 
@@ -97,6 +99,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
         case .localServer: return .localServer
         case .gemini: return .gemini
         case .openrouter: return .openrouter
+        case .cerebras: return .cerebras
         }
     }
 }
@@ -112,6 +115,9 @@ func makeCleanupProvider(_ choice: CleanupChoice, key: APIKey?, serverURL: Strin
         return try? OpenAICompatibleCleanupProvider(baseURL: serverURL, model: model, apiKey: key)
     case .gemini: return key.map { GeminiCleanupProvider(apiKey: $0) }
     case .openrouter: return key.map { OpenRouterCleanupProvider(apiKey: $0) }
+    case .cerebras:
+        guard key != nil else { return nil }
+        return try? OpenAICompatibleCleanupProvider(baseURL: "https://api.cerebras.ai/v1", model: "gpt-oss-120b", apiKey: key, provider: .cerebras)
     }
 }
 
@@ -490,7 +496,7 @@ enum KeyText {
     static let unreadable = "The saved key could not be read from the Keychain."
 
     /// Providers that take a key in Settings. Fireworks is not offered.
-    static let providers: [ProviderID] = [.gemini, .openrouter, .localServer]
+    static let providers: [ProviderID] = [.gemini, .openrouter, .cerebras, .localServer]
 
     static func validated(_ provider: ProviderID) -> String {
         provider == .localServer ? "The local model server answered." : "\(provider.displayName) accepted the key."
@@ -510,6 +516,11 @@ enum KeyCheck {
             case .openrouter:
                 guard let key else { return KeyText.missing }
                 var p = OpenRouterCleanupProvider(apiKey: key); if let transport { p.transport = transport }
+                try await p.validate()
+            case .cerebras:
+                guard let key else { return KeyText.missing }
+                var p = try OpenAICompatibleCleanupProvider(baseURL: "https://api.cerebras.ai/v1", model: "gpt-oss-120b", apiKey: key, provider: .cerebras)
+                if let transport { p.transport = transport }
                 try await p.validate()
             case .localServer:
                 var p = try OpenAICompatibleCleanupProvider(baseURL: serverURL, model: "validation", apiKey: key); if let transport { p.transport = transport }
