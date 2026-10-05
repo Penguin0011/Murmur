@@ -4,6 +4,8 @@ Reviewed the configurable Custom API cleanup change with the ponytail skill. Res
 
 Validation: provider checks passed (581 assertions), route checks passed (103, including migration/relaunch regressions), and update checks passed (91). Native controller and app-services checks passed. `app/build.sh` succeeded on this Mac, and the bundle passed deep/strict signature verification with the development signing identity. These checks use synthetic inputs and mocked HTTP; no new live provider, human speech, or insertion claim is made. [Certain]
 
+Merged PR #19 into `main` as `0f32b105151fd7699d5deee6897b51325a76b907`. The merge tree matches the reviewed and built tree. Installed the verified bundle at `/Users/aakash/Applications/Murmur.app`; Murmur and ModelBench executable hashes match the built bundle. Murmur was idle before quitting; the previous bundle is backed up at `/Users/aakash/Applications/Murmur-backups/20261005-025121/Murmur.app`. Installed executable SHA-256: `dfddb3dbe7c4c903399db7e6de799441077d4c222fcf1739864373bbc86f1422`. Relaunched the installed app and verified Ready, existing History (239 entries), and Microphone/Accessibility/Input Monitoring allowed. The Cleanup screen shows local rules, Gemini, and Custom API provider; the route stayed on local rules. No new dictation or live custom-provider call was tested. [Certain]
+
 # Project completion review — October 4, 2026
 
 Branch `aakash/remaining-gaps` (from `main` at `d6960df`). The user asked what is left and for autonomous work. This section is updated as work lands. [Certain]
