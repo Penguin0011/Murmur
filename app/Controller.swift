@@ -1111,7 +1111,9 @@ final class PreStart: @unchecked Sendable {
             watch = Watch(observation: observation, pid: field.pid, field: field, keys: nil, current: text)
         } else if let pid, CGPreflightListenEventAccess(), startKeyTap(),
                   let observation = DictationObservation(value: text, insertedRange: NSRange(location: 0, length: (text as NSString).length), now: now) {
-            watch = Watch(observation: observation, pid: pid, field: nil, keys: KeystrokeSpan(text), current: text)
+            var keys = KeystrokeSpan(text)
+            keys.resolve = { CorrectionFilter.plausibleEdit(original: text, candidates: $0, isCommonWord: isCommonEnglishWord) }
+            watch = Watch(observation: observation, pid: pid, field: nil, keys: keys, current: text)
         } else { stopWatching(); return }
         watchTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.watchTick() }
@@ -1177,7 +1179,7 @@ final class PreStart: @unchecked Sendable {
     private func watchKey(_ type: CGEventType, _ event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: true) }; return }
         guard var keys = watch?.keys else { return }
-        if type == .keyDown { keys.apply(Self.watchedKey(event)) } else { keys.depart() }
+        if type == .keyDown { keys.apply(Self.watchedKey(event)) } else { keys.click() }
         watch?.keys = keys
     }
     nonisolated static func watchedKey(_ event: CGEvent) -> KeystrokeSpan.Key {

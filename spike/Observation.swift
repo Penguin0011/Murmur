@@ -67,9 +67,8 @@ struct DictationObservation {
               selection.length >= 0, selection.location <= NSMaxRange(updatedRange),
               selection.length <= NSMaxRange(updatedRange) - selection.location,
               Range(selection, in: value) != nil, Self.validBoundaries(selection, value) else { return stop("selection left dictated span") }
+        // Text typed after the span stays in it; the ledger's word diff ignores added words.
         let current = text.substring(with: updatedRange)
-        // Any growth at the end could be ordinary appended typing. Do not attribute it as a correction.
-        guard current == initial || !current.hasPrefix(initial) else { return stop("appended text") }
         range = updatedRange
         edited = current
         candidate = Self.replacement(initial, current)
@@ -135,8 +134,10 @@ struct DictationObservation {
 /// Stand-in for a field with no readable text (VS Code's stub, web canvases): a virtual copy of
 /// the pasted span, edited by the keys typed after it, starting with the caret at its end. Its
 /// `value`/`selection` feed `DictationObservation` as snapshots with no text around the span.
-/// `lost` (any key it cannot model, or an edit outside the span) drops the evidence; `departed`
-/// (a click, or the caret leaving the span) keeps it, like focus departure.
+/// `lost` (a ⌘/⌃ chord such as undo, or an edit outside the span) drops the evidence; `departed`
+/// (Return, Tab, vertical caret keys, or the caret leaving the span) keeps it, like focus departure.
+/// After a click the caret could be anywhere: every caret position and every double-clicked word
+/// is followed at once, and the span reads as the single edit `resolve` finds plausible.
 /// ponytail: the target app's own autocorrect/autocomplete is invisible here; the ledger's filter
 /// and two-session rule are the backstop. Read the field instead wherever AX exposes it.
 struct KeystrokeSpan {
@@ -148,12 +149,18 @@ struct KeystrokeSpan {
     private(set) var chars: [Character]
     private(set) var state = State.editing
     private var anchor: Int, caret: Int
+    /// Where the caret might be after a click; empty while its position is known.
+    private var guesses: [KeystrokeSpan] = []
+    /// Picks the plausible reading among the guesses (the ledger's filter in the app).
+    var resolve: ([String]) -> String? = { _ in nil }
 
     init(_ text: String) { chars = Array(text); anchor = chars.count; caret = chars.count }
+    private init(_ chars: [Character], anchor: Int, caret: Int) { self.chars = chars; self.anchor = anchor; self.caret = caret }
 
     var value: String { String(chars) }
-    /// UTF16 range, as AX reports selections.
+    /// UTF16 range, as AX reports selections. Unknown after a click: the span start stands in.
     var selection: NSRange {
+        if !guesses.isEmpty { return NSRange(location: 0, length: 0) }
         func utf16(_ index: Int) -> Int { String(chars[..<index]).utf16.count }
         let low = min(anchor, caret), high = max(anchor, caret)
         return NSRange(location: utf16(low), length: utf16(high) - utf16(low))
@@ -161,13 +168,38 @@ struct KeystrokeSpan {
 
     mutating func depart() { if state == .editing { state = .departed } }
 
+    /// A click in the app. A second click while the first is still unresolved ends the watch.
+    /// ponytail: one guess per caret position and word, O(span length) work per key; bound the
+    /// span if very long dictations make keystrokes lag.
+    mutating func click() {
+        guard state == .editing else { return }
+        if !guesses.isEmpty, resolve(guesses.map(\.value)) == nil { state = .departed; return }
+        let words = chars.indices.filter { isWord(chars[$0]) && ($0 == 0 || !isWord(chars[$0 - 1])) }
+        guesses = (0...chars.count).map { KeystrokeSpan(chars, anchor: $0, caret: $0) }
+            + words.map { KeystrokeSpan(chars, anchor: $0, caret: wordEnd(after: $0)) }
+    }
+
     mutating func apply(_ key: Key) {
         guard state == .editing else { return }
+        if !guesses.isEmpty {
+            if key == .other { state = .lost; return }
+            var seen = Set<String>()
+            guesses = guesses.compactMap { guess in
+                var next = guess
+                next.apply(key)
+                return next.state == .editing && seen.insert("\(next.anchor) \(next.caret) \(next.value)").inserted ? next : nil
+            }
+            if guesses.isEmpty { state = .departed; return }
+            if let reading = resolve(guesses.map(\.value)) { chars = Array(reading) }
+            return
+        }
         let low = min(anchor, caret), high = max(anchor, caret)
         switch key {
         case .text(let text):
-            // Return, Tab, Escape (control) and arrow/Home/End/Page keys (private-use U+F700...) are not edits it can follow.
-            guard !text.isEmpty, !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) || (0xF700...0xF8FF).contains($0.value) }) else { state = .lost; return }
+            // Return, Tab, Escape (control) and arrow/Home/End/Page keys (private-use U+F700...) end the
+            // edit (a chat sends, the caret moves away) without undoing it.
+            guard !text.isEmpty else { state = .lost; return }
+            guard !text.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0) || (0xF700...0xF8FF).contains($0.value) }) else { state = .departed; return }
             chars.replaceSubrange(low..<high, with: Array(text)); caret = low + text.count; anchor = caret
         case .backspace(let word):
             if low < high { remove(low..<high); return }
@@ -262,9 +294,9 @@ func runObservationChecks() {
                         sameFocusedField: true, readableNonsecure: true)
     assert(outside.stopped && outside.candidate == nil)
     var appended = tracker()
-    _ = appended.observe(value: "🙂 Acme done more", selection: NSRange(location: 12, length: 0), now: 1,
+    _ = appended.observe(value: "🙂 Akme done more", selection: NSRange(location: 12, length: 0), now: 1,
                          sameFocusedField: true, readableNonsecure: true)
-    assert(appended.stopped && appended.candidate == nil)
+    assert(!appended.stopped && appended.edited == "Akme done more")  // a fix, then more typing, stays attributed
     var selection = tracker()
     _ = selection.observe(value: "🙂 Acme done", selection: NSRange(location: 0, length: 0), now: 1,
                           sameFocusedField: true, readableNonsecure: true)

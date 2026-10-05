@@ -296,6 +296,17 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             check(learned(dict).isEmpty && ledger.tombstones.contains(.init(source: "acme", target: "akme")), "reversal withdraws and tombstones")
         }
 
+        // Word diff: separate fixes, a fix followed by typing, rewrites and deletions.
+        do {
+            typealias C = CorrectionFilter.Change
+            try check(CorrectionFilter.replacements("call ACME about Gira", "call Akme about Jira").get() == [C(source: "ACME", targets: ["Akme"]), C(source: "Gira", targets: ["Jira"])], "two fixes are two changes")
+            try check(CorrectionFilter.replacements("pay Acme", "pay Akme and more").get() == [C(source: "Acme", targets: ["Akme", "Akme and", "Akme and more"])], "fix then typing: shortest reading first")
+            try check(CorrectionFilter.replacements("call Acme today", "call Akme today and more").get() == [C(source: "Acme", targets: ["Akme"])], "words added after the span are ignored")
+            check(CorrectionFilter.replacements("call Acme today", "call today") == .failure(.deletion), "deletion")
+            check(CorrectionFilter.replacements("maybe the team wants a new plan", "I think we should ship old stuff") == .failure(.tooManyWords), "rewrite")
+            check(CorrectionFilter.replacements("acme", "Acme") == .failure(.caseOnly), "case only")
+        }
+
         // Tiers: two mishearings of one spelling share one entry; a deleted word is never re-learned.
         do {
             let (dict, ledger) = try fresh("tiers")

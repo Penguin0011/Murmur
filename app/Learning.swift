@@ -12,7 +12,7 @@ struct ObservedCorrection: Codable, Equatable {
     let observedAt: Date
 }
 
-enum CandidateRejection: String, Codable {
+enum CandidateRejection: String, Codable, Error {
     case empty, identical, caseOnly, punctuationOnly, unsupportedCharacters, tooManyWords
     case deletion, insertion, negation, number, antonym, contextualWord, tooShort, inflection, ordinaryWords, notRespelling
 }
@@ -155,6 +155,74 @@ enum CorrectionFilter {
         if similarity >= directSimilarity { return reduced }
         if similarity >= phoneticSimilarity, phoneticKey(sLetters) == phoneticKey(tLetters) { return reduced }
         return .rejected(.notRespelling)
+    }
+
+    struct Change: Equatable {
+        /// The original words, as dictated.
+        let source: String
+        /// Readings of the new words, tried in order. Usually one; a run at the end of the span
+        /// that grew may be a fix followed by more typing, so its first 1...3 words come first.
+        let targets: [String]
+    }
+
+    /// The replaced word runs from `original` to `current`, aligned by longest common
+    /// subsequence of folded words (the helper's BoostFilter aligns the same way, in another
+    /// target). Words added after the span, or anywhere with nothing replaced, are ignored, so a
+    /// fix followed by more typing still counts, and two fixes in one dictation are two changes.
+    /// Fails for an edit that deletes words, or replaces more than half of a long span (a rewrite).
+    static func replacements(_ original: String, _ current: String) -> Result<[Change], CandidateRejection> {
+        let a = TermText.tokens(original), b = TermText.tokens(current)
+        var dp = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
+        for i in stride(from: a.count - 1, through: 0, by: -1) {
+            for j in stride(from: b.count - 1, through: 0, by: -1) {
+                dp[i][j] = a[i].folded == b[j].folded ? dp[i + 1][j + 1] + 1 : max(dp[i + 1][j], dp[i][j + 1])
+            }
+        }
+        var changes: [Change] = []
+        var replaced = 0
+        var i = 0, j = 0
+        while i < a.count || j < b.count {
+            if i < a.count, j < b.count, a[i].folded == b[j].folded { i += 1; j += 1; continue }
+            let i0 = i, j0 = j
+            while (i < a.count || j < b.count) && !(i < a.count && j < b.count && a[i].folded == b[j].folded) {
+                if j < b.count && (i == a.count || dp[i][j + 1] >= dp[i + 1][j]) { j += 1 } else { i += 1 }
+            }
+            if i == i0 { continue }                      // words added: not a correction
+            if j == j0 { return .failure(.deletion) }
+            replaced += i - i0
+            let words = b[j0..<j].map(\.text)
+            let whole = words.joined(separator: " ")
+            let targets = i == a.count && words.count > i - i0
+                ? (1..<words.count).prefix(maxWords).map { words.prefix($0).joined(separator: " ") } + [whole]
+                : [whole]
+            changes.append(Change(source: a[i0..<i].map(\.text).joined(separator: " "), targets: targets))
+        }
+        // ponytail: half-the-span rewrite cut-off is a guess; tune with real correction logs.
+        if replaced > max(maxWords, a.count / 2) { return .failure(.tooManyWords) }
+        if !changes.isEmpty { return .success(changes) }
+        if b.count > a.count { return .failure(.insertion) }
+        // Same words: name the case, punctuation or spacing change.
+        if case .rejected(let reason) = evaluate(source: original, target: current) { return .failure(reason) }
+        return .failure(.identical)
+    }
+
+    /// Of `candidates` (what a span might now read, when the caret position is unknown), the one
+    /// reading whose every replaced run is an accepted respelling of the original, preferring the
+    /// reading that changes the fewest words (a retyped word over one merged with its neighbour).
+    /// Nil when none, or several equally small readings, qualify.
+    static func plausibleEdit(original: String, candidates: [String], isCommonWord: ((String) -> Bool)? = nil) -> String? {
+        var best: (cost: Int, reading: String?)?
+        for candidate in Set(candidates) where candidate != original {
+            guard case .success(let changes) = replacements(original, candidate),
+                  changes.allSatisfy({ change in
+                      if case .accepted = evaluate(source: change.source, target: change.targets.last!, isCommonWord: isCommonWord) { return true }
+                      return false
+                  }) else { continue }
+            let cost = changes.reduce(0) { $0 + max(TermText.tokens($1.source).count, TermText.tokens($1.targets.last!).count) }
+            if best == nil || cost < best!.cost { best = (cost, candidate) }
+            else if cost == best!.cost { best!.reading = nil }
+        }
+        return best?.reading
     }
 
     /// Lowercased letters and digits only.
@@ -343,24 +411,38 @@ final class CorrectionLedger {
         let session = observed.sessionID
         if state.evidence.contains(where: { $0.correction.sessionID == session && $0.settled }) { return .sessionClosed }
         state.evidence.removeAll { $0.correction.sessionID == session }
-        let verdict = CorrectionFilter.evaluate(source: observed.source, target: observed.target,
-                                                manualPreferred: manualPreferredKeys(), isCommonWord: isCommonWord)
-        let outcome: RecordOutcome
-        switch verdict {
-        case .rejected(let reason):
-            outcome = .rejected(reason)
-        case .accepted(let source, let target):
-            let pair = Pair(source: TermText.fold(source), target: TermText.fold(target))
-            if state.tombstones.contains(where: { $0.target == pair.target }) { outcome = .tombstoned }
-            else if state.suppressed.contains(pair.source) { outcome = .suppressed }
-            else {
-                let reduced = ObservedCorrection(sessionID: session, source: source, target: target, observedAt: observed.observedAt)
-                state.evidence.append(Evidence(correction: reduced, settled: false))
-                outcome = .provisional
+        var outcome: RecordOutcome?
+        var rejection = CandidateRejection.identical
+        switch CorrectionFilter.replacements(observed.source, observed.target) {
+        case .failure(let reason):
+            rejection = reason
+        case .success(let changes):
+            for change in changes {
+                // A run that grew past the end of the span may hold the fix plus typing after it:
+                // the shortest accepted reading wins.
+                var verdict = CandidateVerdict.rejected(.notRespelling)
+                for target in change.targets {
+                    verdict = CorrectionFilter.evaluate(source: change.source, target: target,
+                                                        manualPreferred: manualPreferredKeys(), isCommonWord: isCommonWord)
+                    if case .accepted = verdict { break }
+                }
+                switch verdict {
+                case .rejected(let reason):
+                    if outcome == nil, rejection == .identical { rejection = reason }
+                case .accepted(let source, let target):
+                    let pair = Pair(source: TermText.fold(source), target: TermText.fold(target))
+                    if state.tombstones.contains(where: { $0.target == pair.target }) { if outcome == nil { outcome = .tombstoned } }
+                    else if state.suppressed.contains(pair.source) { if outcome == nil { outcome = .suppressed } }
+                    else {
+                        let reduced = ObservedCorrection(sessionID: session, source: source, target: target, observedAt: observed.observedAt)
+                        state.evidence.append(Evidence(correction: reduced, settled: false))
+                        outcome = .provisional
+                    }
+                }
             }
         }
         try save()
-        return outcome
+        return outcome ?? .rejected(rejection)
     }
 
     /// The session's observation window closed: commit its evidence and promote if consistent.
@@ -373,54 +455,57 @@ final class CorrectionLedger {
             try save()
             return []
         }
-        guard let index = state.evidence.firstIndex(where: { $0.correction.sessionID == sessionID && !$0.settled }) else {
-            return []
+        var pairs: [Pair] = []
+        for index in state.evidence.indices where state.evidence[index].correction.sessionID == sessionID && !state.evidence[index].settled {
+            state.evidence[index].settled = true
+            if !pairs.contains(state.evidence[index].pair) { pairs.append(state.evidence[index].pair) }
         }
-        state.evidence[index].settled = true
-        let pair = state.evidence[index].pair
+        guard !pairs.isEmpty else { return [] }
         var promoted: [DictionaryEntry] = []
 
-        if let reversed = state.promotions.first(where: { $0.pair.source == pair.target && $0.pair.target == pair.source }) {
-            // The user changed a learned replacement back: withdraw it and never re-learn it.
-            withdraw(reversed, tombstone: true)
-            state.suppressed.insert(pair.source)
-            state.evidence.removeAll { $0.correction.sessionID == sessionID }
-        } else {
-            let settled = state.evidence.filter { $0.settled && $0.pair.source == pair.source }
-            let targets = Set(settled.map(\.pair.target))
-                .union(state.promotions.filter { $0.pair.source == pair.source }.map(\.pair.target))
-            if targets.count > 1 {
+        for pair in pairs {
+            if let reversed = state.promotions.first(where: { $0.pair.source == pair.target && $0.pair.target == pair.source }) {
+                // The user changed a learned replacement back: withdraw it and never re-learn it.
+                withdraw(reversed, tombstone: true)
                 state.suppressed.insert(pair.source)
-                state.evidence.removeAll { $0.pair.source == pair.source }
-                for promotion in state.promotions where promotion.pair.source == pair.source { withdraw(promotion, tombstone: false) }
-            } else if !state.promotions.contains(where: { $0.pair == pair && $0.replaces }),
-                      let latest = settled.max(by: { $0.correction.observedAt < $1.correction.observedAt }) {
-                let sessions = Array(Set(settled.map(\.correction.sessionID)))
-                if let existing = dictionary.entry(forVariant: latest.correction.source) {
-                    // A manual or other entry already owns this form; consume matching evidence only.
-                    if TermText.fold(existing.preferred) == pair.target {
+                state.evidence.removeAll { $0.correction.sessionID == sessionID && $0.pair == pair }
+            } else {
+                let settled = state.evidence.filter { $0.settled && $0.pair.source == pair.source }
+                let targets = Set(settled.map(\.pair.target))
+                    .union(state.promotions.filter { $0.pair.source == pair.source }.map(\.pair.target))
+                if targets.count > 1 {
+                    state.suppressed.insert(pair.source)
+                    state.evidence.removeAll { $0.pair.source == pair.source }
+                    for promotion in state.promotions where promotion.pair.source == pair.source { withdraw(promotion, tombstone: false) }
+                } else if !state.promotions.contains(where: { $0.pair == pair && $0.replaces }),
+                          let latest = settled.max(by: { $0.correction.observedAt < $1.correction.observedAt }) {
+                    let sessions = Array(Set(settled.map(\.correction.sessionID)))
+                    if let existing = dictionary.entry(forVariant: latest.correction.source) {
+                        // A manual or other entry already owns this form; consume matching evidence only.
+                        if TermText.fold(existing.preferred) == pair.target {
+                            state.evidence.removeAll { $0.pair.source == pair.source }
+                        }
+                    } else if sessions.count >= Self.requiredSessions {
+                        // Second consistent fix: the misheard form is replaced from now on, as another
+                        // variant of the learned entry for this spelling when there is one.
+                        if var owner = dictionary.entries.first(where: { $0.source == .learned && TermText.fold($0.preferred) == pair.target }) {
+                            owner.variants.append(latest.correction.source)
+                            try dictionary.update(owner)
+                            state.promotions.append(Promotion(entryID: owner.id, pair: pair, sessions: sessions, kind: .variant))
+                        } else {
+                            let entry = try dictionary.add(preferred: latest.correction.target,
+                                                           variants: [latest.correction.source], source: .learned)
+                            state.promotions.append(Promotion(entryID: entry.id, pair: pair, sessions: sessions))
+                            promoted.append(entry)
+                        }
+                        // Evidence is consumed; the promotion keeps only session IDs for revert.
                         state.evidence.removeAll { $0.pair.source == pair.source }
-                    }
-                } else if sessions.count >= Self.requiredSessions {
-                    // Second consistent fix: the misheard form is replaced from now on, as another
-                    // variant of the learned entry for this spelling when there is one.
-                    if var owner = dictionary.entries.first(where: { $0.source == .learned && TermText.fold($0.preferred) == pair.target }) {
-                        owner.variants.append(latest.correction.source)
-                        try dictionary.update(owner)
-                        state.promotions.append(Promotion(entryID: owner.id, pair: pair, sessions: sessions, kind: .variant))
-                    } else {
-                        let entry = try dictionary.add(preferred: latest.correction.target,
-                                                       variants: [latest.correction.source], source: .learned)
-                        state.promotions.append(Promotion(entryID: entry.id, pair: pair, sessions: sessions))
+                    } else if !dictionary.entries.contains(where: { TermText.fold($0.preferred) == pair.target }) {
+                        // First fix: a vocabulary hint only. Evidence stays for the second tier.
+                        let entry = try dictionary.add(preferred: latest.correction.target, variants: [], source: .learned)
+                        state.promotions.append(Promotion(entryID: entry.id, pair: pair, sessions: sessions, kind: .hint))
                         promoted.append(entry)
                     }
-                    // Evidence is consumed; the promotion keeps only session IDs for revert.
-                    state.evidence.removeAll { $0.pair.source == pair.source }
-                } else if !dictionary.entries.contains(where: { TermText.fold($0.preferred) == pair.target }) {
-                    // First fix: a vocabulary hint only. Evidence stays for the second tier.
-                    let entry = try dictionary.add(preferred: latest.correction.target, variants: [], source: .learned)
-                    state.promotions.append(Promotion(entryID: entry.id, pair: pair, sessions: sessions, kind: .hint))
-                    promoted.append(entry)
                 }
             }
         }
