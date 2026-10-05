@@ -227,12 +227,12 @@ Physical shortcut/microphone first-word behavior, real speech quality, clipboard
 
 Enable **Intelligently add a leading space** and apply settings to separate inserted dictation from existing text. The option defaults off. It uses the original field value and UTF-16 cursor position, and only inserts a space when preceding text needs separation. It skips existing whitespace, opening delimiters, punctuation-led output, selected-text replacement, word interiors, and unavailable/invalid context. The insertion safety check still rejects changed destinations. Raw transcription stays unchanged; History final text records the attempted insertion including its added space. Copy-only output remains unchanged. [Certain]
 
-## Gemini transcription and local cleanup servers
+## Gemini transcription and custom cleanup APIs
 
 `Providers.swift` adds `GeminiTranscriptionProvider` and `OpenAICompatibleCleanupProvider`. Both are wired in through `Routes.swift` (next section) and covered by `check_providers.swift`, which uses no network and no keys. [Certain]
 
 - **Gemini transcription** is a language model asked to transcribe, not a speech recognizer. Before sending, call `GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel:durationSeconds:)` and skip silent recordings. Use `transcribeChecked(_:)` and hold the result for recovery when `answerSuspected` is true. Its disclosure says that audio leaves this Mac to Google, and that free-tier keys allow human review. [Certain]
-- **Local cleanup** sends the cleanup prompt to `{base}/v1/chat/completions` on a server the user runs. Documented defaults: Ollama `http://localhost:11434`, LM Studio `http://localhost:1234`, llama-server `http://127.0.0.1:8080`, vLLM `http://localhost:8000`. `discoverModels()` lists the server's models. Only loopback addresses count as on this Mac; any other host is disclosed as leaving it. If nothing is listening, the error reads "No local model server is running at host:port". [Certain]
+- **Custom API cleanup** sends the prompt to `{base}/v1/chat/completions` using the configured model ID and Keychain key. The endpoint must accept OpenAI-compatible chat-completions requests. It can point to hosted services or a local server; only loopback addresses count as on this Mac, and other hosts are disclosed before the first request. [Certain]
 
 No real Gemini key or local model server has been used yet; see [PROVIDERS.md](PROVIDERS.md). [Certain]
 
@@ -256,12 +256,12 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 /tmp/murmur-routes-check
 ```
 
-**Settings → Processing routes (R4).** Routes take effect on Apply Settings. The settings keys are `transcriptionRoute`, `cloudTranscriber`, `cleanupChoice`, `localServerURL` and `localServerModel`. Keys are never stored in UserDefaults.
+**Settings → Processing routes (R4).** Routes take effect on Apply Settings. The settings keys are `transcriptionRoute`, `cloudTranscriber`, `cleanupChoice`, `customAPIBaseURL` and `customAPIModel`. Keys are never stored in UserDefaults.
 - Transcription: On this Mac (Parakeet, the default) or Cloud. The cloud picker lists only implemented, non-deprecated providers: OpenRouter Whisper (`OpenRouterTranscriptionProvider`) and Gemini audio (`GeminiTranscriptionProvider`, a language model). Fireworks is not listed. `makeTranscriptionProvider(id:key:)` is the single factory. To add Gemini 3.5 Transcribe, add a `CloudTranscriber` case (with `displayName` and `providerID` `.gemini`) and one factory case; its own `disclosure` must say that Google stores the audio (PRD §5 user decision).
-- Cleanup: Local rules (the default), Local model server, Gemini, OpenRouter or Cerebras GPT OSS 120B. Cerebras uses `https://api.cerebras.ai/v1` and the fixed `gpt-oss-120b` model through Murmur's OpenAI-compatible client; add a Cerebras key under Settings → API keys. The local server has an address (default `http://localhost:11434`), a model name, Find Models (`discoverModels()`, which sends no transcript) and an optional key.
+- Cleanup: Local rules (the default), Gemini or a Custom API provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. Add its key under Settings → API keys. OpenRouter remains available only for transcription.
 
 **A dictation on a cloud route.**
-- At start, `RoutePlan` picks the transcriber and cleaner from the applied settings and the Keychain. It refuses, without fallback, when a key is missing, the local server address or model is invalid, or a disclosure is unconfirmed. The model gate applies only to local transcription.
+- At start, `RoutePlan` picks the transcriber and cleaner from the applied settings and the Keychain. It refuses, without fallback, when a key is missing, the custom endpoint or model is invalid, or a disclosure is unconfirmed. Local loopback endpoints do not need a key. The model gate applies only to local transcription.
 - `CloudTranscription.run` replaces the ModelBench runner. It converts the recording to 16 kHz mono 16-bit WAV (`CloudAudio`) and makes one provider call. If the provider has a silence pre-check (Gemini), silent or very short recordings are skipped and reported as "No speech was detected".
 - A transcript then follows the local path: history save, dictionary and cleanup, insertion. An empty transcript is "no speech".
 - A provider error shows its `userMessage` in the Error phase. On preserve dispositions the audio stays for retry (24-hour policy).
@@ -272,7 +272,7 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 
 **Disclosure before cloud use.** Apply Settings computes each stage that sends data off this Mac. For any stage whose signature (route, provider, endpoint) is not yet confirmed, it shows an NSAlert with the provider's `DataDisclosure` summary and warning. Cancel reverts the route fields and applies nothing. The confirmed signatures are stored in `acknowledgedCloudRoutes`, replaced on every Apply. A change of route, provider or endpoint, or switching away and back, asks again. A loopback local server sends nothing off this Mac and needs no alert; any other host does. The Gemini disclosure says that audio leaves this Mac to Google, that free-tier content may be read by human reviewers, and that paid-tier prompts are logged for a limited time. Settings also shows the summary under each cloud choice. [Certain]
 
-**API keys (R5).** Settings → API keys has a row each for Gemini, OpenRouter and the local model server (optional). Each row has a SecureField, Save (`KeychainCredentialStore(service: "Murmur")`), Validate (`validate()`, showing its `userMessage`) and Remove. The row shows only "Key saved" or "No key saved". The typed key lives only in the field until Save and is cleared after it. Messages come from fixed strings and `ProviderError.userMessage`, never from the key or a response body. Preview uses an in-memory store. [Certain]
+**API keys (R5).** Settings → API keys has a row each for Gemini and OpenRouter (transcription). The optional Custom API key is entered with the custom endpoint under Cleanup. Keys use `KeychainCredentialStore(service: "Murmur")`; a typed key stays in a SecureField until Save, then the field clears. Messages come from fixed strings and `ProviderError.userMessage`, never from the key or a response body. Preview uses an in-memory store. Old saved cleanup choices migrate to the custom route. [Certain]
 
 **Learning lexicon.** `isCommonEnglishWord` in Controller.swift backs `CorrectionLedger.isCommonWord` with `NSSpellChecker` (language "en"): a word is common when no misspelling is found. `ProcessingCoordinator(directory:defaults:isCommonWord:)` injects it, including after Delete All Data. [Certain]
 

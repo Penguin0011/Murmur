@@ -120,11 +120,12 @@ struct SettingsView: View {
     @State private var editVariants = ""
     @State private var openKey: ProviderID?
     @State private var keyDraft = ""
+    @State private var customAPIKeyDraft = ""
     @State private var checkedSetup = false
     /// A window preference only; the floating indicator keeps following the system appearance.
     @AppStorage("appearance") private var appearance = "light"
-    /// Server address and model apply when editing ends (Return or leaving the field), not per keystroke.
-    @FocusState private var serverFieldFocused: Bool
+    /// API address and model apply when editing ends (Return or leaving the field), not per keystroke.
+    @FocusState private var apiFieldFocused: Bool
 
     private static let sections = ["General", "Transcription", "Cleanup", "Dictionary", "History & Privacy", "API Keys", "Updates"]
     private static let ledes = [
@@ -153,7 +154,7 @@ struct SettingsView: View {
         .frame(minWidth: 760, minHeight: 560)
         // Every setting applies as soon as it changes; attached here so hidden sections still apply.
         .modifier(AutoApplyGeneral(controller: controller))
-        .modifier(AutoApplyRoutes(controller: controller, serverFieldFocused: serverFieldFocused))
+        .modifier(AutoApplyRoutes(controller: controller, apiFieldFocused: apiFieldFocused))
         .onAppear {
             controller.refreshPermissions(); controller.refreshHistory()
             if !checkedSetup { checkedSetup = true; if !setupComplete { screen = .setup } }
@@ -501,29 +502,43 @@ struct SettingsView: View {
             eyebrow("Cleanup runs with").padding(.top, 28)
             segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
-            help("Built-in local rules provide limited cleanup. For private AI cleanup, start with an instruction model around 8B parameters using a local model server; Murmur's tested models under 2B were slower and less accurate than Gemini in a synthetic comparison. Cloud choices include Gemini, OpenRouter and Cerebras GPT OSS 120B. Murmur never switches routes on its own.")
+            help("Built-in local rules provide limited cleanup. Choose Gemini or configure any OpenAI-compatible chat-completions API, including hosted providers or a local server. Murmur never switches routes on its own.")
                 .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
             } else {
                 disclosure(controller.routeDisclosure(.cleanup)).padding(.top, 16)
             }
-            if controller.cleanupChoice == .localServer {
-                HStack(spacing: 8) {
-                    field("Server address, e.g. \(RouteSettings.defaultServerURL)", text: $controller.localServerURL)
-                        .focused($serverFieldFocused).onSubmit(controller.settingsChanged)
-                    field("Model name", text: $controller.localServerModel)
-                        .focused($serverFieldFocused).onSubmit(controller.settingsChanged)
-                    Button("Find Models", action: controller.findLocalModels).buttonStyle(InkButtonStyle()).disabled(controller.findingModels)
+            if controller.cleanupChoice == .customAPI {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("OpenAI-compatible API base URL").font(.system(size: 14, weight: .semibold))
+                    field("https://api.cerebras.ai/v1", text: $controller.customAPIBaseURL)
+                        .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+                    Text("Model name").font(.system(size: 14, weight: .semibold)).padding(.top, 4)
+                    field("gpt-oss-120b", text: $controller.customAPIModel)
+                        .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+                    Text("API key (optional)").font(.system(size: 14, weight: .semibold)).padding(.top, 4)
+                    let hasCustomAPIKey = controller.savedKeys.contains(.customAPI)
+                    HStack(spacing: 8) {
+                        mono(hasCustomAPIKey ? "Saved in Keychain ✓" : KeyText.none, color: hasCustomAPIKey ? Palette.accentInk : Palette.ink70)
+                        Spacer()
+                        if hasCustomAPIKey {
+                            Button("Validate") { controller.validateKey(.customAPI) }.buttonStyle(InkButtonStyle(kind: .outline))
+                            Button("Remove", role: .destructive) { controller.removeKey(.customAPI); customAPIKeyDraft = "" }
+                                .buttonStyle(InkButtonStyle(kind: .outline))
+                        }
+                    }
+                    HStack(spacing: 8) {
+                        field(hasCustomAPIKey ? "Enter to replace saved key" : "Paste API key", text: $customAPIKeyDraft, secure: true)
+                        Button("Save Key") {
+                            if controller.saveKey(.customAPI, customAPIKeyDraft) { customAPIKeyDraft = "" }
+                        }
+                        .buttonStyle(InkButtonStyle(kind: .accent)).disabled(customAPIKeyDraft.isEmpty)
+                    }
+                    if let message = controller.keyMessages[.customAPI], !message.isEmpty { help(message) }
+                    help("The endpoint must accept OpenAI-compatible POST /v1/chat/completions requests. Enter the provider's base URL and exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
                 }
                 .padding(.top, 16)
-                if !controller.localServerModels.isEmpty {
-                    Picker("Found models", selection: $controller.localServerModel) {
-                        ForEach(controller.localServerModels, id: \.self) { model in Text(model).tag(model) }
-                    }
-                    .padding(.top, 12)
-                }
-                if !controller.localServerMessage.isEmpty { help(controller.localServerMessage).padding(.top, 12) }
             }
         }
     }
@@ -691,10 +706,10 @@ struct SettingsView: View {
     private var apiKeys: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
-                ForEach(KeyText.providers, id: \.self) { provider in keyRow(provider) }
+                ForEach(KeyText.providers.filter { $0 != .customAPI }, id: \.self) { provider in keyRow(provider) }
             }
             .overlay(alignment: .top) { rule }.padding(.top, 20)
-            help("Keys are stored in your Keychain and never shown again after saving. The local model server key is optional.").padding(.top, 16)
+            help("Keys are stored in your Keychain and never shown again after saving. OpenRouter's key is used for transcription; the custom API key is set in Cleanup.").padding(.top, 16)
         }
     }
 
@@ -707,7 +722,7 @@ struct SettingsView: View {
                     mono(has ? "Saved in Keychain ✓" : KeyText.none, color: has ? Palette.accentInk : Palette.ink70)
                 }
                 Spacer()
-                if has || provider == .localServer {
+                if has {
                     Button("Validate") { controller.validateKey(provider) }.buttonStyle(InkButtonStyle(kind: .outline))
                 }
                 if has { Button("Remove", role: .destructive) { controller.removeKey(provider) }.buttonStyle(InkButtonStyle(kind: .outline)) }
@@ -716,7 +731,7 @@ struct SettingsView: View {
             }
             if open {
                 HStack(spacing: 8) {
-                    field(provider == .localServer ? "Paste a server key (optional)" : "Paste your \(provider.displayName) API key", text: $keyDraft, secure: true)
+                    field("Paste your \(provider.displayName) API key", text: $keyDraft, secure: true)
                     Button("Save Key") { if controller.saveKey(provider, keyDraft) { keyDraft = ""; openKey = nil } }
                         .buttonStyle(InkButtonStyle(kind: .accent)).disabled(keyDraft.isEmpty)
                 }
@@ -1040,7 +1055,7 @@ private struct AutoApplyGeneral: ViewModifier {
 
 private struct AutoApplyRoutes: ViewModifier {
     @ObservedObject var controller: AppController
-    let serverFieldFocused: Bool
+    let apiFieldFocused: Bool
     func body(content: Content) -> some View {
         content
             .onChange(of: controller.cleanupFillers) { controller.settingsChanged() }
@@ -1051,10 +1066,10 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.transcriptionRoute) { controller.settingsChanged() }
             .onChange(of: controller.cloudTranscriber) { controller.settingsChanged() }
             .onChange(of: controller.cleanupChoice) { controller.settingsChanged() }
-            // Typing in a server field waits for Return or focus loss; the Found models picker applies at once.
-            .onChange(of: controller.localServerModel) { if !serverFieldFocused { controller.settingsChanged() } }
-            .onChange(of: controller.localServerURL) { if !serverFieldFocused { controller.settingsChanged() } }
-            .onChange(of: serverFieldFocused) { _, focused in if !focused { controller.settingsChanged() } }
+            // Typing in a provider field waits for Return or focus loss.
+            .onChange(of: controller.customAPIModel) { if !apiFieldFocused { controller.settingsChanged() } }
+            .onChange(of: controller.customAPIBaseURL) { if !apiFieldFocused { controller.settingsChanged() } }
+            .onChange(of: apiFieldFocused) { _, focused in if !focused { controller.settingsChanged() } }
     }
 }
 

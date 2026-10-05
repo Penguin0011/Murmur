@@ -127,12 +127,14 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         check(makeTranscriptionProvider(id: .geminiAudio, key: nil) == nil, "no key, no provider")
         check(makeTranscriptionProvider(id: .geminiAudio, key: testKey) is GeminiTranscriptionProvider, "Gemini audio factory")
         check(makeTranscriptionProvider(id: .openrouterWhisper, key: testKey) is OpenRouterTranscriptionProvider, "OpenRouter factory")
-        check(makeCleanupProvider(.localRules, key: testKey, serverURL: "", serverModel: "") == nil, "local rules has no provider")
-        check(makeCleanupProvider(.gemini, key: nil, serverURL: "", serverModel: "") == nil, "Gemini cleanup needs a key")
-        check(makeCleanupProvider(.localServer, key: nil, serverURL: "http://localhost:11434", serverModel: "llama3.2") is OpenAICompatibleCleanupProvider, "local server key is optional")
-        check(makeCleanupProvider(.localServer, key: nil, serverURL: "http://localhost:11434", serverModel: " ") == nil, "local server needs a model")
-        check(makeCleanupProvider(.localServer, key: nil, serverURL: "ftp://x", serverModel: "m") == nil, "local server rejects a bad URL")
-        check(CleanupChoice.localRules.processingRoute == .local && CleanupChoice.localServer.processingRoute == .cloud, "processing route mapping")
+        check(makeCleanupProvider(.localRules, key: testKey, apiBaseURL: "", model: "") == nil, "local rules has no provider")
+        check(makeCleanupProvider(.gemini, key: nil, apiBaseURL: "", model: "") == nil, "Gemini cleanup needs a key")
+        check(makeCleanupProvider(.customAPI, key: nil, apiBaseURL: "http://localhost:11434", model: "llama3.2") is OpenAICompatibleCleanupProvider, "local custom API needs no key")
+        check(makeCleanupProvider(.customAPI, key: nil, apiBaseURL: "http://localhost:11434", model: " ") == nil, "custom API needs a model")
+        check(makeCleanupProvider(.customAPI, key: testKey, apiBaseURL: "ftp://x", model: "m") == nil, "custom API rejects a bad URL")
+        check(makeCleanupProvider(.customAPI, key: nil, apiBaseURL: "https://api.example.com/v1", model: "m") is OpenAICompatibleCleanupProvider, "custom API key is optional")
+        check(CleanupChoice.allCases == [.localRules, .gemini, .customAPI], "cleanup choices show only local rules, Gemini and custom API")
+        check(CleanupChoice.localRules.processingRoute == .local && CleanupChoice.customAPI.processingRoute == .cloud, "processing route mapping")
     }
 
     // MARK: Plans, no fallback
@@ -158,14 +160,16 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         check(summary.lowercased().contains("logs prompts for a limited time"), "Gemini disclosure states storage")
         check(DisclosureText.summary(gemini, stage: .transcription) == summary, "Settings summary")
 
-        var loopback = RouteSettings(); loopback.cleanup = .localServer; loopback.serverModel = "llama3.2"
+        var loopback = RouteSettings(); loopback.cleanup = .customAPI; loopback.customAPIBaseURL = "http://localhost:11434"; loopback.customAPIModel = "llama3.2"
         let onMac = RoutePlan.make(loopback, cleanupSendsText: true, key: none)
         check(onMac.cleaner != nil && onMac.stages.isEmpty && onMac.refusal == nil, "loopback server needs no disclosure")
-        loopback.serverURL = "http://192.168.1.20:11434"
-        let lan = RoutePlan.make(loopback, cleanupSendsText: true, key: none)
+        loopback.customAPIBaseURL = "http://192.168.1.20:11434"
+        let lan = RoutePlan.make(loopback, cleanupSendsText: true, key: all)
         check(lan.stages.count == 1 && lan.stages[0].disclosure.warning != nil, "LAN server is disclosed with a plain-http warning")
-        loopback.serverModel = ""
-        check(RoutePlan.make(loopback, cleanupSendsText: true, key: none).refusal == ProviderError.invalidConfiguration(.localServer).userMessage, "server without a model refuses")
+        let publicNoKey = RoutePlan.make(loopback, cleanupSendsText: true, key: none)
+        check(publicNoKey.cleaner != nil && publicNoKey.refusal == nil && publicNoKey.stages.count == 1, "public custom API may omit a key")
+        loopback.customAPIModel = ""
+        check(RoutePlan.make(loopback, cleanupSendsText: true, key: all).refusal == ProviderError.invalidConfiguration(.customAPI).userMessage, "custom API without a model refuses")
 
         var geminiCleanup = RouteSettings(); geminiCleanup.cleanup = .gemini
         let off = RoutePlan.make(geminiCleanup, cleanupSendsText: false, key: none)
@@ -191,12 +195,12 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         let alert = DisclosureText.alert(pending)
         check(alert.title.contains("Gemini") && alert.body.contains("human reviewers") && !alert.body.contains(secret), "alert text")
 
-        settings.cloudTranscriber = .openrouterWhisper; settings.cleanup = .localServer; settings.serverModel = "m"
-        settings.serverURL = "http://10.0.0.5:8080"
+        settings.cloudTranscriber = .openrouterWhisper; settings.cleanup = .customAPI; settings.customAPIModel = "m"
+        settings.customAPIBaseURL = "http://10.0.0.5:8080"
         let endpoint = RoutePlan.make(settings, cleanupSendsText: true, key: all)
         check(DisclosureAcknowledgement.pending(endpoint, acknowledged: DisclosureAcknowledgement.acknowledged(defaults)).map(\.disclosure.stage) == [.cleanup], "only the new stage is pending")
         DisclosureAcknowledgement.record(endpoint, in: defaults)
-        settings.serverURL = "http://10.0.0.6:8080"
+        settings.customAPIBaseURL = "http://10.0.0.6:8080"
         check(DisclosureAcknowledgement.pending(RoutePlan.make(settings, cleanupSendsText: true, key: all), acknowledged: DisclosureAcknowledgement.acknowledged(defaults)).count == 1, "endpoint change asks again")
 
         // Switching back to local and then to the same cloud route asks again.
@@ -208,12 +212,18 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
     static func settingsChecks(_ defaults: UserDefaults) {
         check(RouteSettings.load(from: defaults) == RouteSettings(), "missing settings load as local defaults")
         var settings = RouteSettings(); settings.transcription = .cloud; settings.cloudTranscriber = .geminiAudio
-        settings.cleanup = .localServer; settings.serverURL = "http://localhost:1234"; settings.serverModel = "qwen"
+        settings.cleanup = .customAPI; settings.customAPIBaseURL = "https://api.example.com/v1"; settings.customAPIModel = "qwen"
         settings.save(to: defaults)
         check(RouteSettings.load(from: defaults) == settings, "route settings round-trip")
+        defaults.set("cerebras", forKey: RouteSettings.Key.cleanup)
+        defaults.removeObject(forKey: RouteSettings.Key.customAPIBaseURL)
+        defaults.removeObject(forKey: RouteSettings.Key.customAPIModel)
+        let migrated = RouteSettings.load(from: defaults)
+        check(migrated.cleanup == .customAPI && migrated.customAPIBaseURL == "https://api.cerebras.ai/v1" && migrated.customAPIModel == "gpt-oss-120b", "legacy Cerebras route migrates to editable custom API settings")
+        check(RouteSettings.legacyCustomAPIKey(from: "openrouter") == .openrouter && RouteSettings.legacyCustomAPIKey(from: "local-server") == .localServer, "legacy custom-route keys migrate by provider")
         defaults.set("fireworks", forKey: RouteSettings.Key.cloudTranscriber)
         check(RouteSettings.load(from: defaults).cloudTranscriber == .geminiTranscribe, "unknown transcriber falls back to the default choice")
-        for key in [RouteSettings.Key.transcription, RouteSettings.Key.cloudTranscriber, RouteSettings.Key.cleanup, RouteSettings.Key.serverURL, RouteSettings.Key.serverModel] { defaults.removeObject(forKey: key) }
+        for key in [RouteSettings.Key.transcription, RouteSettings.Key.cloudTranscriber, RouteSettings.Key.cleanup, RouteSettings.Key.customAPIBaseURL, RouteSettings.Key.customAPIModel, RouteSettings.Key.legacyServerURL, RouteSettings.Key.legacyServerModel] { defaults.removeObject(forKey: key) }
     }
 
     // MARK: Audio
@@ -292,17 +302,19 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
 
     static func keyChecks() async {
         check(APIKey("sk bad 99") == nil && !KeyText.invalid.contains("sk bad 99"), "invalid key message does not echo input")
-        check(KeyText.providers == [.gemini, .openrouter, .cerebras, .localServer], "key rows")
+        check(KeyText.providers == [.gemini, .openrouter, .customAPI], "key rows")
         check("\(testKey)" == "APIKey(redacted)", "key is redacted when printed")
         let echo = HTTPResult(status: 401, body: Data("{\"error\":{\"message\":\"API key not valid: \(secret)\",\"code\":401}}".utf8))
-        for provider in [ProviderID.gemini, .openrouter, .localServer] {
-            let message = await KeyCheck.run(provider, key: testKey, serverURL: "http://localhost:11434", transport: MockTransport(echo))
+        for provider in [ProviderID.gemini, .openrouter, .localServer, .customAPI] {
+            let message = await KeyCheck.run(provider, key: testKey, apiBaseURL: "http://localhost:11434", transport: MockTransport(echo))
             check(!message.contains(secret) && message == ProviderError.authentication(provider).userMessage, "validate \(provider.rawValue) message has no key")
         }
         let ok = MockTransport(HTTPResult(status: 200, body: Data("{\"data\":[{\"id\":\"llama3.2\"}],\"object\":\"list\"}".utf8)))
-        await checkA(await KeyCheck.run(.gemini, key: testKey, serverURL: "", transport: ok) == KeyText.validated(.gemini), "validation success")
-        await checkA(await KeyCheck.run(.openrouter, key: nil, serverURL: "", transport: ok) == KeyText.missing, "validation needs a saved key")
-        await checkA(await KeyCheck.run(.localServer, key: nil, serverURL: "http://localhost:11434", transport: ok) == KeyText.validated(.localServer), "local server validates without a key")
+        await checkA(await KeyCheck.run(.gemini, key: testKey, apiBaseURL: "", transport: ok) == KeyText.validated(.gemini), "validation success")
+        await checkA(await KeyCheck.run(.openrouter, key: nil, apiBaseURL: "", transport: ok) == KeyText.missing, "validation needs a saved key")
+        await checkA(await KeyCheck.run(.customAPI, key: testKey, apiBaseURL: "https://api.example.com/v1", transport: ok) == KeyText.validated(.customAPI), "custom API validates its configured endpoint")
+        await checkA(await KeyCheck.run(.customAPI, key: nil, apiBaseURL: "https://api.example.com/v1", transport: ok) == KeyText.validated(.customAPI), "custom API validates without a key when the endpoint permits it")
+        await checkA(await KeyCheck.run(.localServer, key: nil, apiBaseURL: "http://localhost:11434", transport: ok) == KeyText.validated(.localServer), "local server validates without a key")
         let found = await KeyCheck.discoverModels(serverURL: "http://localhost:11434", key: nil, transport: ok)
         check((try? found.get()) == ["llama3.2"] && KeyCheck.discoveryMessage(found) == "Found 1 model.", "Find Models")
         let badURL = await KeyCheck.discoverModels(serverURL: "file:///etc", key: testKey)

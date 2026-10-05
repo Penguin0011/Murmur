@@ -6,7 +6,7 @@ Murmur is a macOS dictation app. Press a global shortcut, speak, and Murmur type
 
 Pre-release. Only development builds exist, and there is no signed or notarized download. [Certain]
 
-What works on the development Mac: shortcut → microphone → local model → insertion into the focused field, with recoverable history when insertion fails. [Certain] Cleanup, cloud providers, the custom dictionary, correction learning and update checks exist as checked modules but are not yet wired into the app. The model downloader is in progress; today the model folder is chosen manually. [Certain] See [HANDOFF.md](HANDOFF.md) for open issues and [PRD.md](PRD.md) for the full requirements.
+What works on the development Mac: shortcut → microphone → local model → insertion into the focused field, with recoverable history when insertion fails. Cleanup routes, cloud providers, API keys, the custom dictionary, correction learning and update checks are wired into the app; cloud requests still need validation with each user's provider key. [Certain] The model downloader is in progress; today the model folder is chosen manually. [Certain] See [HANDOFF.md](HANDOFF.md) for open issues and [PRD.md](PRD.md) for the full requirements.
 
 ## Requirements
 

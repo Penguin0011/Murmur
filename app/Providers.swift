@@ -147,6 +147,8 @@ enum ProviderError: Error, Equatable, Sendable, CustomStringConvertible, Localiz
             return "\(name) rejected the request (HTTP \(status)). Check the model setting."
         case .invalidConfiguration(let p) where p == .localServer:
             return "The local model server isn't set up. Check the server address (http or https, no user name or password) and the model name in Settings."
+        case .invalidConfiguration(let p) where p == .customAPI:
+            return "The custom API provider isn't set up. Check the API base URL, model name and key in Settings."
         case .invalidConfiguration:
             return "\(name) isn't set up. Add an API key and model in Settings."
         case .serverNotRunning(_, let address):

@@ -4,13 +4,14 @@ import Security
 #endif
 
 /// Providers that can hold a user-supplied API key. The raw value is the Keychain account name.
-/// `localServer` is a user-run OpenAI-compatible server (Ollama, LM Studio, llama-server, vLLM);
-/// its key is optional and it is on-device only when its address is loopback (see Providers.swift).
+/// `customAPI` uses the OpenAI-compatible chat completions format; `cerebras` and `localServer`
+/// remain for migration from older settings.
 enum ProviderID: String, CaseIterable, Codable, Sendable {
     case fireworks
     case gemini
     case openrouter
     case cerebras
+    case customAPI
     case localServer
 
     var displayName: String {
@@ -19,6 +20,7 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
         case .gemini: return "Gemini"
         case .openrouter: return "OpenRouter"
         case .cerebras: return "Cerebras"
+        case .customAPI: return "Custom API provider"
         case .localServer: return "Local model server"
         }
     }
