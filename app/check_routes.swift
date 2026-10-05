@@ -188,6 +188,12 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         DisclosureAcknowledgement.record(first, in: defaults)
         check(DisclosureAcknowledgement.pending(first, acknowledged: DisclosureAcknowledgement.acknowledged(defaults)).isEmpty, "acknowledged route needs no alert")
 
+        settings.cleanup = .gemini
+        let geminiCleanup = RoutePlan.make(settings, cleanupSendsText: true, key: all)
+        check(geminiCleanup.stages.contains { $0.disclosure.stage == .cleanup } &&
+              DisclosureAcknowledgement.pending(geminiCleanup, acknowledged: []).map(\.disclosure.stage) == [.transcription],
+              "Gemini cleanup disclosure is inline, without an alert")
+
         settings.cloudTranscriber = .geminiAudio
         let changed = RoutePlan.make(settings, cleanupSendsText: true, key: all)
         let pending = DisclosureAcknowledgement.pending(changed, acknowledged: DisclosureAcknowledgement.acknowledged(defaults))
@@ -198,10 +204,13 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         settings.cloudTranscriber = .openrouterWhisper; settings.cleanup = .customAPI; settings.customAPIModel = "m"
         settings.customAPIBaseURL = "http://10.0.0.5:8080"
         let endpoint = RoutePlan.make(settings, cleanupSendsText: true, key: all)
-        check(DisclosureAcknowledgement.pending(endpoint, acknowledged: DisclosureAcknowledgement.acknowledged(defaults)).map(\.disclosure.stage) == [.cleanup], "only the new stage is pending")
+        check(endpoint.stages.contains { $0.disclosure.stage == .cleanup } &&
+              DisclosureAcknowledgement.pending(endpoint, acknowledged: DisclosureAcknowledgement.acknowledged(defaults)).isEmpty,
+              "custom API cleanup disclosure is inline, without an alert")
         DisclosureAcknowledgement.record(endpoint, in: defaults)
         settings.customAPIBaseURL = "http://10.0.0.6:8080"
-        check(DisclosureAcknowledgement.pending(RoutePlan.make(settings, cleanupSendsText: true, key: all), acknowledged: DisclosureAcknowledgement.acknowledged(defaults)).count == 1, "endpoint change asks again")
+        check(DisclosureAcknowledgement.pending(RoutePlan.make(settings, cleanupSendsText: true, key: all), acknowledged: DisclosureAcknowledgement.acknowledged(defaults)).isEmpty,
+              "cleanup endpoint change does not open an alert")
 
         // Switching back to local and then to the same cloud route asks again.
         DisclosureAcknowledgement.record(RoutePlan.make(RouteSettings(), cleanupSendsText: true, key: all), in: defaults)

@@ -502,8 +502,6 @@ struct SettingsView: View {
             eyebrow("Cleanup runs with").padding(.top, 28)
             segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
-            help("Built-in local rules provide limited cleanup. Choose Gemini or configure any OpenAI-compatible chat-completions API, including hosted providers or a local server. Murmur never switches routes on its own.")
-                .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
             } else {

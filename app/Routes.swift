@@ -232,23 +232,20 @@ struct RoutePlan {
 
 // MARK: - Disclosure acknowledgement
 
-/// Stores the signatures of the stages the user confirmed. A stage needs confirmation when its
-/// signature is not stored: on first cloud use, and again whenever its route, provider or
-/// endpoint changes (switching away and back also asks again, since the stored set is replaced).
+/// Stores cloud-transcription confirmations. Cleanup disclosures are shown inline in Settings.
 enum DisclosureAcknowledgement {
     static func acknowledged(_ defaults: UserDefaults) -> Set<String> {
         Set(defaults.stringArray(forKey: RouteSettings.Key.acknowledged) ?? [])
     }
 
-    /// Stages the user has not confirmed yet. Empty means no alert is needed.
+    /// Transcription stages needing confirmation. Cleanup disclosures stay visible inline.
     static func pending(_ plan: RoutePlan, acknowledged: Set<String>) -> [DisclosureStage] {
-        plan.stages.filter { !acknowledged.contains($0.signature) }
+        plan.stages.filter { $0.disclosure.stage == .transcription && !acknowledged.contains($0.signature) }
     }
 
-    /// Replaces the stored set with exactly this plan's stages: call after confirmation, and on
-    /// Apply when nothing was pending, so a stage that was switched away from asks again later.
+    /// Replaces the stored set with this plan's transcription stages, so switching routes asks again.
     static func record(_ plan: RoutePlan, in defaults: UserDefaults) {
-        defaults.set(plan.signatures, forKey: RouteSettings.Key.acknowledged)
+        defaults.set(plan.stages.filter { $0.disclosure.stage == .transcription }.map(\.signature), forKey: RouteSettings.Key.acknowledged)
     }
 }
 
