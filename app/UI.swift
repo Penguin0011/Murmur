@@ -65,6 +65,11 @@ enum Logo {
     static func path(in size: CGSize) -> Path {
         Path { path in bars.forEach { path.addRect($0.applying(CGAffineTransform(scaleX: size.width / 96, y: size.height / 96))) } }
     }
+    /// Full-colour mark: bars stay literal ink on accent in both appearances.
+    static func mark(size: CGFloat) -> some View {
+        path(in: CGSize(width: size, height: size)).fill(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x14 / 255))
+            .frame(width: size, height: size).background(Palette.accent).accessibilityHidden(true)
+    }
     /// One-colour menu bar mark; the template tint follows the menu bar.
     static let menuBarImage: NSImage = {
         let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { rect in
@@ -294,7 +299,7 @@ struct SettingsView: View {
     private var header: some View {
         HStack(spacing: 32) {
             HStack(spacing: 12) {
-                Logo.path(in: CGSize(width: 24, height: 24)).fill(Palette.ink).frame(width: 24, height: 24).accessibilityHidden(true)
+                Logo.mark(size: 32)
                 wordmark("Murmur", size: 24)
             }
             HStack(spacing: 4) {
@@ -1039,9 +1044,7 @@ struct SettingsView: View {
                     .accessibilityElement(children: .combine).padding(.top, 16)
                     Text("Your voice, on your Mac.").font(.system(size: 18)).foregroundStyle(Palette.ink80).padding(.top, 20)
                     Spacer()
-                    // The full-colour mark: bars stay literal ink on accent in both appearances.
-                    Logo.path(in: CGSize(width: 140, height: 140)).fill(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x14 / 255))
-                        .frame(width: 140, height: 140).background(Palette.accent).accessibilityHidden(true)
+                    Logo.mark(size: 140).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 2)).rotationEffect(.degrees(-1.5))
                 }
                 .padding(40).frame(width: geometry.size.width * 5 / 12, alignment: .leading).frame(maxHeight: .infinity, alignment: .top)
                 .background(Palette.accent16)

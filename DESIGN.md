@@ -21,7 +21,7 @@ spacing:
 
 ## Colors
 
-**Logo.** Five bars fall from loud to quiet: ink on accent, with the accent square as the full stop. `Logo` (app/UI.swift) holds the bars on a 96-unit grid and draws the one-colour mark for the window header and the menu bar, and the full-colour mark (literal #141414 bars on accent) on the first-run panel (a template image, so it follows the menu bar tint). The app icon is `app/AppIcon.icns`, the rounded-square variant on the macOS 824-in-1024 grid; regenerate it with `swift app/tools/make_icon.swift`.
+**Logo.** Five bars fall from loud to quiet: ink on accent, with the accent square as the full stop. `Logo` (app/UI.swift) holds the bars on a 96-unit grid and draws the one-colour menu bar mark (a template image, so it follows the menu bar tint) and the full-colour mark (literal #141414 bars on accent) for the window header and, outlined in ink and tilted 1.5°, the first-run panel. The app icon is `app/AppIcon.icns`, the rounded-square variant on the macOS 824-in-1024 grid; regenerate it with `swift app/tools/make_icon.swift`.
 
 Window tokens live in `Palette` (app/UI.swift), copied from the clouddev design system: paper #F4F2ED, ink #141414 with 80/70/64/45/20% alphas, accent #5995C9 (fills, toggles, underlines, logo), accent-ink #2F6EA6 (accent text, 4.8:1 on paper), accent-deep #285F90 (pressed fills, tags) and accent at 16% (notes, tags, setup panel). Settings → General → Appearance switches the window between Light (default) and Dark, stored in UserDefaults as `appearance`. Dark swaps paper and ink and lifts accent-ink to #8DB6DC and accent-deep to #A9C8E6. Only the Murmur window changes: the floating indicator keeps following the system appearance.
 
@@ -31,7 +31,7 @@ System font in place of Archivo (not bundled): 36–56 pt bold with tight tracki
 
 ## Layout
 
-A 64 pt header holds the one-colour mark and wordmark (name plus accent square), Settings/History tabs with an accent underline, the transcription route and the current phase. Ink banners below it carry the status message (with Dismiss) and an unfinished-setup prompt. Settings is a 216 pt numbered sidebar (General, Transcription, Cleanup, Dictionary, History & Privacy, API Keys, Updates) beside a 640 pt content column. History groups transcripts by day; a row expands to its note, final and raw text, and Copy/Delete. First run is a 5:7 split: accent panel with the full-colour mark, then four numbered steps. The default window is 1000 × 680 pt, minimum 760 × 560.
+A 64 pt header holds the full-colour mark and wordmark (name plus accent square), Settings/History tabs with an accent underline, the transcription route and the current phase. Ink banners below it carry the status message (with Dismiss) and an unfinished-setup prompt. Settings is a 216 pt numbered sidebar (General, Transcription, Cleanup, Dictionary, History & Privacy, API Keys, Updates) beside a 640 pt content column. History groups transcripts by day; a row expands to its note, final and raw text, and Copy/Delete. First run is a 5:7 split: accent panel with the full-colour mark, then four numbered steps. The default window is 1000 × 680 pt, minimum 760 × 560.
 
 ## Shapes and controls
 
