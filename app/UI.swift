@@ -155,7 +155,7 @@ struct SettingsView: View {
         .modifier(AutoApplyGeneral(controller: controller))
         .modifier(AutoApplyRoutes(controller: controller, serverFieldFocused: serverFieldFocused))
         .onAppear {
-            controller.refreshPermissions(); controller.refreshHistory()
+            controller.refreshPermissions(); controller.refreshHistory(); controller.refreshInputDevices()
             if !checkedSetup { checkedSetup = true; if !setupComplete { screen = .setup } }
         }
         // Permissions are granted in System Settings; re-read them on return.
@@ -190,7 +190,7 @@ struct SettingsView: View {
     }
 
     private var microphonePicker: some View {
-        let devices = Capture.inputDevices()
+        let devices = controller.inputDevices
         let saved = controller.inputDeviceUID
         return VStack(alignment: .leading, spacing: 8) {
             Picker("Microphone", selection: $controller.inputDeviceUID) {

@@ -231,6 +231,9 @@ final class PreStart: @unchecked Sendable {
     @Published var showMenuBar: Bool
     /// CoreAudio UID of the chosen microphone; empty means the system default.
     @Published var inputDeviceUID: String
+    /// Connected microphones, cached: Settings re-renders with every voice-level tick.
+    @Published private(set) var inputDevices = Capture.inputDevices()
+    func refreshInputDevices() { inputDevices = Capture.inputDevices() }
     /// The system's login item state (SMAppService), not a stored setting; off until the user turns it on.
     @Published private(set) var openAtLogin = SMAppService.mainApp.status == .enabled
     @Published var permissionsSummary = ""
@@ -473,6 +476,9 @@ final class PreStart: @unchecked Sendable {
         refreshPermissions()
         if !preview { configureShortcut() }
         if !preview && updateChecksEnabled { runUpdateCheck(manual: false) }
+        for name in [AVCaptureDevice.wasConnectedNotification, AVCaptureDevice.wasDisconnectedNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.refreshInputDevices() } }
+        }
         // Returning from System Settings reactivates Murmur: re-check grants and start the shortcut once Input Monitoring is allowed.
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -961,7 +967,8 @@ final class PreStart: @unchecked Sendable {
         }
         // First-run test dictation: Murmur never types into itself, so show the result on the setup screen.
         if setupShowing && NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
-            setupTestTranscript = processed; setPhase("Ready", "Test dictation worked."); bubble.hide()
+            // ⌃⌘V still works if this flag was left on with no setup window visible.
+            setupTestTranscript = processed; uninserted = processed; setPhase("Ready", "Test dictation worked."); bubble.hide()
             destination = nil; historySaved(); done(); return
         }
         if insertThisSession {
