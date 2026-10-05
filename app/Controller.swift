@@ -309,9 +309,10 @@ final class PreStart: @unchecked Sendable {
     @Published var cleanupChoice: CleanupChoice
     @Published var customAPIBaseURL: String
     @Published var customAPIModel: String
+    @Published var customTranscriptionModel: String
     @Published var savedKeys: Set<ProviderID> = []
     @Published var keyMessages: [ProviderID: String] = [:]
-    var routeSettings: RouteSettings { RouteSettings(transcription: transcriptionRoute, cloudTranscriber: cloudTranscriber, cleanup: cleanupChoice, customAPIBaseURL: customAPIBaseURL, customAPIModel: customAPIModel) }
+    var routeSettings: RouteSettings { RouteSettings(transcription: transcriptionRoute, cloudTranscriber: cloudTranscriber, cleanup: cleanupChoice, customAPIBaseURL: customAPIBaseURL, customAPIModel: customAPIModel, customTranscriptionModel: customTranscriptionModel) }
     var appliedTranscriptionIsLocal: Bool { appliedRoutes.transcription == .local }
     var appliedCleanupIsLocal: Bool { appliedRoutes.cleanup == .localRules }
     /// What a stage would send off this Mac with the settings as edited, or nil when nothing leaves.
@@ -435,7 +436,7 @@ final class PreStart: @unchecked Sendable {
         updateChecksEnabled = processingSettings.updateChecksEnabled
         let routes = RouteSettings.load(from: defaults)
         transcriptionRoute = routes.transcription; cloudTranscriber = routes.cloudTranscriber; cleanupChoice = routes.cleanup
-        customAPIBaseURL = routes.customAPIBaseURL; customAPIModel = routes.customAPIModel; appliedRoutes = routes
+        customAPIBaseURL = routes.customAPIBaseURL; customAPIModel = routes.customAPIModel; customTranscriptionModel = routes.customTranscriptionModel; appliedRoutes = routes
         self.preview = preview
         let isolatedStorage = isolatedStorage ?? preview
         do {
@@ -637,7 +638,7 @@ final class PreStart: @unchecked Sendable {
     }
     private func revertRoutes() {
         transcriptionRoute = appliedRoutes.transcription; cloudTranscriber = appliedRoutes.cloudTranscriber; cleanupChoice = appliedRoutes.cleanup
-        customAPIBaseURL = appliedRoutes.customAPIBaseURL; customAPIModel = appliedRoutes.customAPIModel
+        customAPIBaseURL = appliedRoutes.customAPIBaseURL; customAPIModel = appliedRoutes.customAPIModel; customTranscriptionModel = appliedRoutes.customTranscriptionModel
     }
     private func routePlan(_ routes: RouteSettings, cleanupSendsText: Bool) -> RoutePlan {
         var refusal: String?
@@ -1275,7 +1276,7 @@ final class PreStart: @unchecked Sendable {
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
     }
     private func announceLearned(_ entry: DictionaryEntry) {
-        bubble.showLearned(entry.preferred, screen: destinationScreen) { [weak self] in self?.deleteDictionaryEntry(entry) }
+        bubble.showLearned(entry.preferred, screen: destinationScreen)
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: "Added \(entry.preferred) to your dictionary.", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
     private func stopWatching() {

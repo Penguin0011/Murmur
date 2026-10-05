@@ -497,13 +497,13 @@ enum Multipart {
 }
 
 enum OpenAITranscriptionFormat {
-    static func makeRequest(endpoint: URL, apiKey: APIKey, model: String, audio: AudioPayload, includePrompt: Bool, boundary: String) -> URLRequest {
+    static func makeRequest(endpoint: URL, apiKey: APIKey?, model: String, audio: AudioPayload, includePrompt: Bool, boundary: String) -> URLRequest {
         var fields: [(name: String, value: String)] = [("model", model), ("response_format", "json"), ("temperature", "0")]
         if let language = audio.language, !language.isEmpty { fields.append(("language", language)) }
         if includePrompt, let hint = audio.vocabularyHint, !hint.isEmpty { fields.append(("prompt", hint)) }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey.secret)", forHTTPHeaderField: "Authorization")
+        if let apiKey { request.setValue("Bearer \(apiKey.secret)", forHTTPHeaderField: "Authorization") }
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = Multipart.body(boundary: boundary, fields: fields, fileField: "file", filename: audio.filename, mimeType: audio.mimeType, fileData: audio.data)
@@ -675,6 +675,52 @@ struct OpenRouterTranscriptionProvider: TranscriptionProvider {
 
     func validate() async throws {
         let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15).execute(OpenRouterCleanupProvider.makeValidationRequest(apiKey: apiKey))
+        try validationResult(provider: id, result)
+    }
+}
+
+// MARK: - Custom OpenAI-compatible speech to text
+
+/// Uses the same endpoint validation and credential transport policy as custom cleanup.
+struct OpenAICompatibleTranscriptionProvider: TranscriptionProvider {
+    let server: OpenAICompatibleCleanupProvider
+    let id = ProviderID.customAPI
+    var transport: HTTPTransport = URLSessionTransport()
+    /// Conservative client upload cap; the configured server may impose a smaller one.
+    static let uploadLimitBytes = 25_000_000
+
+    init(baseURL: String, model: String, apiKey: APIKey? = nil) throws {
+        try OpenAICompatibleCleanupProvider.requireLocalModel(model, provider: .customAPI)
+        server = try OpenAICompatibleCleanupProvider(baseURL: baseURL, model: model, apiKey: apiKey, provider: .customAPI)
+    }
+
+    var endpoint: URL { URL(string: server.baseURL.absoluteString + "/v1/audio/transcriptions")! }
+    var disclosure: DataDisclosure {
+        switch server.locality {
+        case .onDevice:
+            return DataDisclosure(provider: id, stage: .transcription, destinationHost: server.address,
+                                  leavesDevice: [], staysOnDevice: ["the recorded audio", "the dictionary's spelling hints", "history"],
+                                  retentionNote: "Audio and spelling hints go only to the server on this Mac; its logging settings apply.")
+        case .leavesDevice(let host, let encrypted):
+            return DataDisclosure(provider: id, stage: .transcription, destinationHost: host,
+                                  leavesDevice: ["the recorded audio", "your dictionary's spellings as spelling hints"],
+                                  staysOnDevice: ["history", "other apps' text"],
+                                  retentionNote: "Retention depends on whoever runs the configured server.",
+                                  warning: encrypted ? nil : "Audio and spelling hints are sent over unencrypted http. Your API key is not sent; use https to send it.")
+        }
+    }
+
+    func makeRequest(_ audio: AudioPayload, boundary: String = Multipart.makeBoundary()) -> URLRequest {
+        OpenAITranscriptionFormat.makeRequest(endpoint: endpoint, apiKey: server.sendableKey, model: server.model,
+                                             audio: audio, includePrompt: true, boundary: boundary)
+    }
+    func transcribe(_ audio: AudioPayload) async throws -> String {
+        guard audio.data.count <= Self.uploadLimitBytes else { throw ProviderError.payloadTooLarge(id, limitBytes: Self.uploadLimitBytes) }
+        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 75).execute(makeRequest(audio))
+        return try OpenAITranscriptionFormat.parse(provider: id, result: result)
+    }
+    func validate() async throws {
+        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15).execute(server.makeGetRequest(server.modelsURL))
         try validationResult(provider: id, result)
     }
 }

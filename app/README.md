@@ -15,7 +15,7 @@ Idle errors have a Dismiss control. Dismissal hides status without deleting hist
 
 Settings show the current state above the scrollable form, model file availability, individual permission rows, and an always-visible Apply Settings button. Model availability checks file sizes; full checksums are verified before inference. History supports search, delivery status, initial selection, and recovery-entry selection. [Certain]
 
-Recording and processing use a compact standalone glass-dot voice indicator on a transparent background by default. Saved output and successful insertion show no popup; delivery status remains in History. Only errors show a compact clickable message and, when recovery audio exists, Audio. Clicking the popup opens the Dictation tab with the full error, even when History was selected. Dismiss and Audio have separate actions. [Certain]
+Recording and processing use a compact standalone glass-dot voice indicator on a transparent background by default. Saved output and successful insertion show no popup; delivery status remains in History. Only errors show a compact clickable message. Every floating popup is buttonless, including learned-word notices. Clicking an error opens Settings with the full error, even when History was selected. Retained audio is reachable through Settings → History & Privacy → Show Retained Audio; learned entries can be removed in Settings → Dictionary. [Certain]
 
 Corrupt or mismatched history files produce an error and prevent retention from silently skipping data; corruption at startup currently blocks dictation. Automatic repair/quarantine is not implemented. [Certain]
 
@@ -59,7 +59,7 @@ swiftc app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dic
 
 - `DictionaryStore` keeps `dictionary.json` (0600, directory 0700). `apply(to:)` replaces exact variants as whole words and space-separated phrases (case-insensitive, longest match, never fuzzy). It inserts the preferred spelling as stored, and capitalizes its first letter only at a sentence start when the spelling is all lowercase. `relevantEntries(for:)` returns the entries present in the text, plus up to 10 whose preferred spelling sounds like a 1–3 word span (`DictionaryStore.soundsLike`: matching phonetic keys and similarity ≥ 0.5, or similarity ≥ 0.75 for terms of 6+ letters). That is what a cloud stage may receive. Near matches only feed the cleanup prompt and the guard, which then accepts the term in place of 1–3 sound-alike words; `apply` never uses them.
 - Transcription: cloud transcription gets `vocabularyTerms` (every enabled preferred spelling, manual first) as the vocabulary hint; Gemini 3.5 Transcribe and Gemini audio use it, OpenRouter Whisper does not. On-device transcription uses it through dictionary support (below).
-- `CorrectionLedger` keeps `ledger.json` with short source/target strings only. The flow per session is `record` (provisional) while the window is open, then `settle` when it closes; `revert` undoes. One settled session adds the target as a vocabulary hint (learned entry, no variants); a second consistent session (case-folded) adds the source as a variant of that entry, so a second mishearing of the same spelling joins the same entry. A tombstoned target is never learned again from any source. The app shows "Added … to dictionary" with Undo (deletes and tombstones) when a new entry is learned. A conflicting target suppresses the source until `reset()`. A deleted learned entry is tombstoned and its evidence cleared. With learning off, nothing is recorded.
+- `CorrectionLedger` keeps `ledger.json` with short source/target strings only. The flow per session is `record` (provisional) while the window is open, then `settle` when it closes; `revert` undoes. One settled session adds the target as a vocabulary hint (learned entry, no variants); a second consistent session (case-folded) adds the source as a variant of that entry, so a second mishearing of the same spelling joins the same entry. A tombstoned target is never learned again from any source. The app shows a buttonless "Added … to dictionary" notice when a new entry is learned; deleting it in Settings → Dictionary removes it and tombstones the spelling. A conflicting target suppresses the source until `reset()`. A deleted learned entry is tombstoned and its evidence cleared. With learning off, nothing is recorded.
 - `Retention.swift` covers the 50 MB history cap (drop oldest first; Forever warns via `HistoryCapStatus`), the history-off disclosure, and `DataWipe.deleteAllData`. Six-month and 30-day expiry stay in `HistoryStore`.
 
 **Dictionary support in on-device transcription.** Settings → Dictionary offers an optional download of the pinned Parakeet CTC 110M model (`FluidInference/parakeet-ctc-110m-coreml`, 12 files, 103 MB, CC-BY-4.0). It goes to FluidAudio's own folder, `~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml`, because FluidAudio's rescorer reads the CTC tokenizer only from there. That folder may be shared with other FluidAudio apps, so it is hash-verified before every use (`ModelVerificationCache`, per folder) and skipped, never fatal, when it does not match. [Certain]
@@ -109,10 +109,12 @@ app/check_ui.sh
 app/check_ui.sh --light
 app/check_ui.sh --light --compact --opaque
 app/check_ui.sh --bubble-only
+app/check_ui.sh --credential-warning --recovery --bubble-only
 app/check_ui.sh --listening --bubble-only
 app/check_ui.sh --processing --bubble-only
 app/check_ui.sh --saved --bubble-only
-app/check_ui.sh --saved --learned --bubble-only
+app/check_ui.sh --saved --learned --keep-notice --bubble-only
+app/check_ui.sh --custom-transcription
 app/check_ui.sh --light --dictionary
 ```
 
@@ -257,7 +259,7 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 ```
 
 **Settings → Processing routes (R4).** Routes take effect on Apply Settings. The settings keys are `transcriptionRoute`, `cloudTranscriber`, `cleanupChoice`, `customAPIBaseURL` and `customAPIModel`. Keys are never stored in UserDefaults.
-- Transcription: On this Mac (Parakeet, the default) or Cloud. The cloud picker lists only implemented, non-deprecated providers: OpenRouter Whisper (`OpenRouterTranscriptionProvider`) and Gemini audio (`GeminiTranscriptionProvider`, a language model). Fireworks is not listed. `makeTranscriptionProvider(id:key:)` is the single factory. To add Gemini 3.5 Transcribe, add a `CloudTranscriber` case (with `displayName` and `providerID` `.gemini`) and one factory case; its own `disclosure` must say that Google stores the audio (PRD §5 user decision).
+- Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini audio, Gemini 3.5 Transcribe, and Custom Provider. The custom route uses an editable OpenAI-compatible base URL and transcription model, posting multipart audio and spelling hints to `/v1/audio/transcriptions`; it shares the endpoint and destination-bound key with custom cleanup, whose model name remains separate. The request format follows the [OpenAI transcription reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create). A compatible server must implement that format; arbitrary audio APIs are not supported. Legacy OpenRouter selections migrate to editable custom settings, with fresh disclosure acknowledgement and one-time key confirmation. [Certain]
 - Cleanup: Local rules (the default), Gemini or a Custom API provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. Add its optional key under Cleanup beside the endpoint. OpenRouter remains available as a dedicated transcription choice and can also be configured as a custom cleanup endpoint.
 
 **A dictation on a cloud route.**

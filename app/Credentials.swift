@@ -20,7 +20,7 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
         case .gemini: return "Gemini"
         case .openrouter: return "OpenRouter"
         case .cerebras: return "Cerebras"
-        case .customAPI: return "Custom API provider"
+        case .customAPI: return "Custom Provider"
         case .localServer: return "Local model server"
         }
     }

@@ -1,3 +1,11 @@
+# Buttonless popups and Custom Provider — October 5, 2026
+
+Removed Audio and Undo from floating popups. All error messages share the buttonless view; clicking the message still opens Settings with full details. Listening and processing have no controls, and saved/inserted states show no popup. Retained audio is accessible in Settings → History & Privacy; learned entries remain removable in Dictionary. Native screenshots/AX checks covered error, learned-word, listening, and processing popups, plus error-detail navigation and the recovery control. [Certain]
+
+API Keys, Cleanup, and cloud Transcription now use Custom Provider instead of a separate OpenRouter option. Custom transcription posts OpenAI-compatible multipart audio/spelling hints to the chosen base URL's `/v1/audio/transcriptions`. The server address and destination-bound key are shared with custom cleanup; model names are separate. OpenRouter selections migrate to editable custom settings, with a migrated key left unbound and a fresh transcription acknowledgement required. Port/path changes also require new acknowledgement. [Certain]
+
+Checks passed: providers 604, routes 121, native controller, and real HTTP redirect/limit/cancellation checks. The signed production build through `d7b952f` replaced `/Users/aakash/Applications/Murmur.app`; installed executable SHA-256 `340e35c1703f33347be10d6ee93e624b07cca022b69754cd145d063ee7770f61`. Backup: `/Users/aakash/Applications/Murmur-backups/20261005-130745/Murmur.app`. Quit normally after observing Ready, relaunched, and verified Ready, all three permissions allowed, Custom Provider in API Keys, and all 272 history filenames preserved. The existing custom key still needs its one-time save; no real key was read or live custom-provider request sent. [Certain]
+
 # Security/privacy fixes and installation — October 5, 2026
 
 Implemented the audit's credential, redirect, deletion, temporary-output, learning, retention, signing, and disclosure changes; details and remaining limits are in `security_best_practices_report.md`. Custom keys require saving again when unbound or when the normalized destination changes. Strict readable-field learning is opt-in, preserving the approved fallback by default. Delete All Data also removes abandoned audio chunks. [Certain]

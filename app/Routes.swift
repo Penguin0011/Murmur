@@ -29,8 +29,8 @@ enum TranscriptionRoute: String, CaseIterable, Sendable {
 /// To add a provider, add a case here, a `displayName` and `providerID`, and one case in
 /// `makeTranscriptionProvider(id:key:)`.
 enum CloudTranscriber: String, CaseIterable, Identifiable, Sendable {
-    /// OpenRouter `audio/transcriptions` (Whisper large v3 turbo). True ASR.
-    case openrouterWhisper = "openrouter-whisper"
+    /// A user-configured OpenAI-compatible audio transcription endpoint.
+    case customAPI = "custom-api"
     /// Gemini `generateContent` with inline audio: a language model asked to transcribe.
     case geminiAudio = "gemini-audio"
     /// Gemini 3.5 Transcribe via the Interactions API: a dedicated speech model. Google stores
@@ -41,7 +41,7 @@ enum CloudTranscriber: String, CaseIterable, Identifiable, Sendable {
 
     var displayName: String {
         switch self {
-        case .openrouterWhisper: return "OpenRouter Whisper (speech recognition)"
+        case .customAPI: return "Custom Provider"
         case .geminiAudio: return "Gemini audio (language model)"
         case .geminiTranscribe: return "Gemini 3.5 Transcribe (speech recognition, stored by Google)"
         }
@@ -50,17 +50,18 @@ enum CloudTranscriber: String, CaseIterable, Identifiable, Sendable {
     /// The Keychain account that holds this transcriber's key.
     var providerID: ProviderID {
         switch self {
-        case .openrouterWhisper: return .openrouter
+        case .customAPI: return .customAPI
         case .geminiAudio, .geminiTranscribe: return .gemini
         }
     }
 }
 
-/// The one place a cloud transcriber is constructed. Nil when no key is available.
-func makeTranscriptionProvider(id: CloudTranscriber, key: APIKey?) -> TranscriptionProvider? {
+/// The one place a cloud transcriber is constructed. Custom servers may not require a key.
+func makeTranscriptionProvider(id: CloudTranscriber, key: APIKey?, apiBaseURL: String = RouteSettings.defaultCustomAPIURL, model: String = "whisper-1") -> TranscriptionProvider? {
+    if id == .customAPI { return try? OpenAICompatibleTranscriptionProvider(baseURL: apiBaseURL, model: model, apiKey: key) }
     guard let key else { return nil }
     switch id {
-    case .openrouterWhisper: return OpenRouterTranscriptionProvider(apiKey: key)
+    case .customAPI: return nil // Handled above; custom endpoints may not require a key.
     case .geminiAudio: return GeminiTranscriptionProvider(apiKey: key)
     case .geminiTranscribe:
         var provider = GeminiTranscribeProvider(apiKey: key)
@@ -81,7 +82,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .localRules: return "Local rules (this Mac)"
         case .gemini: return "Gemini"
-        case .customAPI: return "Custom API provider"
+        case .customAPI: return "Custom Provider"
         }
     }
 
@@ -119,6 +120,7 @@ struct RouteSettings: Equatable, Sendable {
     var cleanup: CleanupChoice = .localRules
     var customAPIBaseURL: String = RouteSettings.defaultCustomAPIURL
     var customAPIModel: String = RouteSettings.defaultCustomAPIModel
+    var customTranscriptionModel: String = "whisper-1"
 
     enum Key {
         static let transcription = "transcriptionRoute"
@@ -126,6 +128,7 @@ struct RouteSettings: Equatable, Sendable {
         static let cleanup = "cleanupChoice"
         static let customAPIBaseURL = "customAPIBaseURL"
         static let customAPIModel = "customAPIModel"
+        static let customTranscriptionModel = "customTranscriptionModel"
         static let legacyServerURL = "localServerURL"
         static let legacyServerModel = "localServerModel"
         static let acknowledged = "acknowledgedCloudRoutes"
@@ -142,7 +145,8 @@ struct RouteSettings: Equatable, Sendable {
 
     /// Persist migration only after copying the selected route's key, so failure can be retried.
     static func migrateCustomAPI(in defaults: UserDefaults, credentials: CredentialStore) throws {
-        guard let legacy = legacyCustomAPIKey(from: defaults.string(forKey: Key.cleanup)) else { return }
+        guard let legacy = legacyCustomAPIKey(from: defaults.string(forKey: Key.cleanup)) ??
+            (defaults.string(forKey: Key.cloudTranscriber) == "openrouter-whisper" ? .openrouter : nil) else { return }
         if !credentials.exists(.customAPI), let key = try credentials.read(legacy) {
             // Old keys have no destination proof; edited preferences must not silently approve them.
             defaults.removeObject(forKey: CustomAPIKeyBinding.preference)
@@ -155,7 +159,9 @@ struct RouteSettings: Equatable, Sendable {
     static func load(from defaults: UserDefaults) -> RouteSettings {
         var settings = RouteSettings()
         settings.transcription = defaults.string(forKey: Key.transcription).flatMap(TranscriptionRoute.init(rawValue:)) ?? .local
-        settings.cloudTranscriber = defaults.string(forKey: Key.cloudTranscriber).flatMap(CloudTranscriber.init(rawValue:)) ?? .geminiTranscribe
+        let legacyTranscription = defaults.string(forKey: Key.cloudTranscriber) == "openrouter-whisper"
+        settings.cloudTranscriber = legacyTranscription ? .customAPI : defaults.string(forKey: Key.cloudTranscriber).flatMap(CloudTranscriber.init(rawValue:)) ?? .geminiTranscribe
+        settings.customTranscriptionModel = defaults.string(forKey: Key.customTranscriptionModel) ?? (legacyTranscription ? OpenRouterTranscriptionProvider.defaultModel : "whisper-1")
         let oldChoice = defaults.string(forKey: Key.cleanup)
         settings.cleanup = oldChoice.flatMap(CleanupChoice.init(rawValue:)) ?? (legacyCustomAPIKey(from: oldChoice) == nil ? .localRules : .customAPI)
         settings.customAPIBaseURL = defaults.string(forKey: Key.customAPIBaseURL) ?? {
@@ -163,7 +169,7 @@ struct RouteSettings: Equatable, Sendable {
             case "cerebras": return "https://api.cerebras.ai/v1"
             case "openrouter": return "https://openrouter.ai/api/v1"
             case "local-server": return defaults.string(forKey: Key.legacyServerURL) ?? OpenAICompatibleCleanupProvider.ollamaDefault
-            default: return defaultCustomAPIURL
+            default: return legacyTranscription ? "https://openrouter.ai/api/v1" : defaultCustomAPIURL
             }
         }()
         settings.customAPIModel = defaults.string(forKey: Key.customAPIModel) ?? {
@@ -183,6 +189,7 @@ struct RouteSettings: Equatable, Sendable {
         defaults.set(cleanup.rawValue, forKey: Key.cleanup)
         defaults.set(customAPIBaseURL, forKey: Key.customAPIBaseURL)
         defaults.set(customAPIModel, forKey: Key.customAPIModel)
+        defaults.set(customTranscriptionModel, forKey: Key.customTranscriptionModel)
     }
 }
 
@@ -246,10 +253,11 @@ struct RoutePlan {
         var transcriber: TranscriptionProvider?
         if settings.transcription == .cloud {
             let choice = settings.cloudTranscriber
-            transcriber = makeTranscriptionProvider(id: choice, key: key(choice.providerID))
+            transcriber = makeTranscriptionProvider(id: choice, key: key(choice.providerID), apiBaseURL: settings.customAPIBaseURL, model: settings.customTranscriptionModel)
             if transcriber == nil { refusal = ProviderError.invalidConfiguration(choice.providerID).userMessage }
-            if let disclosure = (transcriber ?? makeTranscriptionProvider(id: choice, key: placeholderKey))?.disclosure, !disclosure.staysOnThisMac {
-                stages.append(DisclosureStage(signature: "transcription=\(choice.rawValue)@\(disclosure.destinationHost)", disclosure: disclosure))
+            if let disclosure = (transcriber ?? makeTranscriptionProvider(id: choice, key: placeholderKey, apiBaseURL: settings.customAPIBaseURL, model: settings.customTranscriptionModel))?.disclosure, !disclosure.staysOnThisMac {
+                let destination = choice == .customAPI ? ((try? CustomAPIKeyBinding.endpoint(settings.customAPIBaseURL)) ?? disclosure.destinationHost) : disclosure.destinationHost
+                stages.append(DisclosureStage(signature: "transcription=\(choice.rawValue)@\(destination)", disclosure: disclosure))
             }
         }
         var cleaner: CleanupProvider?
@@ -544,8 +552,8 @@ enum KeyText {
     static let missing = "Save a key first."
     static let unreadable = "The saved key could not be read from the Keychain."
 
-    /// OpenRouter remains available for speech transcription; custom cleanup uses its own key.
-    static let providers: [ProviderID] = [.gemini, .openrouter, .customAPI]
+    /// Only active provider credentials appear in Settings; legacy accounts remain available for migration.
+    static let providers: [ProviderID] = [.gemini, .customAPI]
 
     static func validated(_ provider: ProviderID) -> String {
         provider == .localServer ? "The local model server answered." : provider == .customAPI ? "The custom API endpoint answered." : "\(provider.displayName) accepted the key."

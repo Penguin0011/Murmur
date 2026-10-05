@@ -20,6 +20,10 @@ import SwiftUI
         item.submenu = appMenu; menu.addItem(item); menu.addItem(standardEditMenuItem()); application.mainMenu = menu
         application.appearance = NSAppearance(named: CommandLine.arguments.contains("--light") ? .aqua : .darkAqua)
         let controller = AppController(preview: true)
+        if CommandLine.arguments.contains("--custom-transcription") {
+            controller.transcriptionRoute = .cloud
+            controller.cloudTranscriber = .customAPI
+        }
         delegate.controller = controller
         let compact = CommandLine.arguments.contains("--compact")
         let opaque = CommandLine.arguments.contains("--opaque")
@@ -46,9 +50,17 @@ import SwiftUI
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
-            controller.message = "Model verification failed. Choose the pinned model folder."
+            controller.message = CommandLine.arguments.contains("--credential-warning")
+                ? "Save the API key again for this server address."
+                : "Model verification failed. Choose the pinned model folder."
+            if CommandLine.arguments.contains("--recovery") { controller.hasRecoveryAudio = true }
             controller.bubble.show(phase: controller.phase, message: controller.message)
-            if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", screen: nil) { print("Undo pressed."); fflush(stdout) } }
+            if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", screen: nil) }
+            if CommandLine.arguments.contains("--keep-notice") {
+                Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
+                    MainActor.assumeIsolated { controller.bubble.showLearned("Aakash", screen: nil) }
+                }
+            }
             if CommandLine.arguments.contains("--bubble-only") { window.orderOut(nil) }
             print("Fixture content: \(window.contentLayoutRect.size), full window: \(window.frame.size)"); fflush(stdout)
         }
