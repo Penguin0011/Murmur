@@ -1,3 +1,9 @@
+# Local insertion update installed — October 5, 2026
+
+Installed application code through `5ea3ce5` from `aakash-insertion-behavior` at `/Users/aakash/Applications/Murmur.app`. The installed executable matches the tested build: SHA-256 `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`. Deep/strict signature verification passed. Quit the previous app normally after observing Ready; backed it up at `/Users/aakash/Applications/Murmur-backups/20261005-132505/Murmur.app` before replacement. All 279 history filenames remained identical across installation. Relaunch showed Ready, new paste-last help text, and Microphone, Accessibility, and Input Monitoring allowed. The app remains running normally. [Certain]
+
+The user requested a next-agent verification file and explicitly requested PR creation and merging after that review. Follow [VISUAL_VERIFICATION.md](VISUAL_VERIFICATION.md) for the full visual/delivery/clipboard/recovery matrix, evidence requirements, remaining compatibility risks, and required PR/merge/final-install steps. This installation did not add live microphone, provider, or cross-app delivery evidence. [Certain]
+
 # Insertion behavior review — October 5, 2026
 
 Posted pastes now return quietly to Ready, with a completion announcement for assistive technology. History hides verified/unverified badges and excludes unverified entries from Needs attention, while preserving diagnostic evidence in records/logs. Explicit paste-last recovery retains verified text and survives later unsuccessful recordings; deleting the matching transcript clears its paste/setup buffers after successful storage deletion. Manual paste now checks Accessibility permission, secure-field metadata, Secure Input, and app/field/window identity. [Certain]
