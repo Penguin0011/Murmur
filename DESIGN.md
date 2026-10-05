@@ -21,7 +21,7 @@ spacing:
 
 ## Colors
 
-**Logo.** Five bars fall from loud to quiet: ink on accent, with the accent square as the full stop. `Logo` (app/UI.swift) holds the bars on a 96-unit grid and draws the one-colour menu bar mark (a template image, so it follows the menu bar tint) and the full-colour mark (literal #141414 bars on accent) for the window header and, outlined in ink and tilted 1.5°, the first-run panel. The app icon is `app/AppIcon.icns`, the rounded-square variant on the macOS 824-in-1024 grid; regenerate it with `swift app/tools/make_icon.swift`.
+**Logo.** Five bars rise and fall like a voice, loud and soft in turn: ink on accent, with the accent square as the full stop. `Logo` (app/UI.swift) holds the bars on a 96-unit grid and draws the one-colour menu bar mark (a template image, so it follows the menu bar tint) and the full-colour mark (literal #141414 bars on accent) for the window header and, outlined in ink and tilted 1.5°, the first-run panel. The app icon is `app/AppIcon.icns`, the rounded-square variant on the macOS 824-in-1024 grid; regenerate it with `swift app/tools/make_icon.swift`.
 
 Window tokens live in `Palette` (app/UI.swift), copied from the clouddev design system: paper #F4F2ED, ink #141414 with 80/70/64/45/20% alphas, accent #5995C9 (fills, toggles, underlines, logo), accent-ink #2F6EA6 (accent text, 4.8:1 on paper), accent-deep #285F90 (pressed fills, tags) and accent at 16% (notes, tags, setup panel). Settings → General → Appearance switches the window between Light (default) and Dark, stored in UserDefaults as `appearance`. Dark swaps paper and ink and lifts accent-ink to #8DB6DC and accent-deep to #A9C8E6. Only the Murmur window changes: the floating indicator keeps following the system appearance.
 
