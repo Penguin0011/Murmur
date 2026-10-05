@@ -620,7 +620,18 @@ final class PreStart: @unchecked Sendable {
         customAPIBaseURL = appliedRoutes.customAPIBaseURL; customAPIModel = appliedRoutes.customAPIModel
     }
     private func routePlan(_ routes: RouteSettings, cleanupSendsText: Bool) -> RoutePlan {
-        RoutePlan.make(routes, cleanupSendsText: cleanupSendsText) { try? self.credentials.read($0) }
+        var refusal: String?
+        let plan = RoutePlan.make(routes, cleanupSendsText: cleanupSendsText) { provider in
+            do {
+                return try provider == .customAPI
+                    ? CustomAPIKeyBinding.read(at: routes.customAPIBaseURL, defaults: .standard, credentials: self.credentials)
+                    : self.credentials.read(provider)
+            } catch {
+                refusal = (error as? CredentialError)?.description ?? KeyText.unreadable
+                return nil
+            }
+        }
+        return RoutePlan(transcriber: plan.transcriber, cleaner: refusal == nil ? plan.cleaner : nil, refusal: refusal ?? plan.refusal, stages: plan.stages)
     }
     private func configureShortcut() {
         removeShortcut()
@@ -1441,17 +1452,29 @@ final class PreStart: @unchecked Sendable {
     @discardableResult
     func saveKey(_ provider: ProviderID, _ raw: String) -> Bool {
         guard let key = APIKey(raw) else { keyMessages[provider] = KeyText.invalid; return false }
-        do { try credentials.save(key, for: provider); keyMessages[provider] = KeyText.saved }
+        do {
+            if provider == .customAPI { try CustomAPIKeyBinding.save(key, at: customAPIBaseURL, defaults: .standard, credentials: credentials) }
+            else { try credentials.save(key, for: provider) }
+            keyMessages[provider] = KeyText.saved
+        }
         catch { keyMessages[provider] = KeyText.storeFailed; return false }
         refreshKeys(); return true
     }
     func removeKey(_ provider: ProviderID) {
-        do { try credentials.delete(provider); keyMessages[provider] = KeyText.removed } catch { keyMessages[provider] = KeyText.removeFailed }
+        do {
+            try credentials.delete(provider)
+            if provider == .customAPI { UserDefaults.standard.removeObject(forKey: CustomAPIKeyBinding.preference) }
+            keyMessages[provider] = KeyText.removed
+        } catch { keyMessages[provider] = KeyText.removeFailed }
         refreshKeys()
     }
     func validateKey(_ provider: ProviderID) {
         let key: APIKey?
-        do { key = try credentials.read(provider) } catch { keyMessages[provider] = KeyText.unreadable; return }
+        do {
+            key = try provider == .customAPI
+                ? CustomAPIKeyBinding.read(at: customAPIBaseURL, defaults: .standard, credentials: credentials)
+                : credentials.read(provider)
+        } catch { keyMessages[provider] = (error as? CredentialError)?.description ?? KeyText.unreadable; return }
         keyMessages[provider] = KeyText.checking
         let endpoint = customAPIBaseURL
         Task { @MainActor [weak self] in

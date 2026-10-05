@@ -310,6 +310,21 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
     // MARK: Keys
 
     static func keyChecks() async {
+        let bindingSuite = "murmur-key-binding-" + UUID().uuidString
+        let binding = UserDefaults(suiteName: bindingSuite)!
+        defer { binding.removePersistentDomain(forName: bindingSuite) }
+        let boundKeys = InMemoryCredentialStore([.customAPI: testKey])
+        do { _ = try CustomAPIKeyBinding.read(at: "https://first.example/v1", defaults: binding, credentials: boundKeys); check(false, "unbound keys must not leave") }
+        catch { check(error as? CredentialError == .destinationMismatch, "legacy unbound key refuses") }
+        try! CustomAPIKeyBinding.save(testKey, at: "https://FIRST.example:443/v1/", defaults: binding, credentials: boundKeys)
+        check((try? CustomAPIKeyBinding.read(at: "https://first.example/v1", defaults: binding, credentials: boundKeys)) == testKey, "normalized destination accepts its key")
+        for address in ["https://second.example/v1", "http://first.example/v1", "https://first.example:8443/v1", "https://first.example/tenant/v1"] {
+            do { _ = try CustomAPIKeyBinding.read(at: address, defaults: binding, credentials: boundKeys); check(false, "changed destination must not reuse key") }
+            catch { check(error as? CredentialError == .destinationMismatch, "host, scheme, port and path changes refuse") }
+        }
+        let relaunched = UserDefaults(suiteName: bindingSuite)!
+        check((try? CustomAPIKeyBinding.read(at: "https://first.example/v1", defaults: relaunched, credentials: boundKeys)) == testKey, "binding survives relaunch")
+        check(!binding.dictionaryRepresentation().values.map { "\($0)" }.joined().contains(secret), "binding stores no secret")
         check(APIKey("sk bad 99") == nil && !KeyText.invalid.contains("sk bad 99"), "invalid key message does not echo input")
         check(KeyText.providers == [.gemini, .openrouter, .customAPI], "key rows")
         let migration = UserDefaults(suiteName: "murmur-migration-" + UUID().uuidString)!

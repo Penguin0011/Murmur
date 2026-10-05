@@ -51,11 +51,13 @@ struct APIKey: Equatable, Sendable, CustomStringConvertible, CustomDebugStringCo
 enum CredentialError: Error, Equatable, CustomStringConvertible {
     case keychain(status: Int32)
     case unreadableItem
+    case destinationMismatch
 
     var description: String {
         switch self {
         case .keychain(let status): return "Keychain operation failed (status \(status))."
         case .unreadableItem: return "The stored API key could not be read."
+        case .destinationMismatch: return "Save the API key again for this server address. The existing key is for another or unconfirmed destination."
         }
     }
 }

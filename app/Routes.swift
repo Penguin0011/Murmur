@@ -144,7 +144,7 @@ struct RouteSettings: Equatable, Sendable {
     static func migrateCustomAPI(in defaults: UserDefaults, credentials: CredentialStore) throws {
         guard let legacy = legacyCustomAPIKey(from: defaults.string(forKey: Key.cleanup)) else { return }
         if !credentials.exists(.customAPI), let key = try credentials.read(legacy) {
-            try credentials.save(key, for: .customAPI)
+            try CustomAPIKeyBinding.save(key, at: load(from: defaults).customAPIBaseURL, defaults: defaults, credentials: credentials)
         }
         load(from: defaults).save(to: defaults)
     }
@@ -181,6 +181,32 @@ struct RouteSettings: Equatable, Sendable {
         defaults.set(cleanup.rawValue, forKey: Key.cleanup)
         defaults.set(customAPIBaseURL, forKey: Key.customAPIBaseURL)
         defaults.set(customAPIModel, forKey: Key.customAPIModel)
+    }
+}
+
+/// Only the endpoint identifier lives in preferences; the secret stays in the Keychain.
+enum CustomAPIKeyBinding {
+    static let preference = "customAPIKeyEndpoint"
+
+    static func endpoint(_ raw: String) throws -> String {
+        let url = try LocalEndpoint.normalize(raw)
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        if components.port == (components.scheme == "https" ? 443 : 80) { components.port = nil }
+        return components.string!
+    }
+
+    static func save(_ key: APIKey, at address: String, defaults: UserDefaults, credentials: CredentialStore) throws {
+        let destination = try endpoint(address)
+        // Fail closed if replacing a key fails partway through: never keep the old binding.
+        defaults.removeObject(forKey: preference)
+        try credentials.save(key, for: .customAPI)
+        defaults.set(destination, forKey: preference)
+    }
+
+    static func read(at address: String, defaults: UserDefaults, credentials: CredentialStore) throws -> APIKey? {
+        guard credentials.exists(.customAPI) else { return nil }
+        guard defaults.string(forKey: preference) == (try endpoint(address)) else { throw CredentialError.destinationMismatch }
+        return try credentials.read(.customAPI)
     }
 }
 
