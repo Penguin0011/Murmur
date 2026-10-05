@@ -615,6 +615,10 @@ final class PreStart: @unchecked Sendable {
         defaults.set(inputDeviceUID, forKey: "inputDeviceUID"); Capture.preferredInputUID = inputDeviceUID.isEmpty ? nil : inputDeviceUID
         defaults.set(retention, forKey: "retention")
         if let processing {
+            if !learningEnabled || (learningRequiresReadableField && watch?.keys != nil) {
+                if let watch { try? processing.ledger.revert(sessionID: watch.observation.sessionID) }
+                stopWatching()
+            }
             var next = processing.settings
             next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation)
             next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
@@ -624,6 +628,7 @@ final class PreStart: @unchecked Sendable {
         }
         // Also saved directly, so they persist when the dictionary (and so processing) is unavailable.
         defaults.set(historyMode.rawValue, forKey: ProcessingSettings.Key.historyMode)
+        defaults.set(learningRequiresReadableField, forKey: ProcessingSettings.Key.readableLearning)
         defaults.set(updateChecksEnabled, forKey: ProcessingSettings.Key.updateChecks)
         do { try store?.purge(retention: appliedRetention); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }
