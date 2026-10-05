@@ -1,3 +1,9 @@
+# PR #19 review — October 5, 2026
+
+Reviewed the configurable Custom API cleanup change with the ponytail skill. Resolved conflicts by retaining main's newer release and local-model documentation. Fixed credential migration: only the selected legacy route is copied, and successful migration saves the new route once; removing the Custom API key no longer restores an old Cerebras key on restart. OpenRouter transcription keeps its own credential. Updated the cleanup help text to match the new choices. [Certain]
+
+Validation: provider checks passed (581 assertions), route checks passed (103, including migration/relaunch regressions), and update checks passed (91). Native controller check and signed local build are in progress. These checks use synthetic inputs and mocked HTTP; no new live provider, human speech, or insertion claim is made. [Certain]
+
 # Project completion review — October 4, 2026
 
 Branch `aakash/remaining-gaps` (from `main` at `d6960df`). The user asked what is left and for autonomous work. This section is updated as work lands. [Certain]

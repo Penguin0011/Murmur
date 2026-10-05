@@ -312,6 +312,18 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
     static func keyChecks() async {
         check(APIKey("sk bad 99") == nil && !KeyText.invalid.contains("sk bad 99"), "invalid key message does not echo input")
         check(KeyText.providers == [.gemini, .openrouter, .customAPI], "key rows")
+        let migration = UserDefaults(suiteName: "murmur-migration-" + UUID().uuidString)!
+        defer { for key in [RouteSettings.Key.cleanup, RouteSettings.Key.customAPIBaseURL, RouteSettings.Key.customAPIModel, RouteSettings.Key.transcription, RouteSettings.Key.cloudTranscriber] { migration.removeObject(forKey: key) } }
+        let keys = InMemoryCredentialStore([.cerebras: testKey, .openrouter: testKey])
+        migration.set("custom-api", forKey: RouteSettings.Key.cleanup)
+        try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
+        check(!keys.exists(.customAPI), "unselected legacy Cerebras key is not copied to a custom endpoint")
+        migration.set("openrouter", forKey: RouteSettings.Key.cleanup)
+        try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
+        check(keys.exists(.customAPI) && RouteSettings.load(from: migration).customAPIBaseURL == "https://openrouter.ai/api/v1", "selected legacy key and endpoint migrate together")
+        try! keys.delete(.customAPI)
+        try! RouteSettings.migrateCustomAPI(in: migration, credentials: keys)
+        check(!keys.exists(.customAPI), "removed migrated key stays removed after relaunch")
         check("\(testKey)" == "APIKey(redacted)", "key is redacted when printed")
         let echo = HTTPResult(status: 401, body: Data("{\"error\":{\"message\":\"API key not valid: \(secret)\",\"code\":401}}".utf8))
         for provider in [ProviderID.gemini, .openrouter, .localServer, .customAPI] {

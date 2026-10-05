@@ -457,9 +457,9 @@ final class PreStart: @unchecked Sendable {
         modelStatus = downloader?.status() ?? .notDownloaded
         dictionaryModelStatus = dictionaryDownloader?.status() ?? .notDownloaded
         warm.onDictionaryStatus = { [weak self] failed in DispatchQueue.main.async { self?.dictionarySupportFailed = failed } }
-        if !preview, let legacy = RouteSettings.legacyCustomAPIKey(from: defaults.string(forKey: RouteSettings.Key.cleanup)) ?? (credentials.exists(.cerebras) ? .cerebras : nil),
-           !credentials.exists(.customAPI), let key = try? credentials.read(legacy) {
-            try? credentials.save(key, for: .customAPI)
+        if !preview {
+            do { try RouteSettings.migrateCustomAPI(in: defaults, credentials: credentials) }
+            catch { keyMessages[.customAPI] = KeyText.storeFailed }
         }
         refreshKeys()
         // Choose Folder, Use Default and a finished download all change the folder, even with

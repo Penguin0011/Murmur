@@ -140,6 +140,15 @@ struct RouteSettings: Equatable, Sendable {
         }
     }
 
+    /// Persist migration only after copying the selected route's key, so failure can be retried.
+    static func migrateCustomAPI(in defaults: UserDefaults, credentials: CredentialStore) throws {
+        guard let legacy = legacyCustomAPIKey(from: defaults.string(forKey: Key.cleanup)) else { return }
+        if !credentials.exists(.customAPI), let key = try credentials.read(legacy) {
+            try credentials.save(key, for: .customAPI)
+        }
+        load(from: defaults).save(to: defaults)
+    }
+
     /// Missing or unknown values fall back to the approved local defaults.
     static func load(from defaults: UserDefaults) -> RouteSettings {
         var settings = RouteSettings()
