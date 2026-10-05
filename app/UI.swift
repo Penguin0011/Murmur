@@ -55,6 +55,28 @@ enum Palette {
     static let accent16 = accent.opacity(0.16)
 }
 
+/// The Murmur mark: five bars falling from loud to quiet, on the logo sheet's 96-unit grid.
+enum Logo {
+    static let bars: [CGRect] = [
+        CGRect(x: 14, y: 16, width: 9, height: 64), CGRect(x: 29, y: 28, width: 9, height: 40),
+        CGRect(x: 44, y: 35, width: 9, height: 26), CGRect(x: 59, y: 40, width: 9, height: 16),
+        CGRect(x: 74, y: 44, width: 9, height: 8),
+    ]
+    static func path(in size: CGSize) -> Path {
+        Path { path in bars.forEach { path.addRect($0.applying(CGAffineTransform(scaleX: size.width / 96, y: size.height / 96))) } }
+    }
+    /// One-colour menu bar mark; the template tint follows the menu bar.
+    static let menuBarImage: NSImage = {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { rect in
+            NSColor.black.setFill()
+            bars.forEach { $0.applying(CGAffineTransform(scaleX: rect.width / 96, y: rect.height / 96)).fill() }
+            return true
+        }
+        image.isTemplate = true; image.accessibilityDescription = "Murmur"
+        return image
+    }()
+}
+
 private struct InkButtonStyle: ButtonStyle {
     enum Kind { case filled, outline, accent, plain }
     var kind: Kind = .filled
@@ -271,7 +293,10 @@ struct SettingsView: View {
 
     private var header: some View {
         HStack(spacing: 32) {
-            wordmark("Murmur", size: 24)
+            HStack(spacing: 12) {
+                Logo.path(in: CGSize(width: 24, height: 24)).fill(Palette.ink).frame(width: 24, height: 24).accessibilityHidden(true)
+                wordmark("Murmur", size: 24)
+            }
             HStack(spacing: 4) {
                 tab("Settings", .settings, count: nil)
                 tab("History", .history, count: controller.history.count)
