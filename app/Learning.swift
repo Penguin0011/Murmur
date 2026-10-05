@@ -241,7 +241,9 @@ enum CorrectionFilter {
             while start > 0, TermText.isCore(a[start - 1]) || TermText.isJoiner(a[start - 1]) { start -= 1 }
             while tail > 0, TermText.isCore(a[a.count - tail]) || TermText.isJoiner(a[a.count - tail]) { tail -= 1 }
             guard case .success(let changes) = replacements(String(a[start..<(a.count - tail)]), String(b[start..<(b.count - tail)])),
-                  accepted(changes, nil) else { continue }
+                  // "Nothing is an ordinary word" accepts a superset of what the real lexicon does
+                  // (it only adds rejections), so case and spacing fixes survive to the real check.
+                  accepted(changes, isCommonWord == nil ? nil : { _ in false }) else { continue }
             passing.append((changes.reduce(0) { $0 + max(TermText.tokens($1.source).count, TermText.tokens($1.targets.last!).count) }, candidate, changes))
         }
         var best: (cost: Int, fix: [Change], reading: String?)?

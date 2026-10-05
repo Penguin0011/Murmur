@@ -25,7 +25,15 @@ import CryptoKit
         let corrupt = root.appendingPathComponent(UUID().uuidString + ".json")
         try Data("broken JSON".utf8).write(to: corrupt)
         do { _ = try store.entries(); fatalError("Unreadable history silently hidden") } catch {}
-        try FileManager.default.removeItem(at: corrupt)
+        // Startup moves it aside instead of refusing to start; it still expires by modification date.
+        let movedCount = try store.quarantineUnreadable(), remaining = try store.entries().count
+        precondition(movedCount == 1 && remaining == 1)
+        let moved = try FileManager.default.contentsOfDirectory(at: store.unreadableDirectory, includingPropertiesForKeys: nil)
+        precondition(moved.count == 1 && !FileManager.default.fileExists(atPath: corrupt.path))
+        try store.purge(retention: "six-months", now: now); precondition(FileManager.default.fileExists(atPath: moved[0].path))
+        try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-200 * 86400)], ofItemAtPath: moved[0].path)
+        try store.purge(retention: "forever", now: now); precondition(FileManager.default.fileExists(atPath: moved[0].path))
+        try store.purge(retention: "six-months", now: now); precondition(!FileManager.default.fileExists(atPath: moved[0].path))
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let sixMonths = calendar.date(from: DateComponents(year: 2026, month: 8, day: 31))!
         let cutoff = calendar.date(byAdding: .month, value: -6, to: sixMonths)!
@@ -56,6 +64,6 @@ import CryptoKit
         let rewritten = try ModelVerificationCache.fingerprint(modelRoot, manifest: manifest)
         precondition(rewritten != hashed, "rewrite must change the fingerprint")
         do { try cache.verify(modelRoot, manifest: manifest); fatalError("Cache accepted rewritten weights") } catch {}
-        print("Native history and verifier checks passed (atomic roundtrip, permissions, calendar expiry, invalid policy, mismatched/corrupt history, deletion, absent/corrupt weights).")
+        print("Native history and verifier checks passed (atomic roundtrip, permissions, calendar expiry, invalid policy, mismatched/corrupt history, quarantine and expiry of unreadable files, deletion, absent/corrupt weights).")
     }
 }

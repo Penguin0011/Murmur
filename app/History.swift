@@ -56,16 +56,46 @@ struct HistoryStore {
         try FileManager.default.removeItem(at: directory.appendingPathComponent(entry.id + ".json"))
     }
     func expired(retention: String, now: Date = Date(), calendar: Calendar = .current) throws -> [HistoryEntry] {
-        guard retention != "forever" else { return [] }
-        let cutoff: Date
-        if retention == "six-months" {
-            guard let date = calendar.date(byAdding: .month, value: -6, to: now) else { throw CaptureError("Invalid retention date") }
-            cutoff = date
-        } else if retention == "30-days" { cutoff = now.addingTimeInterval(-30 * 86400) }
-        else { throw CaptureError("Invalid history retention policy") }
+        guard let cutoff = try Self.cutoff(retention: retention, now: now, calendar: calendar) else { return [] }
         return try entries().filter { $0.recordedAt <= cutoff }
     }
-    func purge(retention: String) throws { for entry in try expired(retention: retention) { try delete(entry) } }
+    /// Nil for forever.
+    static func cutoff(retention: String, now: Date = Date(), calendar: Calendar = .current) throws -> Date? {
+        if retention == "forever" { return nil }
+        if retention == "six-months" {
+            guard let date = calendar.date(byAdding: .month, value: -6, to: now) else { throw CaptureError("Invalid retention date") }
+            return date
+        }
+        if retention == "30-days" { return now.addingTimeInterval(-30 * 86400) }
+        throw CaptureError("Invalid history retention policy")
+    }
+    /// Files moved aside by `quarantineUnreadable`. Inside the history folder, so Delete All Data removes them.
+    var unreadableDirectory: URL { directory.appendingPathComponent("unreadable", isDirectory: true) }
+    /// Moves history files that cannot be decoded (or whose name does not match their id) into
+    /// `unreadable/`, so one damaged file cannot stop Murmur from starting. Returns how many moved.
+    func quarantineUnreadable() throws -> Int {
+        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey])
+            .filter { $0.pathExtension == "json" && ((try? $0.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true) }
+        var moved = 0
+        for file in files {
+            if let entry = try? JSONDecoder().decode(HistoryEntry.self, from: Data(contentsOf: file)),
+               UUID(uuidString: entry.id) != nil, file.lastPathComponent == entry.id + ".json" { continue }
+            try FileManager.default.createDirectory(at: unreadableDirectory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let target = unreadableDirectory.appendingPathComponent(UUID().uuidString + ".json")
+            try FileManager.default.moveItem(at: file, to: target)
+            moved += 1
+        }
+        return moved
+    }
+    /// Expires entries, and unreadable files by their modification date: their text still counts as history.
+    func purge(retention: String, now: Date = Date()) throws {
+        for entry in try expired(retention: retention, now: now) { try delete(entry) }
+        guard let cutoff = try Self.cutoff(retention: retention, now: now) else { return }
+        let files = (try? FileManager.default.contentsOfDirectory(at: unreadableDirectory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for file in files where ((try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantFuture) <= cutoff {
+            try FileManager.default.removeItem(at: file)
+        }
+    }
 }
 
 /// Hashing the 1.8 GB model took about 0.9 s before every dictation. Verify once, then reuse the

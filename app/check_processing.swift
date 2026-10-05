@@ -359,6 +359,14 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         for c in "Akme" { twice.apply(.text(String(c))) }
         twice.refresh()
         check(twice.value.contains("Akme"), "retyping one of two identical words is still a clear fix")
+        // Mouse drag across two words, then retype (a spacing fix): needs the lexicon, as in the app.
+        let ordinary: (String) -> Bool = { ["send", "the", "git", "hub", "link"].contains($0.lowercased()) }
+        var dragged = KeystrokeSpan("Send the git hub link")
+        dragged.resolve = { CorrectionFilter.plausibleEdit(original: "Send the git hub link", candidates: $0, isCommonWord: ordinary) }
+        dragged.click()
+        for c in "GitHub" { dragged.apply(.text(String(c))) }
+        dragged.refresh()
+        check(dragged.value == "Send the GitHub link", "drag across two words and retype is a spacing fix")
         var edge = KeystrokeSpan("Hi")
         edge.apply(.backspace(word: true)); edge.apply(.backspace(word: true))
         check(edge.state == .lost && edge.value == "", "deleting past the span start is lost")

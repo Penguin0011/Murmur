@@ -55,6 +55,8 @@ Proposed behavior: cleanup edits dictation, never answers it, executes instructi
 
 Cleanup acceptance is measured, not asserted. Build a fixed corpus (target 300+ labeled utterances, covering each option, interactions between options, names, numbers, negation, quoted speech, and look-alike prose) before choosing the cleanup model. Proposed pass bar: no more than 1% of utterances with an unintended edit to a name, number, or negation; spoken-correction accuracy and list-formatting precision thresholds set from the corpus baseline and recorded in the decision log. Report each local candidate and the cloud routes against the same corpus.
 
+Local-model guidance and selection: Murmur's built-in rule cleaner is limited and is not an instruction-tuned cleanup model. Tell users that reliable local AI cleanup needs a larger model (start evaluation around 8B parameters); otherwise they can choose Gemini or OpenRouter cleanup. No automatic fallback between routes. Settings should offer a small curated browser (roughly 3–5 choices at a time) of models that have passed the cleanup quality and safety gates, with download size, license, hardware guidance, privacy, benchmark results, and a download/install action. Do not label unbenchmarked models as adequate. Current evidence (October 5, 2026) covers only three candidates of 2B parameters or less on a synthetic corpus, so no downloadable local LLM is yet approved for production. [Certain]
+
 Prompt-injection guard: transcripts are data. Cleanup output must pass a bound check against the raw text (length ratio and edit-distance limits per enabled option, no new named entities or numbers). If the check fails, or the model appears to answer or obey the dictation, preserve raw text for recovery and do not insert automatically. Offer an explicit action to use the raw transcript; log only a content-free failure reason locally. This resolves the previous conflict with section 3 conservatively. [Certain] Include injection phrases ("ignore previous instructions", "write me a…") in the corpus.
 
 Additional required checks: preserve meaningful uses of “like”; preserve negation, names, numbers, and quoted speech; do not interpret “sorry” alone as a replacement instruction; do not create lists from ordinary prose. Ambiguous corrections should retain the original wording rather than guess.
@@ -78,7 +80,7 @@ Proposed implementation and acceptance criteria:
 - Automatic post-insertion observation is required at launch. The macOS feasibility spike must prove field/range tracking in representative native, browser, rich-text, chat, and code-editor apps; publish the supported observation matrix. Unsupported apps may still support dictation, but cannot claim automatic learning. Do not replace this requirement with manual feedback. Approved launch rule: a category that fails observation ships with automatic learning marked unsupported in the published matrix and in-app (learning is off for those apps, dictation still works); it does not hold the launch. [Certain] Proposed floor: if no tested app in any category supports observation, report a launch blocker, since the feature would not exist.
 - Proposed learning implementation: persisted vocabulary/preferences, not model-weight fine-tuning. Validate that these preferences improve repeated corrections without changing unrelated dictation.
 - Store dictionary and learned corrections locally. When a selected cloud stage needs relevant entries, disclose that those entries will leave the device; avoid sending unrelated history or the entire dictionary unnecessarily.
-- Hardware policy: users may disable cleanup or choose lighter models to suit their hardware. No M1-specific benchmark or 8 GB default rule blocks release. Preserve local-first defaults and never silently use cloud. [Certain]
+- Hardware policy: users may disable cleanup or choose models to suit their hardware. No M1-specific benchmark or 8 GB default rule blocks release. Keep transcription local by default; cleanup route is explicit and never silently changes to cloud. [Certain]
 
 Prefer runtime vocabulary biasing where supported; otherwise evaluate conservative correction during processing. Document limitations for each transcription/cleanup route instead of promising identical behavior.
 - Learning data has its own clear/reset controls. Transcript expiry does not silently delete user-approved vocabulary; explain the separate lifetimes in settings.
@@ -94,7 +96,7 @@ Validation deliverable for the selected default:
 2. Check license and redistribution rights for weights and runtime separately; record exact versions and sources.
 3. Benchmark English dictation on the available Apple Silicon host, including accents, quiet speech, names, numbers, background noise, and 5/30/120-second recordings. Record RAM and macOS version; report results only for the measured configuration. M1/8 GB testing is optional future work. [Certain]
 4. Record word error rate, name/number accuracy, cold/warm latency, peak memory, download size, and processing time. Publish results with the recommendation.
-5. Evaluate a small local cleanup model separately against the cleanup contract. Do not assume a transcription model performs instruction-based cleanup.
+5. Evaluate a local cleanup model separately against the cleanup contract, starting around 8B parameters. Do not assume a transcription model performs instruction-based cleanup.
 6. Validate the selected default and choose an accuracy-focused alternative only if measurements justify it. Resolve upstream/conversion license metadata differences before redistributing weights; do not silently change the model selection if validation fails.
 
 Cloud providers (user-named candidates): **Fireworks API**, **Gemini API**, and **OpenRouter**. [Certain]
@@ -127,7 +129,7 @@ Subscription-funded access remains a research item, not a launch commitment. Acc
 
 Approved defaults are labeled below; other settings remain proposals. [Certain]
 
-- Approved: local transcription and local cleanup selected initially, with model downloads disclosed separately from inference. [Certain]
+- Approved: local transcription selected initially; cleanup remains independently configurable. [Certain] User preference (October 5, 2026): most users are expected to choose Gemini cleanup, while privacy-conscious users should be able to browse and choose a quality-validated local model. The default cleanup route still needs an explicit product decision.
 - Local transcript history for successful and unsuccessful insertion, with raw/final text, timestamp, processing route, and insertion status.
 - Confirmed retention choices: 30 days, six calendar months, or forever. Approved default: 30 days; no transcript cloud sync. [Certain]
 - For finite retention, expire entries from their recording timestamp at launch and periodically while running. Use calendar subtraction for six months, not a fixed 180-day approximation. Warn before shortening retention; delete expired entries and associated artifacts after confirmation. Forever does not prevent manual deletion.
@@ -187,7 +189,7 @@ Proposed launch implementation: check stable GitHub Releases at launch and at mo
 
 Use proper version comparison, ignore drafts/prereleases by default, validate the configured repository and release link, and handle offline/rate-limited checks without interrupting dictation. Explain that release checks use the network even when inference is local. Never transmit transcripts, audio, dictionary, or API keys in update requests.
 
-Release handoff must include reproducible build instructions, architecture/macOS requirements, signed/notarized download artifacts where available, third-party notices, and source for the released version. GitHub account/repository name and signing identity remain to be supplied; do not invent them.
+Release handoff must include reproducible build instructions, architecture/macOS requirements, signed/notarized download artifacts where available, third-party notices, and source for the released version. The confirmed release repository is `Penguin0011/Murmur`; it is private, so the unauthenticated release check currently returns 404. The user deferred Apple Developer Program enrollment because it costs $99. Sparkle is deferred; retain user-controlled download-and-replace updates until signing and release packaging are ready. [Certain]
 
 ## 9. Release acceptance
 
@@ -206,22 +208,22 @@ Release handoff must include reproducible build instructions, architecture/macOS
 ## 10. Decisions still needed
 
 1. Minimum macOS 26 and Apple Silicon scope remain confirmed. M1/8 GB performance is deferred, with user-selected models and no validated minimum RAM guarantee. Intel remains deferred. [Certain]
-2. Select and benchmark local models on the available Mac; retain local-first and cleanup-on defaults and user model selection. Do not silently substitute cloud processing. [Certain]
+2. Select and benchmark local models on the available Mac; retain local transcription, cleanup-on, explicit cleanup-route choice, and user model selection. Do not silently substitute cloud processing. [Certain]
 3. Establish supported automatic-learning apps through the required feasibility spike, with unsupported categories disclosed rather than blocking launch (approved); the 60-second window and two-observation threshold are approved. [Certain]
-4. Product name: **Murmur** (confirmed October 2, 2026). Signing identity and approval of manual download/replace updating remain open. Settled: GitHub account `Penguin0011`, repository `dictation` (to be renamed); the user is the MIT copyright holder; LICENSE added October 3, 2026 with holder "Aakash" as supplied by the user. No Apple Developer account exists yet: enrolling in the Apple Developer Program is a prerequisite for Developer ID signing and notarization, and the release milestone is blocked on it. The user deferred enrollment (October 3, 2026); development builds stay self-signed until then. [Certain]
-5. Local cleanup model/runtime and verification of the named cloud providers (Fireworks, Gemini, OpenRouter); validation and exact artifact pinning for selected Parakeet Unified transcription. Update October 3, 2026: provider documentation is verified and a launch split is proposed in section 5, pending user approval and live key tests; the local cleanup baseline is recorded in the milestone 1 decisions, and the local cleanup model is still open. [Certain]
+4. Product name and release repository: **Murmur**, `Penguin0011/Murmur`, renamed October 4, 2026. The repository is currently private. The user deferred Apple Developer Program enrollment because it costs $99; Developer ID signing and notarization remain later release work. Sparkle is deferred; continue user-controlled manual download-and-replace updates. The user is the MIT copyright holder; LICENSE added October 3, 2026 with holder "Aakash" as supplied by the user. [Certain]
+5. Larger local cleanup model/runtime and a curated browser of quality-validated choices; verification of the named cloud providers (Fireworks, Gemini, OpenRouter); validation and exact artifact pinning for selected Parakeet Unified transcription. October 5, 2026 comparison: Qwen3.5-0.8B, Qwen3.5-2B, and LFM2.5-1.2B-Instruct did not establish a production-quality local recommendation on the synthetic corpus. See HANDOFF.md. Users choose Gemini/OpenRouter cloud cleanup or a validated larger local model; no silent fallback. [Certain]
 
 This draft defines the confirmed product and proposed work boundaries; it is not yet a claim of full Wispr Flow feature parity. [Certain]
 
-### Approved decision: local-first and cleanup-on defaults
+### Approved decision: local transcription and cleanup-on defaults
 
-Approved by the user: local-first and cleanup-on defaults, subject to hardware and quality validation. [Certain] The following details define the approved behavior; model selection remains open.
+Approved by the user: local transcription and cleanup-on defaults, subject to hardware and quality validation. [Certain] The October 5 local-model comparison supersedes the earlier assumption that the built-in local cleanup path was production-ready.
 
-Approved behavior: on first setup, select local transcription and local cleanup, with filler removal, spoken corrections, and list formatting enabled. Explain these settings before the first real dictation and offer a faithful-transcription preset. Cloud routes require choosing a provider and configuring an API key. [Certain]
+Approved behavior: on first setup, select local transcription and enable filler removal, spoken corrections, and list formatting. Cleanup provider choice remains explicit; the user expects most people to use Gemini, with validated local models offered for privacy-conscious users. Explain cloud disclosure and API-key setup before any transcript is sent; offer a faithful-transcription preset. [Certain]
 
-Local-first means recording and inference remain on the Mac; initial model downloads and enabled GitHub update checks still require network access. This is a proposed product contract, not a claim of a completely network-free application.
+Local transcription keeps recording and transcription on the Mac; cleanup leaves the Mac only when the user explicitly selects and acknowledges a cloud cleanup route. Initial model downloads and enabled GitHub update checks still require network access. This is not a claim of a completely network-free application.
 
-The complete transcription-plus-cleanup pipeline remains unmeasured on the available Mac. Validate it there before publishing performance claims. M1/8 GB optimization and testing are deferred; users choose lighter models or disable cleanup as needed. [Certain]
+Small local cleanup models are not recommended for production based on current tests. Until a larger candidate passes the quality and safety gates, tell users to use cloud cleanup or run a larger local model (around 8B parameters as an evaluation starting point). This size is guidance, not a guarantee of quality or hardware fit. M1/8 GB optimization and testing are deferred. [Certain]
 
 Cleanup-on means the initial output may differ from a literal transcript by design. Enable only the named features; do not silently add tone rewriting or summarization. Preserve raw text in history while history is enabled, and let users disable each feature independently.
 

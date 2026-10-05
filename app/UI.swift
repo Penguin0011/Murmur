@@ -155,7 +155,7 @@ struct SettingsView: View {
         .modifier(AutoApplyGeneral(controller: controller))
         .modifier(AutoApplyRoutes(controller: controller, serverFieldFocused: serverFieldFocused))
         .onAppear {
-            controller.refreshPermissions(); controller.refreshHistory()
+            controller.refreshPermissions(); controller.refreshHistory(); controller.refreshInputDevices()
             if !checkedSetup { checkedSetup = true; if !setupComplete { screen = .setup } }
         }
         // Permissions are granted in System Settings; re-read them on return.
@@ -186,6 +186,20 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.system(size: 16, weight: .semibold))
             if let detail { help(detail) }
+        }
+    }
+
+    private var microphonePicker: some View {
+        let devices = controller.inputDevices
+        let saved = controller.inputDeviceUID
+        return VStack(alignment: .leading, spacing: 8) {
+            Picker("Microphone", selection: $controller.inputDeviceUID) {
+                Text("System default").tag("")
+                ForEach(devices, id: \.uid) { device in Text(device.name).tag(device.uid) }
+                if !saved.isEmpty && !devices.contains(where: { $0.uid == saved }) { Text("Chosen microphone (not connected)").tag(saved) }
+            }
+            .labelsHidden()
+            help("Used for the next dictation. If the chosen microphone is not connected, Murmur uses the system default.")
         }
     }
 
@@ -379,6 +393,10 @@ struct SettingsView: View {
             toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. If it cannot, press ⌃⌘V to paste the dictation where your cursor is. Your clipboard is always put back. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
+            toggleRow("Open at login", "Starts Murmur in the background when you log in, so the shortcut is ready.", isOn: Binding(get: { controller.openAtLogin }, set: controller.setOpenAtLogin))
+
+            eyebrow("Microphone").padding(.top, 28)
+            microphonePicker.padding(.top, 8)
 
             eyebrow("Permissions").padding(.top, 28)
             VStack(spacing: 0) {
@@ -501,6 +519,8 @@ struct SettingsView: View {
             eyebrow("Cleanup runs with").padding(.top, 28)
             segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
+            help("Built-in local rules handle only a limited set of cleanup patterns. For private AI cleanup, try an instruction model around 8B or larger with a local model server; Murmur has not qualified a model that size yet. Its tested models under 2B were slower and less accurate than Gemini in a synthetic comparison. Otherwise choose Gemini or OpenRouter. Murmur never switches routes on its own.")
+                .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
             } else {
@@ -674,6 +694,9 @@ struct SettingsView: View {
                  : HistoryMode.offDisclosure).padding(.top, 12)
             eyebrow("Keep transcripts for").padding(.top, 28)
             segmented([("30-days", "30 days"), ("six-months", "Six months"), ("forever", "Forever")], $controller.retention).padding(.top, 8)
+            if let notice = controller.historyNotice {
+                Text(notice).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+            }
             if let warning = controller.historyCapWarning {
                 Text(warning).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
             }
@@ -933,6 +956,29 @@ struct SettingsView: View {
 
     // MARK: First run
 
+    private var shortcutName: String {
+        ["right-option": "Right Option", "fn": "Fn / Globe", "ctrl-option-space": "Control–Option–Space"][controller.shortcut] ?? "your shortcut"
+    }
+
+    /// The PRD's first-run test dictation and the faithful-transcription choice.
+    private var tryIt: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow("Try it")
+            help("Press \(shortcutName) and say a sentence. With this window in front, your words appear here instead of being typed.").padding(.top, 8)
+            Text(controller.setupTestTranscript.isEmpty ? "Waiting for your voice…" : controller.setupTestTranscript)
+                .font(.system(size: 16)).foregroundStyle(controller.setupTestTranscript.isEmpty ? Palette.ink70 : Palette.ink)
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading).padding(12)
+                .overlay(Rectangle().strokeBorder(Palette.ink45, lineWidth: 1)).padding(.top, 12)
+                .accessibilityLabel(controller.setupTestTranscript.isEmpty ? "Test dictation: waiting" : "Test dictation: \(controller.setupTestTranscript)")
+            toggleRow("Clean up my dictation", "Removes filler words, applies spoken corrections and formats spoken lists. Off is faithful transcription: exactly what was heard, with dictionary spellings.", isOn: Binding(
+                get: { controller.cleanupFillers || controller.cleanupCorrections || controller.cleanupLists },
+                set: { on in if on { controller.cleanupFillers = true; controller.cleanupCorrections = true; controller.cleanupLists = true } else { controller.useFaithfulTranscription() } }))
+                .padding(.top, 8)
+        }
+        .onAppear { controller.setupShowing = true }
+        .onDisappear { controller.setupShowing = false }
+    }
+
     private var setup: some View {
         let steps: [(title: String, detail: String, done: Bool, action: String, run: () -> Void)] = [
             ("Microphone", "So Murmur can hear you while the shortcut is held.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
@@ -989,6 +1035,7 @@ struct SettingsView: View {
                                 .padding(.vertical, 18).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink45).frame(height: 1) }
                             }
                             if !controller.modelMessage.isEmpty { help(controller.modelMessage).padding(.top, 12).frame(maxWidth: .infinity, alignment: .leading) }
+                            if done == 4 { tryIt.padding(.top, 28) }
                         }
                     }
                     HStack {
@@ -1030,6 +1077,7 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.pressToToggle) { controller.settingsChanged() }
             .onChange(of: controller.intelligentLeadingSpace) { controller.settingsChanged() }
             .onChange(of: controller.showMenuBar) { controller.settingsChanged() }
+            .onChange(of: controller.inputDeviceUID) { controller.settingsChanged() }
             .onChange(of: controller.retention) { controller.settingsChanged() }
             .onChange(of: controller.historyMode) { controller.settingsChanged() }
             .onChange(of: controller.updateChecksEnabled) { controller.settingsChanged() }

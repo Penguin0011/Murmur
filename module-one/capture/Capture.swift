@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CoreAudio
 import Darwin
 import os
 
@@ -32,6 +33,27 @@ final class Capture {
     /// The capture that is recording now, for the shortcut thread.
     static var current: Capture? { currentLock.withLock { _current } }
 
+    nonisolated(unsafe) private static var _preferredInputUID: String?
+    /// CoreAudio UID of the chosen microphone. Nil, or a device that is not connected, means the system default input.
+    static var preferredInputUID: String? {
+        get { currentLock.withLock { _preferredInputUID } }
+        set { currentLock.withLock { _preferredInputUID = newValue } }
+    }
+    /// Connected microphones as (CoreAudio UID, name); AVCaptureDevice's uniqueID is the CoreAudio UID on macOS.
+    static func inputDevices() -> [(uid: String, name: String)] {
+        AVCaptureDevice.DiscoverySession(deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified)
+            .devices.map { ($0.uniqueID, $0.localizedName) }
+    }
+    static func deviceID(uid: String) -> AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyTranslateUIDToDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var name = uid as CFString
+        var device = AudioDeviceID(kAudioObjectUnknown), size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = withUnsafeMutablePointer(to: &name) {
+            AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, UInt32(MemoryLayout<CFString>.size), $0, &size, &device)
+        }
+        return status == noErr && device != kAudioObjectUnknown ? device : nil
+    }
+
     func cut(after uptime: TimeInterval) {
         queue.async { [self] in
             cutoff = min(cutoff, uptime)
@@ -47,6 +69,11 @@ final class Capture {
 
     func start(url: URL) throws {
         let input = engine.inputNode
+        // Pin the chosen microphone before reading the format; an unplugged one falls back to the system default.
+        if let uid = Self.preferredInputUID, var device = Self.deviceID(uid: uid), let unit = input.audioUnit {
+            let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, UInt32(MemoryLayout<AudioDeviceID>.size))
+            if status != noErr { timingLog.notice("input-device-set failed status=\(status)") }
+        }
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw CaptureError("No usable system microphone format")
