@@ -179,10 +179,14 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 Repository rename (October 4, 2026): GitHub repository is now `Penguin0011/Murmur`, and the local `origin` remote and release-check default use that name. The repository remains private; anonymous GitHub Releases checks return 404 until publication or a different feed is chosen. Apple Developer Program enrollment is deferred until much later because of its $99 cost. [Certain]
 
 **Processing and providers**
-18. No provider has been called with a real API key. Fireworks STT is deprecated upstream; the OpenRouter STT and Gemini/OpenRouter cleanup split is a proposal pending user approval.
-19. The local cleanup model is unselected. `RuleCleaner` is a baseline; its corpus has no real ASR transcripts, and the guard will hold more real LLM output than baseline output.
+18. Gemini cleanup was called live on October 5 with 15 synthetic benchmark prompts using the stored key. No other cloud provider was called in this benchmark. Fireworks STT is deprecated upstream; the OpenRouter STT and Gemini/OpenRouter cleanup split remains a proposal pending user approval.
+19. Qwen3.5-0.8B was installed and benchmarked October 5 but not selected; see the trial record below. The local cleanup model decision remains open. `RuleCleaner` remains the baseline; the corpus has no real ASR transcripts.
 20. Learning's lexicon check needs NSSpellChecker on macOS before learning ships; the semantic promotion rule is approved.
 21. The Parakeet conversion's CC-BY-4.0 label conflicts with the upstream NVIDIA Open Model License; the app must show the model license before download.
+
+**Qwen local cleanup trial — October 5, 2026.** Installed `Qwen3.5-0.8B-Q4_K_M.gguf` (532,517,120 bytes) at `/Users/aakash/Library/Caches/Dictation/cleanup/Qwen3.5-0.8B-Q4_K_M.gguf`, revision `6ab461498e2023f6e3c1baea90a8f0fe38ab64d0`, SHA-256 `bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517`. Runtime: Homebrew `llama.cpp` 0.5.0; test host: Apple M3, 16 GB, macOS 26.6.2. The server had to run with reasoning disabled: default auto mode generated up to 4,096 tokens for a five-word cleanup case; reasoning-off returned the correct five-word cleanup. A compiled smoke call through `OpenAICompatibleCleanupProvider` passed `CleanupGuard`.
+
+On the 425-case synthetic cleanup corpus, 425/425 local API calls returned without errors or truncation. Exact output matched 228/425 (53.6%); case/punctuation-insensitive word sequences matched 260/425 (61.2%); `CleanupGuard` passed 394/425 (92.7%). Median end-to-end local latency was 637 ms (p95 1,249 ms); median generation throughput was 85.6 tokens/s. In 15 paired synthetic calls against the configured Gemini primary model `gemini-3.5-flash-lite` (fallback disabled), Qwen matched 6/15 and had 659 ms median latency; Gemini matched 12/15 and had 598 ms median latency, with 14/15 outputs passing `CleanupGuard`. This small paired sample is preliminary. Qwen was slower at median latency and less accurate in the paired subset; it is not selected. The 425 corpus has no real ASR transcripts. The test used the production prompt and guard, but did not exercise the full app UI or change app settings. The temporary local server is stopped; the model and runtime remain installed. [Certain]
 
 ---
 
