@@ -247,6 +247,8 @@ final class PreStart: @unchecked Sendable {
     @Published var learningEnabled: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
     @Published var dictionaryEntries: [DictionaryEntry] = []
+    /// Forms and spellings learning skips (conflicting, undone or deleted fixes), for Settings.
+    @Published var blockedWords: [CorrectionLedger.Blocked] = []
     @Published var dictionaryMessage = ""
     // Model download (R2). modelMessage reports the last download action, never interrupting dictation.
     @Published var modelStatus: ModelStatus = .notDownloaded
@@ -951,7 +953,7 @@ final class PreStart: @unchecked Sendable {
                 // A readable text field is written and read back; anything else (a web editor, a
                 // custom text view, no accessible focus) gets a plain paste.
                 let readable = target.map { insertionTextRole($0.role) && $0.value != nil && $0.selection != nil } ?? false
-                let insertion = readable ? insertText(entry.finalText, into: target!, policy: .singleAttempt) : pasteIntoFrontmostApp(entry.finalText)
+                let insertion = readable ? insertText(entry.finalText, into: target!) : pasteIntoFrontmostApp(entry.finalText)
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
@@ -1033,6 +1035,7 @@ final class PreStart: @unchecked Sendable {
     /// the warm helper with it, so a wipe or edit never leaves old terms loaded.
     func refreshDictionary() {
         dictionaryEntries = processing?.dictionary.entries ?? []
+        blockedWords = processing?.ledger.blocked ?? []
         writeHelperVocabulary()
         if started { prewarm() }
     }
@@ -1076,9 +1079,13 @@ final class PreStart: @unchecked Sendable {
         do { try processing?.deleteEntry(id: entry.id); dictionaryMessage = "" } catch { dictionaryMessage = "Could not delete this dictionary entry." }
         refreshDictionary()
     }
+    func unblockWord(_ item: CorrectionLedger.Blocked) {
+        do { try processing?.ledger.unblock(item); dictionaryMessage = "" } catch { dictionaryMessage = "Could not save the learning data." }
+        refreshDictionary()
+    }
     func resetLearnedEntries() {
         let alert = NSAlert(); alert.messageText = "Reset learned dictionary entries?"
-        alert.informativeText = "This removes every learned entry and all learning evidence. Entries you added stay."
+        alert.informativeText = "This removes every learned entry and all learning evidence, and unblocks every word under Not learned. Entries you added stay."
         alert.addButton(withTitle: "Reset Learned"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do { try processing?.resetLearned(); dictionaryMessage = "" } catch { dictionaryMessage = "Could not reset learned entries." }
@@ -1111,7 +1118,9 @@ final class PreStart: @unchecked Sendable {
             watch = Watch(observation: observation, pid: field.pid, field: field, keys: nil, current: text)
         } else if let pid, CGPreflightListenEventAccess(), startKeyTap(),
                   let observation = DictationObservation(value: text, insertedRange: NSRange(location: 0, length: (text as NSString).length), now: now) {
-            watch = Watch(observation: observation, pid: pid, field: nil, keys: KeystrokeSpan(text), current: text)
+            var keys = KeystrokeSpan(text)
+            keys.resolve = { CorrectionFilter.plausibleEdit(original: text, candidates: $0, isCommonWord: isCommonEnglishWord) }
+            watch = Watch(observation: observation, pid: pid, field: nil, keys: keys, current: text)
         } else { stopWatching(); return }
         watchTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.watchTick() }
@@ -1120,7 +1129,8 @@ final class PreStart: @unchecked Sendable {
     private func watchTick(ending: Bool = false) {
         guard var w = watch else { return }
         let same: Bool, readable: Bool, value: String, selection: NSRange
-        if let keys = w.keys {
+        if var keys = w.keys {
+            keys.refresh(); w.keys = keys; watch?.keys = keys
             same = keys.state != .departed && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
             readable = keys.state != .lost && !IsSecureEventInputEnabled()
             value = keys.value; selection = keys.selection
@@ -1146,9 +1156,13 @@ final class PreStart: @unchecked Sendable {
                 stopWatching()
                 // Settling can also delete learned entries (reversal, conflict), so always refresh.
                 defer { refreshDictionary() }
-                try processing?.settle(sessionID: session)
+                if let entry = try processing?.settle(sessionID: session).last { announceLearned(entry) }
             }
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
+    }
+    private func announceLearned(_ entry: DictionaryEntry) {
+        bubble.showLearned(entry.preferred, screen: destinationScreen) { [weak self] in self?.deleteDictionaryEntry(entry) }
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: "Added \(entry.preferred) to your dictionary.", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
     private func stopWatching() {
         watchTimer?.invalidate(); watchTimer = nil; watch = nil
@@ -1173,7 +1187,7 @@ final class PreStart: @unchecked Sendable {
     private func watchKey(_ type: CGEventType, _ event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { if let keyTap { CGEvent.tapEnable(tap: keyTap, enable: true) }; return }
         guard var keys = watch?.keys else { return }
-        if type == .keyDown { keys.apply(Self.watchedKey(event)) } else { keys.depart() }
+        if type == .keyDown { keys.apply(Self.watchedKey(event)) } else { keys.click() }
         watch?.keys = keys
     }
     nonisolated static func watchedKey(_ event: CGEvent) -> KeystrokeSpan.Key {

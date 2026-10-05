@@ -269,8 +269,9 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         // Watched spans (AppController's loop without AX): undo drops evidence; two corrected
         // dictations promote with the user's casing, not the tracker's lowercased candidate.
         let watched = try ProcessingCoordinator(directory: dir.appendingPathComponent("watch"), defaults: defaults)
-        func dictate(_ snapshots: [String], inserted: String = "Call Acme today") throws {
-            var o = DictationObservation(value: inserted, insertedRange: NSRange(location: 0, length: 15), now: 0)!
+        func dictate(_ snapshots: [String], inserted: String = "Call Acme today", into p: ProcessingCoordinator? = nil) throws {
+            let watched = p ?? watched
+            var o = DictationObservation(value: inserted, insertedRange: NSRange(location: 0, length: (inserted as NSString).length), now: 0)!
             var last = o.initial
             for (i, value) in snapshots.enumerated() {
                 _ = o.observe(value: value, selection: NSRange(location: 0, length: 0), now: Double(i + 1), sameFocusedField: true, readableNonsecure: true)
@@ -280,16 +281,24 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
             o.finish(); try watched.settle(sessionID: o.sessionID)
         }
         try dictate(["Call Akme today", "Call Acme today"])
-        try dictate(["Call Akme today", "Call Akme today and more"])
-        check(watched.ledger.evidence.isEmpty, "undo and appended text leave no evidence")
-        try dictate(["Call Akme today"])
-        check(watched.dictionary.entries.isEmpty, "one session does not promote")
-        try dictate(["Call Akme today"])
+        try dictate(["Call Acme today and more"])
+        check(watched.ledger.evidence.isEmpty && watched.dictionary.entries.isEmpty, "undo and plain appended text leave no evidence")
+        try dictate(["Call Akme today", "Call Akme today and more", "Call Akme today and more. Then"])
+        check(watched.dictionary.entries.map(\.variants) == [[]], "a fix followed by more typing adds a hint")
+        check(watched.process("call acme") == .insert("Call acme"), "a hint replaces nothing")
+        try dictate(["Call Akme"], inserted: "Call Acme")
         check(watched.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "watched corrections promote with casing")
         try dictate(["Call Acme today"], inserted: "Call Akme today")
         check(watched.dictionary.entries.isEmpty, "changing a learned replacement back withdraws it")
 
-        // Real dictations carry punctuation; only the changed words reach the filter.
+        // Two fixes in one dictation are two corrections, not one phrase.
+        let pair = try ProcessingCoordinator(directory: dir.appendingPathComponent("pair"), defaults: defaults)
+        try dictate(["Please call Akme and Jira"], inserted: "Please call Acme and Gira", into: pair)
+        check(Set(pair.dictionary.entries.map(\.preferred)) == ["Akme", "Jira"], "each fix in one dictation is learned")
+        try dictate(["I think we should ship the old plan today"], inserted: "Maybe the team wants a new plan for Monday", into: pair)
+        check(pair.dictionary.entries.count == 2, "a rewrite teaches nothing")
+
+        // Real dictations carry punctuation; the ledger diffs words, so only changed words reach the filter.
         let named = try ProcessingCoordinator(directory: dir.appendingPathComponent("punct"), defaults: defaults)
         for _ in 0..<2 {
             let session = UUID()
@@ -299,9 +308,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(named.dictionary.entries.contains { $0.preferred == "Aakash" && $0.variants == ["Akash"] }, "a punctuated sentence learns the changed word")
         let punctuationOnly = UUID()
         try named.observeSpan(sessionID: punctuationOnly, original: "Akash, hi.", current: "Akash; hi!")
-        check(named.ledger.evidence.isEmpty && ProcessingCoordinator.changedWords("Akash, hi.", "Akash; hi!") == nil, "a punctuation-only edit records nothing")
-        check(ProcessingCoordinator.changedWords("Call Akash.", "Call Aakash, now.")! == ("Akash", "Aakash, now"), "changed words keep inner punctuation for the filter to judge")
-        check(ProcessingCoordinator.changedWords("hello, Akash.", "Hello, Aakash.")! == ("Akash", "Aakash"), "a capitalization fix nearby stays context")
+        check(named.ledger.evidence.isEmpty, "a punctuation-only edit records nothing")
         let recased = UUID()
         try named.observeSpan(sessionID: recased, original: "hello, Akash.", current: "Hello, Aakash.")
         check(named.ledger.evidence.contains { $0.sessionID == recased && $0.target == "Aakash" }, "a name fix survives a nearby capitalization fix")
@@ -309,12 +316,16 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
 
         // Unreadable fields: keystrokes rebuild the span (AppController's tap feeds KeystrokeSpan).
         let keyed = try ProcessingCoordinator(directory: dir.appendingPathComponent("keys"), defaults: defaults)
-        func typed(_ keys: [KeystrokeSpan.Key], click: Bool = false) throws {
+        func typed(_ keys: [KeystrokeSpan.Key?], click: Bool = false, into p: ProcessingCoordinator? = nil) throws {
+            let keyed = p ?? keyed
             var span = KeystrokeSpan("Call Acme today")
+            span.resolve = { CorrectionFilter.plausibleEdit(original: "Call Acme today", candidates: $0) }
             var o = DictationObservation(value: span.value, insertedRange: NSRange(location: 0, length: 15), now: 0)!
             var last = o.initial
-            for (i, key) in (keys.map(Optional.some) + (click ? [nil] : [])).enumerated() {
-                if let key { span.apply(key) } else { span.depart() }
+            // nil is a click inside the app; a trailing `click` is one that leaves (an app switch).
+            for (i, key) in (keys + (click ? [nil] : [])).enumerated() {
+                if let key { span.apply(key) } else if click && i == keys.count { span.depart() } else { span.click() }
+                span.refresh()
                 _ = o.observe(value: span.value, selection: span.selection, now: Double(i + 1),
                               sameFocusedField: span.state != .departed, readableNonsecure: span.state != .lost)
                 let current = o.edited ?? o.initial
@@ -326,9 +337,28 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try typed(selectAcme + [.text("Akme")], click: true)
         try typed(selectAcme + [.text("Akme"), .other])
         try typed([.text(" and more")])
-        check(keyed.ledger.evidence.count == 1 && keyed.dictionary.entries.isEmpty, "keystroke fix kept; undo chord and appended text dropped")
+        check(keyed.ledger.evidence.count == 1 && keyed.dictionary.entries.map(\.variants) == [[]], "keystroke fix kept as a hint; undo chord and appended text dropped")
         try typed([.left(word: true, extend: false), .left(word: false, extend: false)] + Array(repeating: .backspace(word: false), count: 4) + "Akme".map { .text(String($0)) })
         check(keyed.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "backspace-and-retype promotes")
+        // Click to fix: the caret position is unknown, so the one plausible reading is taken.
+        let clicked = try ProcessingCoordinator(directory: dir.appendingPathComponent("click"), defaults: defaults)
+        try typed([nil, nil, nil] + "Akme".map { .text(String($0)) }, into: clicked)    // click, then double-click a word (two clicks), retype it
+        check(clicked.dictionary.entries.map(\.preferred) == ["Akme"], "double-click and retype is learned")
+        try typed([nil, .backspace(word: false), .backspace(word: false), .backspace(word: false)] + "kme".map { .text(String($0)) } + [.text("\r")], into: clicked)
+        check(clicked.dictionary.entries.first?.variants == ["Acme"], "click, backspace and retype, then Return, promotes")
+        let unclear = try ProcessingCoordinator(directory: dir.appendingPathComponent("unclear"), defaults: defaults)
+        try typed([nil, .text(" and more")], into: unclear)
+        check(unclear.ledger.evidence.isEmpty, "typing after a click with no plausible fix teaches nothing")
+        var stray = KeystrokeSpan("Call Acme today")
+        stray.resolve = { CorrectionFilter.plausibleEdit(original: "Call Acme today", candidates: $0) }
+        stray.click(); stray.apply(.text("x")); stray.click()
+        check(stray.state == .departed, "a click after unexplained typing ends the watch")
+        var twice = KeystrokeSpan("Ask Acme, then Acme again")
+        twice.resolve = { CorrectionFilter.plausibleEdit(original: "Ask Acme, then Acme again", candidates: $0) }
+        twice.click(); twice.click()
+        for c in "Akme" { twice.apply(.text(String(c))) }
+        twice.refresh()
+        check(twice.value.contains("Akme"), "retyping one of two identical words is still a clear fix")
         var edge = KeystrokeSpan("Hi")
         edge.apply(.backspace(word: true)); edge.apply(.backspace(word: true))
         check(edge.state == .lost && edge.value == "", "deleting past the span start is lost")

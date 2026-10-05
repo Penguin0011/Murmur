@@ -141,6 +141,18 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         check(CorrectionFilter.evaluate(source: "lunch", target: "launch", isCommonWord: common) == .rejected(.ordinaryWords), "lunch -> launch")
         check(CorrectionFilter.evaluate(source: "Acme", target: "Akme", isCommonWord: common) == .accepted(source: "Acme", target: "Akme"), "lexicon keeps Acme -> Akme")
         check(CorrectionFilter.evaluate(source: "Cloud", target: "Claude", manualPreferred: ["claude"], isCommonWord: { lexicon.contains($0) || $0 == "claude" }) == .rejected(.ordinaryWords), "manual term does not waive lexicon guard")
+        // With a lexicon: case, spacing, acronym and short-name fixes (user decision, October 4, 2026).
+        let words: Set<String> = lexicon.union(["notion", "git", "hub", "every", "one", "everyone", "api", "son", "call"])
+        let ordinary: (String) -> Bool = { words.contains($0) }
+        for (source, target) in [("jira", "Jira"), ("git hub", "GitHub"), ("para keet", "Parakeet"), ("a p i", "API"), ("J son", "JSON"), ("Jon", "John")] {
+            check(CorrectionFilter.evaluate(source: source, target: target, isCommonWord: ordinary) == .accepted(source: source, target: target), "\(source) -> \(target) learned with a lexicon")
+        }
+        check(CorrectionFilter.evaluate(source: "call jira", target: "call Jira", isCommonWord: ordinary) == .accepted(source: "jira", target: "Jira"), "case fix trims its context")
+        check(CorrectionFilter.evaluate(source: "notion", target: "Notion", isCommonWord: ordinary) == .rejected(.ordinaryWords), "recasing an ordinary word is not learned")
+        check(CorrectionFilter.evaluate(source: "every one", target: "everyone", isCommonWord: ordinary) != .accepted(source: "every one", target: "everyone"), "joining ordinary words is not learned")
+        check(CorrectionFilter.evaluate(source: "jira", target: "Jira") == .rejected(.caseOnly), "no lexicon: case fix skipped")
+        check(CorrectionFilter.evaluate(source: "git hub", target: "GitHub") == .rejected(.punctuationOnly), "no lexicon: spacing fix skipped")
+        check(CorrectionFilter.evaluate(source: "Jon", target: "John") == .rejected(.tooShort), "no lexicon: short word skipped")
     }
 
     static func learningChecks(_ dir: URL) throws {
@@ -155,17 +167,19 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         }
         func learned(_ dict: DictionaryStore) -> [DictionaryEntry] { dict.entries.filter { $0.source == .learned } }
 
-        // Once does not promote; twice in separate sessions does.
+        // Once adds a vocabulary hint; twice in separate sessions adds the replacement.
         do {
             let (dict, ledger) = try fresh("promote")
             let a = UUID(), b = UUID()
             try check(ledger.record(obs(a, "Acme", "Akme")) == .provisional, "first observation provisional")
-            try check(ledger.settle(sessionID: a).isEmpty, "one observation does not promote")
-            check(learned(dict).isEmpty, "no learned entry after one")
+            try check(ledger.settle(sessionID: a).map(\.preferred) == ["Akme"], "one observation adds a hint")
+            check(learned(dict).count == 1 && learned(dict)[0].variants.isEmpty, "hint has no variants")
+            check(dict.vocabularyTerms == ["Akme"], "hint reaches transcription vocabulary")
+            check(dict.apply(to: "Ask Acme today") == "Ask Acme today", "hint replaces nothing")
             try check(ledger.record(obs(b, "acme", "AKME", 10)) == .provisional, "second observation (case differs)")
             let promoted = try ledger.settle(sessionID: b)
-            check(promoted.count == 1 && learned(dict).count == 1, "two sessions promote")
-            check(dict.apply(to: "Ask Acme today") == "Ask AKME today", "learned entry applies (latest casing)")
+            check(promoted.isEmpty && learned(dict).count == 1 && learned(dict)[0].variants == ["acme"], "two sessions add the variant to the hint")
+            check(dict.apply(to: "Ask Acme today") == "Ask Akme today", "learned entry applies (first spelling kept)")
             check(ledger.evidence.isEmpty, "evidence consumed on promotion")
             // Ledger file holds only short strings.
             let raw = try String(contentsOf: dir.appendingPathComponent("promote/ledger.json"), encoding: .utf8)
@@ -183,7 +197,7 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             try ledger.settle(sessionID: a)
             try check(ledger.settle(sessionID: a).isEmpty, "settling twice is harmless")
             try check(ledger.record(obs(a, "Acme", "Akme", 6)) == .sessionClosed, "closed session ignored")
-            check(learned(dict).isEmpty && ledger.evidence.count == 1, "same session counts once")
+            check(learned(dict).count == 1 && learned(dict)[0].variants.isEmpty && ledger.evidence.count == 1, "same session counts once")
         }
 
         // accept -> decline never promotes.
@@ -241,12 +255,12 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             check(ledger.evidence.isEmpty, "revert removes provisional evidence")
             try ledger.settle(sessionID: a)
             try ledger.record(obs(b, "Acme", "Akme")); try ledger.settle(sessionID: b)
-            check(learned(dict).isEmpty, "reverted evidence does not count")
+            check(learned(dict).allSatisfy(\.variants.isEmpty), "reverted evidence does not count")
             let c = UUID()
             try ledger.record(obs(c, "Acme", "Akme")); try ledger.settle(sessionID: c)
             check(learned(dict).count == 1, "promoted with b and c")
             try ledger.revert(sessionID: c)
-            check(learned(dict).isEmpty, "revert after promotion withdraws the entry")
+            check(learned(dict).count == 1 && learned(dict)[0].variants.isEmpty, "revert after promotion withdraws the variant, b's hint stays")
             check(ledger.tombstones.isEmpty, "revert does not tombstone")
         }
 
@@ -292,6 +306,59 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             let r = UUID()
             try ledger.record(obs(r, "Akme", "Acme")); try ledger.settle(sessionID: r)
             check(learned(dict).isEmpty && ledger.tombstones.contains(.init(source: "acme", target: "akme")), "reversal withdraws and tombstones")
+        }
+
+        // Word diff: separate fixes, a fix followed by typing, rewrites and deletions.
+        do {
+            typealias C = CorrectionFilter.Change
+            try check(CorrectionFilter.replacements("call ACME about Gira", "call Akme about Jira").get() == [C(source: "ACME", targets: ["Akme"]), C(source: "Gira", targets: ["Jira"])], "two fixes are two changes")
+            try check(CorrectionFilter.replacements("pay Acme", "pay Akme and more").get() == [C(source: "Acme", targets: ["Akme", "Akme and", "Akme and more"])], "fix then typing: shortest reading first")
+            try check(CorrectionFilter.replacements("call Acme today", "call Akme today and more").get() == [C(source: "Acme", targets: ["Akme"])], "words added after the span are ignored")
+            check(CorrectionFilter.replacements("call Acme today", "call today") == .failure(.deletion), "deletion")
+            check(CorrectionFilter.replacements("maybe the team wants a new plan", "I think we should ship old stuff") == .failure(.tooManyWords), "rewrite")
+            try check(CorrectionFilter.replacements("acme", "Acme").get() == [C(source: "acme", targets: ["Acme"])], "a case change is a change")
+        }
+
+        // A case fix runs both tiers and its reversal withdraws it.
+        do {
+            let d = dir.appendingPathComponent("case-tiers")
+            let dict = try DictionaryStore(directory: d)
+            let ledger = try CorrectionLedger(directory: d, dictionary: dict)
+            ledger.isCommonWord = { ["call", "the"].contains($0) }
+            for _ in 0..<2 { let s = UUID(); try ledger.record(obs(s, "call jira", "call Jira")); try ledger.settle(sessionID: s) }
+            check(learned(dict).map(\.preferred) == ["Jira"] && learned(dict)[0].variants == ["jira"], "case fix: hint then variant")
+            check(dict.apply(to: "open jira now") == "open Jira now", "case fix applies")
+            let r = UUID(); try ledger.record(obs(r, "Jira", "jira")); try ledger.settle(sessionID: r)
+            check(learned(dict).isEmpty, "lowercasing it again withdraws it")
+            check(ledger.blocked == [.heard("jira"), .spelling("Jira")], "reversal blocks the heard form and the spelling")
+            try ledger.unblock(.spelling("jira")); try ledger.unblock(.heard("jira"))
+            check(ledger.blocked.isEmpty, "unblocked")
+            let s = UUID()
+            try check(ledger.record(obs(s, "call jira", "call Jira")) == .provisional, "learnable again after unblocking")
+        }
+
+        // Tiers: two mishearings of one spelling share one entry; a deleted word is never re-learned.
+        do {
+            let (dict, ledger) = try fresh("tiers")
+            for source in ["Akash", "Akash", "Aakesh", "Aakesh"] {
+                let s = UUID(); try ledger.record(obs(s, source, "Aakash")); try ledger.settle(sessionID: s)
+            }
+            check(learned(dict).count == 1 && learned(dict)[0].variants == ["Akash", "Aakesh"], "one entry gathers both mishearings")
+            try ledger.deleteLearned(id: learned(dict)[0].id)
+            let s = UUID()
+            try check(ledger.record(obs(s, "Akesh", "Aakash")) == .tombstoned, "deleted word not re-learned from a new mishearing")
+        }
+
+        // A version-1 ledger written before tiers (promotion without kind) still withdraws its entry.
+        do {
+            let d = dir.appendingPathComponent("legacy")
+            let dict = try DictionaryStore(directory: d)
+            let entry = try dict.add(preferred: "Akme", variants: ["Acme"], source: .learned)
+            let legacy = #"{"evidence":[],"learningEnabled":true,"promotions":[{"entryID":"\#(entry.id.uuidString)","pair":{"source":"acme","target":"akme"},"sessions":[]}],"suppressed":[],"tombstones":[],"version":1}"#
+            try PrivateFiles.write(Data(legacy.utf8), to: d.appendingPathComponent(CorrectionLedger.fileName))
+            let ledger = try CorrectionLedger(directory: d, dictionary: dict)
+            let r = UUID(); try ledger.record(obs(r, "Akme", "Acme")); try ledger.settle(sessionID: r)
+            check(learned(dict).isEmpty, "legacy promotion decodes and reversal withdraws it")
         }
 
         // Manual entry already owns the source: no duplicate learned entry.
