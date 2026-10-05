@@ -476,11 +476,13 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         try Data("{}".utf8).write(to: locations.history.appendingPathComponent(UUID().uuidString + ".json"))
         try FileManager.default.createDirectory(at: locations.retryAudio, withIntermediateDirectories: true)
         try Data([1, 2, 3]).write(to: locations.retryAudio.appendingPathComponent("retry.wav"))
+        try FileManager.default.createDirectory(at: locations.chunks, withIntermediateDirectories: true)
+        try Data([4, 5, 6]).write(to: locations.chunks.appendingPathComponent("chunk.wav"))
         var keychainCalled = false
         let report = DataWipe.deleteAllData(locations) { keychainCalled = true; return ["fireworks-api-key"] }
         check(report.succeeded && keychainCalled && report.keychainItems == ["fireworks-api-key"], "deleteAll reports keychain removal")
-        check(report.removed.count == 3, "history, dictionary+ledger, retry audio removed")
-        for url in [locations.history, locations.dictionary, locations.ledger, locations.retryAudio] {
+        check(report.removed.count == 4, "history, dictionary+ledger, retry audio and abandoned chunks removed")
+        for url in [locations.history, locations.dictionary, locations.ledger, locations.retryAudio, locations.chunks] {
             check(!FileManager.default.fileExists(atPath: url.path), "\(url.lastPathComponent) gone")
         }
         try dict.reload(); try ledger.reload()
@@ -488,6 +490,6 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         struct KeychainFailure: Error {}
         let second = DataWipe.deleteAllData(locations) { throw KeychainFailure() }
         // reload() recreated the empty dictionary directory; the other locations are absent.
-        check(second.absent.count == 2 && second.removed.count == 1 && !second.succeeded && second.failures.count == 1, "absent data and keychain failure reported")
+        check(second.absent.count == 3 && second.removed.count == 1 && !second.succeeded && second.failures.count == 1, "absent data and keychain failure reported")
     }
 }

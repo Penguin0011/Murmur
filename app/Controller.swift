@@ -1454,9 +1454,12 @@ final class PreStart: @unchecked Sendable {
         guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
         guard let base = dataDirectory else { return }
         stopWatching()
+        if let retry { prestart.discard(store: retry) }
+        chunkJobs.values.forEach { $0.discard() }; chunkJobs.removeAll()
         warm.stop()
         generation = UUID()
         uninserted = nil; setupTestTranscript = ""
+        destination = nil; sessionTranscriber = nil
         let locations = MurmurDataLocations.standard(base: base)
         // Preview and the developer probe never touch the login Keychain.
         let removeKeys: () throws -> [String] = preview ? { [] } : {
@@ -1475,6 +1478,8 @@ final class PreStart: @unchecked Sendable {
                 store = next; records = HistoryRouter(disk: historyDisk(next), persists: appliedHistoryMode.persistsTranscripts)
             case .recreateRetryAudio:
                 retry = try RetryAudio(directory: locations.retryAudio)
+                try FileManager.default.createDirectory(at: locations.chunks, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                Chunker.directory = locations.chunks
             case .reloadDictionary:
                 do { processing = try ProcessingCoordinator(directory: locations.dictionary, isCommonWord: isCommonEnglishWord); dictionaryMessage = "" }
                 catch { dictionaryMessage = "The dictionary could not be read. Dictations are held in History until it is repaired."; throw error }

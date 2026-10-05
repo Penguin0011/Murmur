@@ -159,12 +159,13 @@ struct MurmurDataLocations {
     var dictionary: URL
     var ledger: URL
     var retryAudio: URL
+    var chunks: URL
 
     /// Matches Controller's layout under Application Support/Dictation.
     static func standard(base: URL) -> MurmurDataLocations {
         let dictionary = base.appendingPathComponent("dictionary")
         return MurmurDataLocations(history: base.appendingPathComponent("history"), dictionary: dictionary,
-                                   ledger: dictionary, retryAudio: base.appendingPathComponent("retry-audio"))
+                                   ledger: dictionary, retryAudio: base.appendingPathComponent("retry-audio"), chunks: base.appendingPathComponent("chunks"))
     }
 }
 
@@ -178,7 +179,7 @@ struct DeleteAllReport {
 }
 
 enum DataWipe {
-    /// Removes history, dictionary, ledger and retry-audio directories, then calls
+    /// Removes history, dictionary, ledger, retry audio and chunk directories, then calls
     /// `removeKeychainItems` (which returns the item names it removed). Continues past failures
     /// and reports them. In-memory stores must be reloaded or discarded afterwards
     /// (`DictionaryStore.reload()`, `CorrectionLedger.reload()`, a new `HistoryStore`).
@@ -188,7 +189,7 @@ enum DataWipe {
         var report = DeleteAllReport()
         var seen = Set<String>()
         let fm = FileManager.default
-        for url in [locations.history, locations.dictionary, locations.ledger, locations.retryAudio] {
+        for url in [locations.history, locations.dictionary, locations.ledger, locations.retryAudio, locations.chunks] {
             let path = url.standardizedFileURL.path
             guard seen.insert(path).inserted else { continue }
             guard (try? fm.attributesOfItem(atPath: path)) != nil else { report.absent.append(url); continue }

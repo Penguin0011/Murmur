@@ -158,6 +158,8 @@ import ApplicationServices
         // The learning lexicon uses the real English spell checker.
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
         controller.uninserted = "held synthetic text"; controller.setupTestTranscript = "setup synthetic text"
+        let chunk = temp.appendingPathComponent(name).appendingPathComponent("chunks/abandoned.wav")
+        try Data([4, 5, 6]).write(to: chunk)
         controller.phase = "Processing"
         controller.deleteConfirmedData()
         precondition(controller.uninserted != nil && !controller.setupTestTranscript.isEmpty && manager.fileExists(atPath: recovery.path), "busy wipe refuses")
@@ -165,6 +167,7 @@ import ApplicationServices
         controller.deleteConfirmedData()
         precondition(controller.uninserted == nil && controller.setupTestTranscript.isEmpty, "wipe clears paste and setup buffers")
         precondition(controller.history.isEmpty && !controller.hasRecoveryAudio && !manager.fileExists(atPath: recovery.path), "wipe refreshes empty storage")
+        precondition(!manager.fileExists(atPath: chunk.path), "wipe removes abandoned chunk audio")
         controller.pasteUninserted()
         precondition(controller.uninserted == nil, "deleted text cannot be pasted later")
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
