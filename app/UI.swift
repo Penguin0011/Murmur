@@ -55,12 +55,12 @@ enum Palette {
     static let accent16 = accent.opacity(0.16)
 }
 
-/// The Murmur mark: five bars falling from loud to quiet, on the logo sheet's 96-unit grid.
+/// The Murmur mark: five bars rising and falling like a voice, on the logo sheet's 96-unit grid.
 enum Logo {
     static let bars: [CGRect] = [
-        CGRect(x: 14, y: 16, width: 9, height: 64), CGRect(x: 29, y: 28, width: 9, height: 40),
-        CGRect(x: 44, y: 35, width: 9, height: 26), CGRect(x: 59, y: 40, width: 9, height: 16),
-        CGRect(x: 74, y: 44, width: 9, height: 8),
+        CGRect(x: 14, y: 36, width: 9, height: 24), CGRect(x: 29, y: 14, width: 9, height: 68),
+        CGRect(x: 44, y: 30, width: 9, height: 36), CGRect(x: 59, y: 22, width: 9, height: 52),
+        CGRect(x: 74, y: 38, width: 9, height: 20),
     ]
     static func path(in size: CGSize) -> Path {
         Path { path in bars.forEach { path.addRect($0.applying(CGAffineTransform(scaleX: size.width / 96, y: size.height / 96))) } }
