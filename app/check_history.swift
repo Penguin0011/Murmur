@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 @main struct HistoryChecks {
     static func main() throws {
@@ -12,6 +13,22 @@ import CryptoKit
         let loaded = try store.entries()
         precondition(loaded.count == 1 && loaded[0].rawText == entry.rawText)
         let path = root.appendingPathComponent(entry.id + ".json")
+        let abandoned = root.appendingPathComponent(".pending-" + UUID().uuidString)
+        try JSONEncoder().encode(entry).write(to: abandoned)
+        _ = try HistoryStore(directory: root)
+        precondition(!FileManager.default.fileExists(atPath: abandoned.path) && FileManager.default.fileExists(atPath: path.path), "startup removes orphan writes and keeps committed history")
+        // A second opener must wait for an active writer rather than deleting its temporary output.
+        let lockFD = open(root.path, O_RDONLY)
+        precondition(lockFD >= 0 && flock(lockFD, LOCK_EX) == 0)
+        try JSONEncoder().encode(entry).write(to: abandoned)
+        let entered = DispatchSemaphore(value: 0), finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            entered.signal(); _ = try! HistoryStore(directory: root); finished.signal()
+        }
+        entered.wait()
+        precondition(finished.wait(timeout: .now() + 0.1) == .timedOut && FileManager.default.fileExists(atPath: abandoned.path), "cleanup waits for the writer's lock")
+        precondition(flock(lockFD, LOCK_UN) == 0); close(lockFD)
+        precondition(finished.wait(timeout: .now() + 2) == .success && !FileManager.default.fileExists(atPath: abandoned.path))
         let permissions = try FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as! NSNumber
         precondition(permissions.intValue == 0o600)
         let thirty = try store.expired(retention: "30-days", now: now); precondition(thirty.count == 1)

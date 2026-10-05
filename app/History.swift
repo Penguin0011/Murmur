@@ -21,8 +21,30 @@ struct HistoryStore {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        try removePendingFiles()
+    }
+    /// Writers and cleanup share a directory lock across processes, so cleanup cannot unlink a live save.
+    private func locked<T>(_ operation: () throws -> T) throws -> T {
+        let descriptor = open(directory.path, O_RDONLY | O_NOFOLLOW)
+        guard descriptor >= 0 else { throw CaptureError("Cannot open history directory") }
+        defer { close(descriptor) }
+        guard flock(descriptor, LOCK_EX) == 0 else { throw CaptureError("Cannot lock history directory") }
+        defer { flock(descriptor, LOCK_UN) }
+        return try operation()
+    }
+    private func removePendingFiles() throws {
+        try locked {
+            for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+                let name = file.lastPathComponent
+                guard name.hasPrefix(".pending-"), UUID(uuidString: String(name.dropFirst(9))) != nil else { continue }
+                try FileManager.default.removeItem(at: file)
+            }
+        }
     }
     func save(_ entry: HistoryEntry) throws {
+        try locked { try saveLocked(entry) }
+    }
+    private func saveLocked(_ entry: HistoryEntry) throws {
         guard UUID(uuidString: entry.id) != nil else { throw CaptureError("Invalid history identifier") }
         let target = directory.appendingPathComponent(entry.id + ".json")
         let temporary = directory.appendingPathComponent(".pending-" + UUID().uuidString)
@@ -90,6 +112,7 @@ struct HistoryStore {
     /// Expires entries, and unreadable files by their modification date: their text still counts as history.
     func purge(retention: String, now: Date = Date()) throws {
         for entry in try expired(retention: retention, now: now) { try delete(entry) }
+        try removePendingFiles()
         guard let cutoff = try Self.cutoff(retention: retention, now: now) else { return }
         let files = (try? FileManager.default.contentsOfDirectory(at: unreadableDirectory, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
         for file in files where ((try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantFuture) <= cutoff {

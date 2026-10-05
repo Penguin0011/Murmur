@@ -454,6 +454,11 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         try check(HistoryCap.capStatus(entries: remaining, directory: history, retention: .forever, capBytes: 3200) == .approachingCap(usedBytes: 3000, capBytes: 3200), "capStatus forever")
         let noDrop = try HistoryCap.enforce(entries: remaining, directory: history, retention: .forever, capBytes: 1000) { _ in check(false, "forever must not delete") }
         check(noDrop.dropped.isEmpty, "forever enforce drops nothing")
+        let quarantine = history.appendingPathComponent("unreadable")
+        try FileManager.default.createDirectory(at: quarantine, withIntermediateDirectories: true)
+        try Data(repeating: 0, count: 700).write(to: quarantine.appendingPathComponent("damaged.json"))
+        try FileManager.default.createSymbolicLink(at: history.appendingPathComponent("outside-link"), withDestinationURL: dir)
+        try check(HistoryCap.usage(directory: history) == 3700, "quarantined bytes count without following symlinks")
         check(HistoryRetention(rawValue: "six-months") == .sixMonths && HistoryRetention(rawValue: "30-days") == .thirtyDays, "retention strings match HistoryStore")
 
         // History-off mode.

@@ -67,12 +67,14 @@ enum HistoryCap {
         String(format: "%.1f MB", Double(bytes) / 1_048_576)
     }
 
-    /// Bytes of regular files directly inside `directory` (entries plus any stray temporaries).
+    /// Bytes of history files, including quarantined data; symbolic links are not followed.
     static func usage(directory: URL) throws -> Int64 {
         let fm = FileManager.default
         var total: Int64 = 0
         for name in try fm.contentsOfDirectory(atPath: directory.path) {
-            let attrs = try fm.attributesOfItem(atPath: directory.appendingPathComponent(name).path)
+            let file = directory.appendingPathComponent(name)
+            let attrs = try fm.attributesOfItem(atPath: file.path)
+            if attrs[.type] as? FileAttributeType == .typeDirectory { total += try usage(directory: file); continue }
             guard attrs[.type] as? FileAttributeType == .typeRegular else { continue }
             total += (attrs[.size] as? NSNumber)?.int64Value ?? 0
         }
@@ -148,7 +150,7 @@ enum HistoryMode: String, Codable {
 
     var persistsTranscripts: Bool { self == .on }
 
-    static let offDisclosure = "With history off, Murmur does not save transcripts to disk. If insertion fails and Murmur quits or stops unexpectedly, that text cannot be recovered. Turning history off does not delete existing history; delete it separately."
+    static let offDisclosure = "With history off, Murmur does not save transcript history to disk. If insertion fails and Murmur quits or stops unexpectedly, that text cannot be recovered. Retry audio can still remain for up to 24 hours, and learning can still save spellings in your dictionary. Turning history off does not delete existing history; delete it separately."
 }
 
 /// Where Murmur keeps user data. The dictionary and ledger may share one directory.
