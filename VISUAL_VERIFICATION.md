@@ -28,6 +28,26 @@ Read [app/INSERTION_REVIEW.md](app/INSERTION_REVIEW.md), [CONTRIBUTING.md](CONTR
 - Record actual macOS/app versions, appearance, window size, executable hash, steps, expected/actual result, screenshot path, relevant content-free log excerpt, and verdict for every matrix row. Use **PASS / FAIL / NOT RUN**, with a reason for each NOT RUN. Keep synthetic screenshots/output in `runtime/verification/`; do not commit private transcripts, credentials, model files, or audio.
 - Preserve the user's settings, dictionary, history, clipboard, open documents, and selected provider. Use fixture-only appearance/accessibility overrides where possible. Do not delete live data or change global privacy permissions to exercise failure cases; simulate those cases in isolated checks.
 
+## Verification results — October 5, 2026
+
+Environment: macOS 26.6.2; app bundle version 0.1.0 (build 1); arm64; fixture window 1000×680 points, compact 760×560 points; full application executable SHA-256 `424a560969b3dd40b33f5763c95a5df9c4a8d0681d8f7d10588d364352594997`. [Certain] `app/build.sh`, `codesign --verify --deep --strict runtime/Murmur.app`, and `runtime/Murmur.app/Contents/MacOS/Murmur --preview --quit-after 2` passed after the source change. [Certain]
+
+| Area / step | Expected and observed | Evidence / verdict |
+| --- | --- | --- |
+| History status matrix; dark full-size | Seven synthetic rows showed verified/unverified without delivery badges, failed as Not inserted, pending as Saved with duplicate-avoidance guidance, held results as recoverable, and session-only retention disclosure; Needs attention excluded verified, unverified, and saved-not-inserted. | `runtime/verification/history-matrix-dark-full.png`, `history-matrix-needs-attention.png`, `history-session-only-dark.png` — PASS. [Certain] |
+| History visual variants | Long multiline text wraps; light, dark, compact, and opaque layouts were inspected. Search no-results and empty History appeared; the empty state disables Clear History. | `runtime/verification/history-matrix-light-full.png`, `history-matrix-light-compact-opaque.png`, `history-search-empty.png`, `history-empty-dark.png` — PASS. [Certain] |
+| History actions | Synthetic row deletion removed one fixture record; Clear History confirmation showed irreversible-deletion text, Cancel retained rows, Delete All cleared only the fixture. Copy Text and Copy Raw showed copied feedback; the original clipboard's item/type representation was restored and verified unchanged. | `runtime/verification/history-clear-confirmation.png` — PASS. [Certain] |
+| Bubble and recovery UI | Listening and processing bubbles rendered; error status click opened Settings and dismiss cleared the status. Saved/learned synthetic notice rendered. | `runtime/verification/bubble-listening.png`, `bubble-processing.png`, `error-dismiss-ready-dark.png` — PASS. [Certain] |
+| Keyboard/accessibility | Tab focus reached Search with visible focus ring; labels exposed History states and bubble status through Accessibility. | UI Automation accessibility snapshots — PASS. [Certain] |
+| Isolated UI matrix | `app/check_ui.sh --history --saved --matrix`, light/full, light/compact/opaque, empty History, and listening/processing/recovery bubble fixtures were run. | PASS. [Certain] |
+| Source checks | Launch (normal/preview/probe and 13 invalid combinations), History persistence/retention/deletion, controller, insertion spike, dictionary, provider and processing checks passed. | PASS. [Certain] |
+| Build/signature/preview | Production build completed; deep/strict bundle signature verification succeeded; preview exited 0. | PASS. [Certain] |
+| Physical speech and live model insertion | Not run: the pinned Parakeet model directory contains metadata/configuration only, not its model weight files. The production `--test-audio` probe therefore cannot reach transcription. | NOT RUN; no weights downloaded and no provider/preferences changed. [Certain] |
+| Live target-app insertion and recovery | TextEdit, browser fields, rich-text/canvas editors, chat composers, code editor/terminal, secure fields, focus changes, physical shortcut, alternate keyboard layout, remote client, and clipboard-manager race cases were not exercised in this run. | NOT RUN; no disposable target-app matrix was executed. Synthetic UI is not delivery evidence. [Certain] |
+| Reduce Motion / contrast preferences | Not run because exercising them would require changing persistent system appearance/accessibility settings; opaque rendering was exercised in the fixture. | NOT RUN. [Certain] |
+
+Residual race limits remain: macOS focus checks, clipboard staging, posting, and restoration are not atomic; the 0.5-second clipboard lease may be too short for slow or remote readers. [Certain] This verification does not establish universal delivery reliability. [Certain]
+
 ## Visual review
 
 Run these separately and quit each fixture before opening another:

@@ -1,3 +1,11 @@
+# Insertion verification checkpoint — October 5, 2026
+
+The insertion behavior review and isolated History UI fixture work are on `aakash-insertion-behavior`; the source fixture change is commit `a954d1f`. [Certain] The verification matrix, evidence links, outcomes, and remaining live-coverage limits are recorded in `VISUAL_VERIFICATION.md`. [Certain]
+
+The development app at `runtime/Murmur.app` passed `app/build.sh`, deep/strict signature verification, and `--preview --quit-after 2`; its Murmur executable SHA-256 is `424a560969b3dd40b33f5763c95a5df9c4a8d0681d8f7d10588d364352594997`. [Certain] The installed `/Users/aakash/Applications/Murmur.app` still has executable SHA-256 `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`, and its prior backup remains `/Users/aakash/Applications/Murmur-backups/20261005-132505/Murmur.app`. [Certain] This task's runtime code change is an access-level adjustment used by the isolated fixture; no insertion behavior changed, so the installed app was not replaced. [Certain]
+
+Synthetic fixture checks covered History statuses, session-only retention, search/empty states, light/dark/compact/opaque layouts, copy feedback, deletion, clear confirmation, accessibility focus, and status-bubble navigation/dismissal. [Certain] Live microphone and target-app insertion remain unverified because pinned Parakeet weight files are absent; see the explicit NOT RUN rows in `VISUAL_VERIFICATION.md`. [Certain]
+
 # Local insertion update installed — October 5, 2026
 
 Installed application code through `5ea3ce5` from `aakash-insertion-behavior` at `/Users/aakash/Applications/Murmur.app`. The installed executable matches the tested build: SHA-256 `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`. Deep/strict signature verification passed. Quit the previous app normally after observing Ready; backed it up at `/Users/aakash/Applications/Murmur-backups/20261005-132505/Murmur.app` before replacement. All 279 history filenames remained identical across installation. Relaunch showed Ready, new paste-last help text, and Microphone, Accessibility, and Input Monitoring allowed. The app remains running normally. [Certain]
