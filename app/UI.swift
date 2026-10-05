@@ -954,6 +954,29 @@ struct SettingsView: View {
 
     // MARK: First run
 
+    private var shortcutName: String {
+        ["right-option": "Right Option", "fn": "Fn / Globe", "ctrl-option-space": "Control–Option–Space"][controller.shortcut] ?? "your shortcut"
+    }
+
+    /// The PRD's first-run test dictation and the faithful-transcription choice.
+    private var tryIt: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow("Try it")
+            help("Press \(shortcutName) and say a sentence. With this window in front, your words appear here instead of being typed.").padding(.top, 8)
+            Text(controller.setupTestTranscript.isEmpty ? "Waiting for your voice…" : controller.setupTestTranscript)
+                .font(.system(size: 16)).foregroundStyle(controller.setupTestTranscript.isEmpty ? Palette.ink70 : Palette.ink)
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading).padding(12)
+                .overlay(Rectangle().strokeBorder(Palette.ink45, lineWidth: 1)).padding(.top, 12)
+                .accessibilityLabel(controller.setupTestTranscript.isEmpty ? "Test dictation: waiting" : "Test dictation: \(controller.setupTestTranscript)")
+            toggleRow("Clean up my dictation", "Removes filler words, applies spoken corrections and formats spoken lists. Off is faithful transcription: exactly what was heard, with dictionary spellings.", isOn: Binding(
+                get: { controller.cleanupFillers || controller.cleanupCorrections || controller.cleanupLists },
+                set: { on in if on { controller.cleanupFillers = true; controller.cleanupCorrections = true; controller.cleanupLists = true } else { controller.useFaithfulTranscription() } }))
+                .padding(.top, 8)
+        }
+        .onAppear { controller.setupShowing = true }
+        .onDisappear { controller.setupShowing = false }
+    }
+
     private var setup: some View {
         let steps: [(title: String, detail: String, done: Bool, action: String, run: () -> Void)] = [
             ("Microphone", "So Murmur can hear you while the shortcut is held.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
@@ -1010,6 +1033,7 @@ struct SettingsView: View {
                                 .padding(.vertical, 18).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink45).frame(height: 1) }
                             }
                             if !controller.modelMessage.isEmpty { help(controller.modelMessage).padding(.top, 12).frame(maxWidth: .infinity, alignment: .leading) }
+                            if done == 4 { tryIt.padding(.top, 28) }
                         }
                     }
                     HStack {

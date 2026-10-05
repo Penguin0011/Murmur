@@ -274,6 +274,9 @@ final class PreStart: @unchecked Sendable {
     @Published var historyCapWarning: String?
     /// Set at launch when damaged history files were moved aside.
     @Published var historyNotice: String?
+    /// While the first-run screen is open, a dictation made with Murmur in front lands here instead of being refused.
+    var setupShowing = false
+    @Published var setupTestTranscript = ""
     @Published var sessionOnlyIDs: Set<String> = []
     var historySummary: String { HistoryText.summary(mode: appliedHistoryMode, count: history.count, sessionOnly: sessionOnlyIDs.count) }
     // Update checks (R12). Results are shown quietly in Settings only.
@@ -955,6 +958,11 @@ final class PreStart: @unchecked Sendable {
         if processed != text {
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus)
             do { try store.save(entry) } catch { setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); destination = nil; historySaved(); done(); return }
+        }
+        // First-run test dictation: Murmur never types into itself, so show the result on the setup screen.
+        if setupShowing && NSWorkspace.shared.frontmostApplication?.processIdentifier == getpid() {
+            setupTestTranscript = processed; setPhase("Ready", "Test dictation worked."); bubble.hide()
+            destination = nil; historySaved(); done(); return
         }
         if insertThisSession {
             watchTick(ending: true)
