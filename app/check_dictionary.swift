@@ -141,6 +141,18 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         check(CorrectionFilter.evaluate(source: "lunch", target: "launch", isCommonWord: common) == .rejected(.ordinaryWords), "lunch -> launch")
         check(CorrectionFilter.evaluate(source: "Acme", target: "Akme", isCommonWord: common) == .accepted(source: "Acme", target: "Akme"), "lexicon keeps Acme -> Akme")
         check(CorrectionFilter.evaluate(source: "Cloud", target: "Claude", manualPreferred: ["claude"], isCommonWord: { lexicon.contains($0) || $0 == "claude" }) == .rejected(.ordinaryWords), "manual term does not waive lexicon guard")
+        // With a lexicon: case, spacing, acronym and short-name fixes (user decision, October 4, 2026).
+        let words: Set<String> = lexicon.union(["notion", "git", "hub", "every", "one", "everyone", "api", "son", "call"])
+        let ordinary: (String) -> Bool = { words.contains($0) }
+        for (source, target) in [("jira", "Jira"), ("git hub", "GitHub"), ("para keet", "Parakeet"), ("a p i", "API"), ("J son", "JSON"), ("Jon", "John")] {
+            check(CorrectionFilter.evaluate(source: source, target: target, isCommonWord: ordinary) == .accepted(source: source, target: target), "\(source) -> \(target) learned with a lexicon")
+        }
+        check(CorrectionFilter.evaluate(source: "call jira", target: "call Jira", isCommonWord: ordinary) == .accepted(source: "jira", target: "Jira"), "case fix trims its context")
+        check(CorrectionFilter.evaluate(source: "notion", target: "Notion", isCommonWord: ordinary) == .rejected(.ordinaryWords), "recasing an ordinary word is not learned")
+        check(CorrectionFilter.evaluate(source: "every one", target: "everyone", isCommonWord: ordinary) != .accepted(source: "every one", target: "everyone"), "joining ordinary words is not learned")
+        check(CorrectionFilter.evaluate(source: "jira", target: "Jira") == .rejected(.caseOnly), "no lexicon: case fix skipped")
+        check(CorrectionFilter.evaluate(source: "git hub", target: "GitHub") == .rejected(.punctuationOnly), "no lexicon: spacing fix skipped")
+        check(CorrectionFilter.evaluate(source: "Jon", target: "John") == .rejected(.tooShort), "no lexicon: short word skipped")
     }
 
     static func learningChecks(_ dir: URL) throws {
@@ -304,7 +316,20 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             try check(CorrectionFilter.replacements("call Acme today", "call Akme today and more").get() == [C(source: "Acme", targets: ["Akme"])], "words added after the span are ignored")
             check(CorrectionFilter.replacements("call Acme today", "call today") == .failure(.deletion), "deletion")
             check(CorrectionFilter.replacements("maybe the team wants a new plan", "I think we should ship old stuff") == .failure(.tooManyWords), "rewrite")
-            check(CorrectionFilter.replacements("acme", "Acme") == .failure(.caseOnly), "case only")
+            try check(CorrectionFilter.replacements("acme", "Acme").get() == [C(source: "acme", targets: ["Acme"])], "a case change is a change")
+        }
+
+        // A case fix runs both tiers and its reversal withdraws it.
+        do {
+            let d = dir.appendingPathComponent("case-tiers")
+            let dict = try DictionaryStore(directory: d)
+            let ledger = try CorrectionLedger(directory: d, dictionary: dict)
+            ledger.isCommonWord = { ["call", "the"].contains($0) }
+            for _ in 0..<2 { let s = UUID(); try ledger.record(obs(s, "call jira", "call Jira")); try ledger.settle(sessionID: s) }
+            check(learned(dict).map(\.preferred) == ["Jira"] && learned(dict)[0].variants == ["jira"], "case fix: hint then variant")
+            check(dict.apply(to: "open jira now") == "open Jira now", "case fix applies")
+            let r = UUID(); try ledger.record(obs(r, "Jira", "jira")); try ledger.settle(sessionID: r)
+            check(learned(dict).isEmpty, "lowercasing it again withdraws it")
         }
 
         // Tiers: two mishearings of one spelling share one entry; a deleted word is never re-learned.

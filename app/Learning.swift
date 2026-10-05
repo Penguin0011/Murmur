@@ -50,6 +50,8 @@ enum CandidateVerdict: Equatable {
 enum CorrectionFilter {
     static let maxWords = 3
     static let minLetters = 4
+    /// With a lexicon, short names and acronyms (Jon -> John, sequel -> SQL) are allowed.
+    static let minLettersWithLexicon = 2
     static let directSimilarity = 0.75
     static let phoneticSimilarity = 0.5
 
@@ -118,8 +120,12 @@ enum CorrectionFilter {
         if t.isEmpty { return .rejected(.deletion) }
         if s.isEmpty { return .rejected(.insertion) }
         if s == t { return .rejected(.identical) }
-        if TermText.fold(s) == TermText.fold(t) { return .rejected(.caseOnly) }
-        if letters(TermText.fold(s)) == letters(TermText.fold(t)) { return .rejected(.punctuationOnly) }
+        // Case (jira -> Jira), spacing (git hub -> GitHub) and short-word (Jon -> John) fixes are
+        // learned only when the lexicon can tell names and terms from ordinary words.
+        let caseOnly = TermText.fold(s) == TermText.fold(t)
+        if caseOnly, isCommonWord == nil { return .rejected(.caseOnly) }
+        let spacing = !caseOnly && letters(TermText.fold(s)) == letters(TermText.fold(t))
+        if spacing, isCommonWord == nil || TermText.tokens(s).count == TermText.tokens(t).count { return .rejected(.punctuationOnly) }
 
         var sw = TermText.tokens(s), tw = TermText.tokens(t)
         if sw.isEmpty { return .rejected(.insertion) }
@@ -127,8 +133,9 @@ enum CorrectionFilter {
         guard wordsOnly(s, sw), wordsOnly(t, tw) else { return .rejected(.unsupportedCharacters) }
 
         // Shared surrounding words are context, not part of the replacement.
-        while let a = sw.first, let b = tw.first, a.folded == b.folded { sw.removeFirst(); tw.removeFirst() }
-        while let a = sw.last, let b = tw.last, a.folded == b.folded { sw.removeLast(); tw.removeLast() }
+        func same(_ a: TermText.Token, _ b: TermText.Token) -> Bool { caseOnly ? a.text == b.text : a.folded == b.folded }
+        while let a = sw.first, let b = tw.first, same(a, b) { sw.removeFirst(); tw.removeFirst() }
+        while let a = sw.last, let b = tw.last, same(a, b) { sw.removeLast(); tw.removeLast() }
         if tw.isEmpty { return .rejected(.deletion) }
         if sw.isEmpty { return .rejected(.insertion) }
         guard sw.count <= maxWords, tw.count <= maxWords else { return .rejected(.tooManyWords) }
@@ -141,15 +148,19 @@ enum CorrectionFilter {
             return .rejected(.number)
         }
         for a in sf { for b in tf where antonymSet.contains("\(a)|\(b)") { return .rejected(.antonym) } }
-        if (sf + tf).contains(where: { contextualWords.contains($0) }) { return .rejected(.contextualWord) }
+        // Spelled-out letters ("a p i" -> API) are not the function words they look like.
+        if (spacing ? tf : sf + tf).contains(where: { contextualWords.contains($0) }) { return .rejected(.contextualWord) }
 
         let sLetters = letters(sf.joined()), tLetters = letters(tf.joined())
-        guard sLetters.count >= minLetters, tLetters.count >= minLetters else { return .rejected(.tooShort) }
-        if sf.count == 1, tf.count == 1, inflectionOnly(sf[0], tf[0]) { return .rejected(.inflection) }
+        let floor = isCommonWord == nil ? minLetters : minLettersWithLexicon
+        guard sLetters.count >= floor, tLetters.count >= floor else { return .rejected(.tooShort) }
+        if !caseOnly, sf.count == 1, tf.count == 1, inflectionOnly(sf[0], tf[0]) { return .rejected(.inflection) }
 
         let reduced = CandidateVerdict.accepted(source: sw.map(\.text).joined(separator: " "),
                                                 target: tw.map(\.text).joined(separator: " "))
-        if let isCommonWord, (sf + tf).allSatisfy(isCommonWord) { return .rejected(.ordinaryWords) }
+        // An all-capitals target (API, SQL, JSON) is a deliberate acronym, not an ordinary word.
+        let acronym = tw.allSatisfy { $0.text.count >= 2 && $0.text.allSatisfy { !$0.isLetter || $0.isUppercase } }
+        if let isCommonWord, !acronym, (sf + tf).allSatisfy(isCommonWord) { return .rejected(.ordinaryWords) }
         if manualPreferred.contains(tf.joined(separator: " ")) { return reduced }
         let similarity = self.similarity(sLetters, tLetters)
         if similarity >= directSimilarity { return reduced }
@@ -166,7 +177,7 @@ enum CorrectionFilter {
     }
 
     /// The replaced word runs from `original` to `current`, aligned by longest common
-    /// subsequence of folded words (the helper's BoostFilter aligns the same way, in another
+    /// subsequence of words (case-sensitive, so jira -> Jira is a change) (the helper's BoostFilter aligns the same way, in another
     /// target). Words added after the span, or anywhere with nothing replaced, are ignored, so a
     /// fix followed by more typing still counts, and two fixes in one dictation are two changes.
     /// Fails for an edit that deletes words, or replaces more than half of a long span (a rewrite).
@@ -175,16 +186,16 @@ enum CorrectionFilter {
         var dp = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
         for i in stride(from: a.count - 1, through: 0, by: -1) {
             for j in stride(from: b.count - 1, through: 0, by: -1) {
-                dp[i][j] = a[i].folded == b[j].folded ? dp[i + 1][j + 1] + 1 : max(dp[i + 1][j], dp[i][j + 1])
+                dp[i][j] = a[i].text == b[j].text ? dp[i + 1][j + 1] + 1 : max(dp[i + 1][j], dp[i][j + 1])
             }
         }
         var changes: [Change] = []
         var replaced = 0
         var i = 0, j = 0
         while i < a.count || j < b.count {
-            if i < a.count, j < b.count, a[i].folded == b[j].folded { i += 1; j += 1; continue }
+            if i < a.count, j < b.count, a[i].text == b[j].text { i += 1; j += 1; continue }
             let i0 = i, j0 = j
-            while (i < a.count || j < b.count) && !(i < a.count && j < b.count && a[i].folded == b[j].folded) {
+            while (i < a.count || j < b.count) && !(i < a.count && j < b.count && a[i].text == b[j].text) {
                 if j < b.count && (i == a.count || dp[i][j + 1] >= dp[i + 1][j]) { j += 1 } else { i += 1 }
             }
             if i == i0 { continue }                      // words added: not a correction
@@ -346,12 +357,24 @@ final class CorrectionLedger {
         case rejected(CandidateRejection)
     }
 
-    struct Pair: Codable, Hashable { let source: String; let target: String }
+    /// Folded source and target, except that a case-only fix keeps the target's casing
+    /// (jira -> Jira), since folding would make it identical to its source.
+    struct Pair: Codable, Hashable {
+        let source: String
+        let target: String
+        init(source: String, target: String) { self.source = source; self.target = target }
+        init(of source: String, _ target: String) {
+            self.source = TermText.fold(source)
+            self.target = TermText.fold(target) == self.source ? target : TermText.fold(target)
+        }
+        /// The target as other keys see it (preferred spellings and tombstones compare folded).
+        var folded: String { TermText.fold(target) }
+    }
 
     private struct Evidence: Codable {
         var correction: ObservedCorrection
         var settled: Bool
-        var pair: Pair { Pair(source: TermText.fold(correction.source), target: TermText.fold(correction.target)) }
+        var pair: Pair { Pair(of: correction.source, correction.target) }
     }
 
     private struct Promotion: Codable {
@@ -448,8 +471,8 @@ final class CorrectionLedger {
                 case .rejected(let reason):
                     if outcome == nil, rejection == .identical { rejection = reason }
                 case .accepted(let source, let target):
-                    let pair = Pair(source: TermText.fold(source), target: TermText.fold(target))
-                    if state.tombstones.contains(where: { $0.target == pair.target }) { if outcome == nil { outcome = .tombstoned } }
+                    let pair = Pair(of: source, target)
+                    if state.tombstones.contains(where: { $0.folded == pair.folded }) { if outcome == nil { outcome = .tombstoned } }
                     else if state.suppressed.contains(pair.source) { if outcome == nil { outcome = .suppressed } }
                     else {
                         let reduced = ObservedCorrection(sessionID: session, source: source, target: target, observedAt: observed.observedAt)
@@ -482,7 +505,7 @@ final class CorrectionLedger {
         var promoted: [DictionaryEntry] = []
 
         for pair in pairs {
-            if let reversed = state.promotions.first(where: { $0.pair.source == pair.target && $0.pair.target == pair.source }) {
+            if let reversed = state.promotions.first(where: { $0.pair != pair && $0.pair.source == pair.folded && $0.pair.folded == pair.source }) {
                 // The user changed a learned replacement back: withdraw it and never re-learn it.
                 withdraw(reversed, tombstone: true)
                 state.suppressed.insert(pair.source)
@@ -500,13 +523,13 @@ final class CorrectionLedger {
                     let sessions = Array(Set(settled.map(\.correction.sessionID)))
                     if let existing = dictionary.entry(forVariant: latest.correction.source) {
                         // A manual or other entry already owns this form; consume matching evidence only.
-                        if TermText.fold(existing.preferred) == pair.target {
+                        if TermText.fold(existing.preferred) == pair.folded {
                             state.evidence.removeAll { $0.pair.source == pair.source }
                         }
                     } else if sessions.count >= Self.requiredSessions {
                         // Second consistent fix: the misheard form is replaced from now on, as another
                         // variant of the learned entry for this spelling when there is one.
-                        if var owner = dictionary.entries.first(where: { $0.source == .learned && TermText.fold($0.preferred) == pair.target }) {
+                        if var owner = dictionary.entries.first(where: { $0.source == .learned && TermText.fold($0.preferred) == pair.folded }) {
                             owner.variants.append(latest.correction.source)
                             try dictionary.update(owner)
                             state.promotions.append(Promotion(entryID: owner.id, pair: pair, sessions: sessions, kind: .variant))
@@ -518,7 +541,7 @@ final class CorrectionLedger {
                         }
                         // Evidence is consumed; the promotion keeps only session IDs for revert.
                         state.evidence.removeAll { $0.pair.source == pair.source }
-                    } else if !dictionary.entries.contains(where: { TermText.fold($0.preferred) == pair.target }) {
+                    } else if !dictionary.entries.contains(where: { TermText.fold($0.preferred) == pair.folded }) {
                         // First fix: a vocabulary hint only. Evidence stays for the second tier.
                         let entry = try dictionary.add(preferred: latest.correction.target, variants: [], source: .learned)
                         state.promotions.append(Promotion(entryID: entry.id, pair: pair, sessions: sessions, kind: .hint))
