@@ -147,7 +147,6 @@ struct SettingsView: View {
     @State private var editVariants = ""
     @State private var openKey: ProviderID?
     @State private var keyDraft = ""
-    @State private var customAPIKeyDraft = ""
     @State private var checkedSetup = false
     /// A window preference only; the floating indicator keeps following the system appearance.
     @AppStorage("appearance") private var appearance = "light"
@@ -496,6 +495,18 @@ struct SettingsView: View {
                 segmented(CloudTranscriber.allCases.map { ($0, short($0.displayName)) }, $controller.cloudTranscriber, size: 14).padding(.top, 16)
                     .help(controller.cloudTranscriber.displayName)
                 disclosure(controller.routeDisclosure(.transcription)).padding(.top, 16)
+                if controller.cloudTranscriber == .customAPI {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("OpenAI-compatible API base URL").font(.system(size: 14, weight: .semibold))
+                        field("https://api.example.com/v1", text: $controller.customAPIBaseURL)
+                            .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+                        Text("Transcription model name").font(.system(size: 14, weight: .semibold))
+                        field("whisper-1", text: $controller.customTranscriptionModel)
+                            .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+                        keyRow(.customAPI)
+                        help("The server must support OpenAI-compatible POST /v1/audio/transcriptions. The server address and key are shared with custom cleanup; model names are separate.")
+                    }.padding(.top, 16)
+                }
             }
 
             Button { showAdvanced.toggle() } label: {
@@ -550,7 +561,7 @@ struct SettingsView: View {
             eyebrow("Cleanup runs with").padding(.top, 28)
             segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
-            help("Built-in local rules handle only a limited set of cleanup patterns. For private AI cleanup, try an instruction model around 8B or larger with a local model server; Murmur has not qualified a model that size yet. Its tested models under 2B were slower and less accurate than Gemini in a synthetic comparison. Otherwise choose Gemini or a Custom API provider. Murmur never switches routes on its own.")
+            help("Built-in local rules handle only a limited set of cleanup patterns. For private AI cleanup, try an instruction model around 8B or larger with a local model server; Murmur has not qualified a model that size yet. Its tested models under 2B were slower and less accurate than Gemini in a synthetic comparison. Otherwise choose Gemini or a Custom Provider. Murmur never switches routes on its own.")
                 .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
@@ -565,29 +576,8 @@ struct SettingsView: View {
                     Text("Model name").font(.system(size: 14, weight: .semibold)).padding(.top, 4)
                     field("gpt-oss-120b", text: $controller.customAPIModel)
                         .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
-                    Text("API key (optional)").font(.system(size: 14, weight: .semibold)).padding(.top, 4)
-                    let hasCustomAPIKey = controller.savedKeys.contains(.customAPI)
-                    HStack(spacing: 8) {
-                        mono(hasCustomAPIKey ? "Saved in Keychain ✓" : KeyText.none, color: hasCustomAPIKey ? Palette.accentInk : Palette.ink70)
-                        Spacer()
-                        if hasCustomAPIKey {
-                            Button("Validate") { controller.validateKey(.customAPI) }.buttonStyle(InkButtonStyle(kind: .outline))
-                            Button("Remove", role: .destructive) { controller.removeKey(.customAPI); customAPIKeyDraft = "" }
-                                .buttonStyle(InkButtonStyle(kind: .outline))
-                        }
-                    }
-                    HStack(spacing: 8) {
-                        field(hasCustomAPIKey ? "Enter to replace saved key" : "Paste API key", text: $customAPIKeyDraft, secure: true)
-                        Button("Save Key") {
-                            if controller.saveKey(.customAPI, customAPIKeyDraft) { customAPIKeyDraft = "" }
-                        }
-                        .buttonStyle(InkButtonStyle(kind: .accent)).disabled(customAPIKeyDraft.isEmpty)
-                    }
-                    if controller.customAPIKeyNeedsConfirmation {
-                        help("Save the API key again to confirm this server address. The existing key stays in Keychain and will not be sent until confirmed.", color: Palette.accentInk)
-                    }
-                    if let message = controller.keyMessages[.customAPI], !message.isEmpty { help(message) }
-                    help("The endpoint must accept OpenAI-compatible POST /v1/chat/completions requests. Enter the provider's base URL and exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
+                    keyRow(.customAPI)
+                    help("The endpoint must accept OpenAI-compatible POST /v1/chat/completions requests. Its server address and key are shared with custom transcription. Enter the provider's base URL and exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
                 }
                 .padding(.top, 16)
             }
@@ -766,10 +756,10 @@ struct SettingsView: View {
     private var apiKeys: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(spacing: 0) {
-                ForEach(KeyText.providers.filter { $0 != .customAPI }, id: \.self) { provider in keyRow(provider) }
+                ForEach(KeyText.providers, id: \.self) { provider in keyRow(provider) }
             }
             .overlay(alignment: .top) { rule }.padding(.top, 20)
-            help("Keys are stored in your Keychain and never shown again after saving. OpenRouter's key is used for transcription; the custom API key is set in Cleanup.").padding(.top, 16)
+            help("Keys are stored in your Keychain and never shown again after saving. Custom Provider uses one server address and API key for transcription and cleanup, with separate model names. Configure it in either section.").padding(.top, 16)
         }
     }
 
@@ -794,6 +784,12 @@ struct SettingsView: View {
                     field("Paste your \(provider.displayName) API key", text: $keyDraft, secure: true)
                     Button("Save Key") { if controller.saveKey(provider, keyDraft) { keyDraft = ""; openKey = nil } }
                         .buttonStyle(InkButtonStyle(kind: .accent)).disabled(keyDraft.isEmpty)
+                }
+            }
+            if provider == .customAPI {
+                help("Server address: \(controller.customAPIBaseURL)")
+                if controller.customAPIKeyNeedsConfirmation {
+                    help("Save the API key again to confirm this server address. The existing key stays in Keychain and will not be sent until confirmed.", color: Palette.accentInk)
                 }
             }
             if let message = controller.keyMessages[provider], !message.isEmpty { help(message) }
@@ -1145,6 +1141,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupChoice) { controller.settingsChanged() }
             // Typing in a provider field waits for Return or focus loss.
             .onChange(of: controller.customAPIModel) { if !apiFieldFocused { controller.settingsChanged() } }
+            .onChange(of: controller.customTranscriptionModel) { if !apiFieldFocused { controller.settingsChanged() } }
             .onChange(of: controller.customAPIBaseURL) { if !apiFieldFocused { controller.settingsChanged() } }
             .onChange(of: apiFieldFocused) { _, focused in if !focused { controller.settingsChanged() } }
     }

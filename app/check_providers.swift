@@ -135,6 +135,7 @@ func checkKeychainStore() {
 
 @main struct ProviderChecks {
     static func main() async {
+        await checkCustomTranscription()
         checkAPIKeyAndCredentials()
         checkMultipart()
         checkGeminiRequest()
@@ -1162,4 +1163,35 @@ extension ProviderChecks {
         catch { check(error as? ProviderError == .authentication(.gemini), "validate: observed bad key is authentication") }
         check(GeminiTranscribeProvider(apiKey: key).id == .gemini, "transcribe: reports as Gemini")
     }
+}
+
+
+func checkCustomTranscription() async {
+    let audio = AudioPayload(data: Data([1, 2, 3]), vocabularyHint: "Murmur")
+    for address in ["https://speech.example/tenant/v1", "http://192.168.1.20:8000/v1", "http://localhost:8000/v1"] {
+        guard var provider = try? OpenAICompatibleTranscriptionProvider(baseURL: address, model: "custom/whisper:latest", apiKey: key) else { check(false, "custom speech server builds"); continue }
+        let request = provider.makeRequest(audio, boundary: "synthetic-boundary")
+        let normalized = try! LocalEndpoint.normalize(address)
+        check(request.url?.absoluteString == normalized.absoluteString + "/v1/audio/transcriptions", "custom speech request uses the configured host and prefix")
+        let body = String(data: request.httpBody!, encoding: .utf8)!
+        check(body.contains("custom/whisper:latest") && body.contains("Murmur"), "custom speech sends the model and disclosed spelling hints")
+        check((request.value(forHTTPHeaderField: "Authorization") != nil) == !address.contains("192.168"), "custom speech refuses to send keys over off-device http")
+        check(provider.disclosure.staysOnThisMac == address.contains("localhost"), "custom speech locality disclosure")
+        let transport = MockTransport(.success(result(200, #"{"text":"Synthetic custom provider transcript."}"#)))
+        provider.transport = transport
+        let text = try? await provider.transcribe(audio)
+        check(text == "Synthetic custom provider transcript." && transport.requests.count == 1, "custom speech transcribes with one configured request")
+        try? await provider.validate()
+        check(transport.requests.last?.url == provider.server.modelsURL, "custom speech validation targets the configured server")
+    }
+    let unkeyed = try! OpenAICompatibleTranscriptionProvider(baseURL: "http://localhost:8000", model: "whisper-1")
+    check(unkeyed.makeRequest(audio).value(forHTTPHeaderField: "Authorization") == nil, "unkeyed custom speech sends no bearer")
+    check((try? OpenAICompatibleTranscriptionProvider(baseURL: "https://user:password@example.com/v1", model: "m")) == nil, "custom speech rejects embedded credentials")
+    check((try? OpenAICompatibleTranscriptionProvider(baseURL: "https://example.com/v1", model: "bad\nmodel")) == nil, "custom speech rejects model control characters")
+    var broken = unkeyed
+    broken.transport = MockTransport(.success(result(200, #"{"wrong":"response"}"#)))
+    do { _ = try await broken.transcribe(audio); check(false, "malformed custom speech refuses") }
+    catch { check(error as? ProviderError == .malformedResponse(.customAPI), "custom speech errors retain the custom provider identity") }
+    do { _ = try await broken.transcribe(AudioPayload(data: Data(repeating: 0, count: OpenAICompatibleTranscriptionProvider.uploadLimitBytes + 1))); check(false, "oversized custom speech refuses") }
+    catch { check(error as? ProviderError == .payloadTooLarge(.customAPI, limitBytes: OpenAICompatibleTranscriptionProvider.uploadLimitBytes), "custom speech upload is bounded") }
 }

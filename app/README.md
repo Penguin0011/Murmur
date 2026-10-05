@@ -113,7 +113,8 @@ app/check_ui.sh --credential-warning --recovery --bubble-only
 app/check_ui.sh --listening --bubble-only
 app/check_ui.sh --processing --bubble-only
 app/check_ui.sh --saved --bubble-only
-app/check_ui.sh --saved --learned --bubble-only
+app/check_ui.sh --saved --learned --keep-notice --bubble-only
+app/check_ui.sh --custom-transcription
 app/check_ui.sh --light --dictionary
 ```
 
@@ -258,7 +259,7 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 ```
 
 **Settings → Processing routes (R4).** Routes take effect on Apply Settings. The settings keys are `transcriptionRoute`, `cloudTranscriber`, `cleanupChoice`, `customAPIBaseURL` and `customAPIModel`. Keys are never stored in UserDefaults.
-- Transcription: On this Mac (Parakeet, the default) or Cloud. The cloud picker lists only implemented, non-deprecated providers: OpenRouter Whisper (`OpenRouterTranscriptionProvider`) and Gemini audio (`GeminiTranscriptionProvider`, a language model). Fireworks is not listed. `makeTranscriptionProvider(id:key:)` is the single factory. To add Gemini 3.5 Transcribe, add a `CloudTranscriber` case (with `displayName` and `providerID` `.gemini`) and one factory case; its own `disclosure` must say that Google stores the audio (PRD §5 user decision).
+- Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini audio, Gemini 3.5 Transcribe, and Custom Provider. The custom route uses an editable OpenAI-compatible base URL and transcription model, posting multipart audio and spelling hints to `/v1/audio/transcriptions`; it shares the endpoint and destination-bound key with custom cleanup, whose model name remains separate. The request format follows the [OpenAI transcription reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create). A compatible server must implement that format; arbitrary audio APIs are not supported. Legacy OpenRouter selections migrate to editable custom settings, with fresh disclosure acknowledgement and one-time key confirmation. [Certain]
 - Cleanup: Local rules (the default), Gemini or a Custom API provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. Add its optional key under Cleanup beside the endpoint. OpenRouter remains available as a dedicated transcription choice and can also be configured as a custom cleanup endpoint.
 
 **A dictation on a cloud route.**
