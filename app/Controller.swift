@@ -1165,7 +1165,16 @@ final class PreStart: @unchecked Sendable {
         do {
             if current != w.current {
                 let outcome = try processing?.observeSpan(sessionID: session, original: w.observation.initial, current: current)
-                timingLog.notice("watch edit outcome=\(outcome.map { "\($0)" } ?? "reverted", privacy: .public)")
+                // Shape only (word and letter counts, similarity), never the words themselves.
+                let shape: String
+                switch CorrectionFilter.replacements(w.observation.initial, current) {
+                case .failure(let why): shape = "\(why)"
+                case .success(let changes): shape = changes.map { change in
+                    let from = CorrectionFilter.letters(change.source), to = CorrectionFilter.letters(change.targets[0])
+                    return "\(TermText.tokens(change.source).count)w\(from.count)l->\(TermText.tokens(change.targets[0]).count)w\(to.count)l sim=\(String(format: "%.2f", CorrectionFilter.similarity(from, to)))"
+                }.joined(separator: ",")
+                }
+                timingLog.notice("watch edit outcome=\(outcome.map { "\($0)" } ?? "reverted", privacy: .public) changes=\(shape, privacy: .public)")
                 w.current = current
             }
             watch = w
