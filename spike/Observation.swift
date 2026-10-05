@@ -69,6 +69,8 @@ struct DictationObservation {
               Range(selection, in: value) != nil, Self.validBoundaries(selection, value) else { return stop("selection left dictated span") }
         // Text typed after the span stays in it; the ledger's word diff ignores added words.
         let current = text.substring(with: updatedRange)
+        // A chat composer empties when Return sends it: keep the fix made before that.
+        if current.isEmpty { return stop("span cleared") }
         range = updatedRange
         edited = current
         candidate = Self.replacement(initial, current)
@@ -83,7 +85,7 @@ struct DictationObservation {
         stopReason = reason
         // A valid prior correction survives focus departure, expiry or the caret moving elsewhere
         // (the text it was read from is unchanged). An invalidating edit removes it.
-        if !["window ended", "focus departed", "selection left dictated span"].contains(reason) { candidate = nil; edited = nil }
+        if !["window ended", "focus departed", "selection left dictated span", "span cleared"].contains(reason) { candidate = nil; edited = nil }
         return candidate
     }
 
@@ -151,6 +153,8 @@ struct KeystrokeSpan {
     private var anchor: Int, caret: Int
     /// Where the caret might be after a click; empty while its position is known.
     private var guesses: [KeystrokeSpan] = []
+    private var typedSinceClick = false
+    private var unresolved = false
     /// Picks the plausible reading among the guesses (the ledger's filter in the app).
     var resolve: ([String]) -> String? = { _ in nil }
 
@@ -168,12 +172,25 @@ struct KeystrokeSpan {
 
     mutating func depart() { if state == .editing { state = .departed } }
 
-    /// A click in the app. A second click while the first is still unresolved ends the watch.
+    /// Takes the plausible reading of the guesses as `value`. Resolving runs the ledger's filter
+    /// (tens of ms on a long span), so the app calls this on its poll, not per keystroke.
+    mutating func refresh() {
+        guard unresolved else { return }
+        unresolved = false
+        if let reading = resolve(guesses.map(\.value)) { chars = Array(reading) }
+    }
+
+    /// A click in the app (a double-click is two). A click after typing that still has no
+    /// plausible reading ends the watch; otherwise the guesses restart from the current text.
     /// ponytail: one guess per caret position and word, O(span length) work per key; bound the
     /// span if very long dictations make keystrokes lag.
     mutating func click() {
         guard state == .editing else { return }
-        if !guesses.isEmpty, resolve(guesses.map(\.value)) == nil { state = .departed; return }
+        if typedSinceClick {
+            guard let reading = resolve(guesses.map(\.value)) else { state = .departed; return }
+            chars = Array(reading)
+        }
+        typedSinceClick = false; unresolved = false
         let words = chars.indices.filter { isWord(chars[$0]) && ($0 == 0 || !isWord(chars[$0 - 1])) }
         guesses = (0...chars.count).map { KeystrokeSpan(chars, anchor: $0, caret: $0) }
             + words.map { KeystrokeSpan(chars, anchor: $0, caret: wordEnd(after: $0)) }
@@ -183,14 +200,17 @@ struct KeystrokeSpan {
         guard state == .editing else { return }
         if !guesses.isEmpty {
             if key == .other { state = .lost; return }
+            typedSinceClick = true
             var seen = Set<String>()
-            guesses = guesses.compactMap { guess in
+            let next = guesses.compactMap { guess -> KeystrokeSpan? in
                 var next = guess
                 next.apply(key)
                 return next.state == .editing && seen.insert("\(next.anchor) \(next.caret) \(next.value)").inserted ? next : nil
             }
-            if guesses.isEmpty { state = .departed; return }
-            if let reading = resolve(guesses.map(\.value)) { chars = Array(reading) }
+            // Return or a caret key ends the edit: settle what was typed before it.
+            if next.isEmpty { refresh(); state = .departed; return }
+            guesses = next
+            unresolved = true
             return
         }
         let low = min(anchor, caret), high = max(anchor, caret)
@@ -297,6 +317,10 @@ func runObservationChecks() {
     _ = appended.observe(value: "🙂 Akme done more", selection: NSRange(location: 12, length: 0), now: 1,
                          sameFocusedField: true, readableNonsecure: true)
     assert(!appended.stopped && appended.edited == "Akme done more")  // a fix, then more typing, stays attributed
+    var sent = tracker()
+    _ = sent.observe(value: "🙂 Akme done", selection: NSRange(location: 7, length: 0), now: 1, sameFocusedField: true, readableNonsecure: true)
+    _ = sent.observe(value: "🙂 ", selection: NSRange(location: 3, length: 0), now: 2, sameFocusedField: true, readableNonsecure: true)
+    assert(sent.stopped && sent.edited == "Akme done")  // Return sent the message: the fix stands
     var selection = tracker()
     _ = selection.observe(value: "🙂 Acme done", selection: NSRange(location: 0, length: 0), now: 1,
                           sameFocusedField: true, readableNonsecure: true)

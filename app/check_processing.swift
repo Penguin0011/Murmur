@@ -309,6 +309,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
             // nil is a click inside the app; a trailing `click` is one that leaves (an app switch).
             for (i, key) in (keys + (click ? [nil] : [])).enumerated() {
                 if let key { span.apply(key) } else if click && i == keys.count { span.depart() } else { span.click() }
+                span.refresh()
                 _ = o.observe(value: span.value, selection: span.selection, now: Double(i + 1),
                               sameFocusedField: span.state != .departed, readableNonsecure: span.state != .lost)
                 let current = o.edited ?? o.initial
@@ -325,13 +326,23 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(keyed.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "backspace-and-retype promotes")
         // Click to fix: the caret position is unknown, so the one plausible reading is taken.
         let clicked = try ProcessingCoordinator(directory: dir.appendingPathComponent("click"), defaults: defaults)
-        try typed([nil] + "Akme".map { .text(String($0)) }, into: clicked)    // double-click a word, retype it
+        try typed([nil, nil, nil] + "Akme".map { .text(String($0)) }, into: clicked)    // click, then double-click a word (two clicks), retype it
         check(clicked.dictionary.entries.map(\.preferred) == ["Akme"], "double-click and retype is learned")
         try typed([nil, .backspace(word: false), .backspace(word: false), .backspace(word: false)] + "kme".map { .text(String($0)) } + [.text("\r")], into: clicked)
         check(clicked.dictionary.entries.first?.variants == ["Acme"], "click, backspace and retype, then Return, promotes")
         let unclear = try ProcessingCoordinator(directory: dir.appendingPathComponent("unclear"), defaults: defaults)
         try typed([nil, .text(" and more")], into: unclear)
         check(unclear.ledger.evidence.isEmpty, "typing after a click with no plausible fix teaches nothing")
+        var stray = KeystrokeSpan("Call Acme today")
+        stray.resolve = { CorrectionFilter.plausibleEdit(original: "Call Acme today", candidates: $0) }
+        stray.click(); stray.apply(.text("x")); stray.click()
+        check(stray.state == .departed, "a click after unexplained typing ends the watch")
+        var twice = KeystrokeSpan("Ask Acme, then Acme again")
+        twice.resolve = { CorrectionFilter.plausibleEdit(original: "Ask Acme, then Acme again", candidates: $0) }
+        twice.click(); twice.click()
+        for c in "Akme" { twice.apply(.text(String(c))) }
+        twice.refresh()
+        check(twice.value.contains("Akme"), "retyping one of two identical words is still a clear fix")
         var edge = KeystrokeSpan("Hi")
         edge.apply(.backspace(word: true)); edge.apply(.backspace(word: true))
         check(edge.state == .lost && edge.value == "", "deleting past the span start is lost")

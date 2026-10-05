@@ -209,18 +209,36 @@ enum CorrectionFilter {
     /// Of `candidates` (what a span might now read, when the caret position is unknown), the one
     /// reading whose every replaced run is an accepted respelling of the original, preferring the
     /// reading that changes the fewest words (a retyped word over one merged with its neighbour).
-    /// Nil when none, or several equally small readings, qualify.
+    /// Readings that imply the same fix (one of several identical words retyped) count as one.
+    /// Nil when none, or several equally small but different fixes, qualify.
     static func plausibleEdit(original: String, candidates: [String], isCommonWord: ((String) -> Bool)? = nil) -> String? {
-        var best: (cost: Int, reading: String?)?
+        func accepted(_ changes: [Change], _ lexicon: ((String) -> Bool)?) -> Bool {
+            changes.allSatisfy { change in
+                if case .accepted = evaluate(source: change.source, target: change.targets.last!, isCommonWord: lexicon) { return true }
+                return false
+            }
+        }
+        // The spell checker is slow, so it only sees readings that pass every other rule.
+        var passing: [(cost: Int, reading: String, changes: [Change])] = []
+        let a = Array(original)
         for candidate in Set(candidates) where candidate != original {
-            guard case .success(let changes) = replacements(original, candidate),
-                  changes.allSatisfy({ change in
-                      if case .accepted = evaluate(source: change.source, target: change.targets.last!, isCommonWord: isCommonWord) { return true }
-                      return false
-                  }) else { continue }
-            let cost = changes.reduce(0) { $0 + max(TermText.tokens($1.source).count, TermText.tokens($1.targets.last!).count) }
-            if best == nil || cost < best!.cost { best = (cost, candidate) }
-            else if cost == best!.cost { best!.reading = nil }
+            // Each guess differs only around its caret: diff just that stretch, widened to whole words.
+            let b = Array(candidate)
+            var start = 0, tail = 0
+            while start < min(a.count, b.count), a[start] == b[start] { start += 1 }
+            while tail < min(a.count, b.count) - start, a[a.count - 1 - tail] == b[b.count - 1 - tail] { tail += 1 }
+            while start > 0, TermText.isCore(a[start - 1]) || TermText.isJoiner(a[start - 1]) { start -= 1 }
+            while tail > 0, TermText.isCore(a[a.count - tail]) || TermText.isJoiner(a[a.count - tail]) { tail -= 1 }
+            guard case .success(let changes) = replacements(String(a[start..<(a.count - tail)]), String(b[start..<(b.count - tail)])),
+                  accepted(changes, nil) else { continue }
+            passing.append((changes.reduce(0) { $0 + max(TermText.tokens($1.source).count, TermText.tokens($1.targets.last!).count) }, candidate, changes))
+        }
+        var best: (cost: Int, fix: [Change], reading: String?)?
+        for item in passing.sorted(by: { ($0.cost, $0.reading) < ($1.cost, $1.reading) }) {
+            if let best, item.cost > best.cost { break }
+            guard isCommonWord == nil || accepted(item.changes, isCommonWord) else { continue }
+            if best == nil { best = (item.cost, item.changes, item.reading) }
+            else if best!.fix != item.changes { best!.reading = nil }
         }
         return best?.reading
     }

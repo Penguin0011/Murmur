@@ -1122,7 +1122,8 @@ final class PreStart: @unchecked Sendable {
     private func watchTick(ending: Bool = false) {
         guard var w = watch else { return }
         let same: Bool, readable: Bool, value: String, selection: NSRange
-        if let keys = w.keys {
+        if var keys = w.keys {
+            keys.refresh(); w.keys = keys; watch?.keys = keys
             same = keys.state != .departed && NSWorkspace.shared.frontmostApplication?.processIdentifier == w.pid
             readable = keys.state != .lost && !IsSecureEventInputEnabled()
             value = keys.value; selection = keys.selection
