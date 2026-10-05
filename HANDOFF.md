@@ -1,3 +1,9 @@
+# Saved notification timeout — October 5, 2026
+
+Saved-delivery notifications now dismiss after five seconds using the existing status timer. Each timer checks the status UUID, so it cannot hide a newer notice, error, or active dictation. Dismissal preserves History and recovery audio; other errors retain their existing behavior. [Certain]
+
+The native controller check passed, including visibility before five seconds, dismissal after five seconds, recovery preservation, and replacement by a newer Saved notice. The signed production build succeeded and passed deep/strict verification. Installed at `/Users/aakash/Applications/Murmur.app`, executable SHA-256 `b019d735234f68f7891111bb09294cd762a9c59ece2288d3cda5e370fe3162d2`; previous build backed up at `/Users/aakash/Applications/Murmur-backups/20261005-030042/Murmur.app`. [Certain]
+
 # PR #19 review — October 5, 2026
 
 Reviewed the configurable Custom API cleanup change with the ponytail skill. Resolved conflicts by retaining main's newer release and local-model documentation. Fixed credential migration: only the selected legacy route is copied, and successful migration saves the new route once; removing the Custom API key no longer restores an old Cerebras key on restart. OpenRouter transcription keeps its own credential. Updated the cleanup help text to match the new choices. [Certain]

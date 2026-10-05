@@ -99,6 +99,18 @@ import AppKit
         controller.setPhase("Error", "Transcription failed. Audio is saved for retry for up to 24 hours.")
         RunLoop.main.run(until: Date().addingTimeInterval(1.5))
         precondition(controller.phase == "Error" && controller.message.hasPrefix("Transcription failed"), "a newer error is not dismissed")
+        controller.history = [entry]; controller.recoveryEntryID = entry.id
+        controller.setPhase("Saved", "Saved in History. Delivery could not be verified. Press ⌃⌘V to paste it if it is missing.")
+        RunLoop.main.run(until: Date().addingTimeInterval(2.5))
+        precondition(controller.phase == "Saved", "saved notice stays visible before five seconds")
+        RunLoop.main.run(until: Date().addingTimeInterval(2.8))
+        precondition(controller.phase == "Ready", "saved notice dismisses after five seconds")
+        precondition(controller.history.first?.id == entry.id && manager.fileExists(atPath: recovery.path), "automatic dismissal preserves recovery")
+        controller.setPhase("Saved", "Older saved notice")
+        RunLoop.main.run(until: Date().addingTimeInterval(2.5))
+        controller.setPhase("Saved", "Newer saved notice")
+        RunLoop.main.run(until: Date().addingTimeInterval(2.8))
+        precondition(controller.phase == "Saved" && controller.message == "Newer saved notice", "an old timer cannot dismiss a newer saved notice")
         controller.phase = "Saved"
         // The check binary has no bundled artifact-pins.json: the model row offers nothing and refuses quietly, without an alert.
         precondition(controller.modelRow.actions.isEmpty && !controller.usesCustomModelFolder)

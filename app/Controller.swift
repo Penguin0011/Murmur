@@ -781,10 +781,12 @@ final class PreStart: @unchecked Sendable {
     }
     func setPhase(_ phase: String, _ message: String) {
         self.phase = phase; self.message = message
-        // "No speech" needs no action, so its popup leaves on its own after 2 s unless replaced.
+        // Saved text stays recoverable in History; dismiss its notice after 5 s unless replaced.
         let shown = UUID(); statusShown = shown
-        if phase == "Error" && message.hasPrefix("No speech was detected") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        let dismissAfter: TimeInterval? = phase == "Saved" ? 5 :
+            (phase == "Error" && message.hasPrefix("No speech was detected") ? 2 : nil)
+        if let dismissAfter {
+            DispatchQueue.main.asyncAfter(deadline: .now() + dismissAfter) { [weak self] in
                 guard let self, self.statusShown == shown else { return }
                 self.dismissStatus()
             }
