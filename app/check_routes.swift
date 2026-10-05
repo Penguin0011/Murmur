@@ -27,7 +27,7 @@ private final class MockTransport: HTTPTransport, @unchecked Sendable {
     init(_ result: HTTPResult) { self.result = result }
     var count: Int { lock.lock(); defer { lock.unlock() }; return _count }
     var lastBody: String { lock.lock(); defer { lock.unlock() }; return String(decoding: _lastBody ?? Data(), as: UTF8.self) }
-    func send(_ request: URLRequest) async throws -> HTTPResult { lock.lock(); _count += 1; _lastBody = request.httpBody; lock.unlock(); return result }
+    func send(_ request: URLRequest) async throws -> HTTPResult { lock.withLock { _count += 1; _lastBody = request.httpBody }; return result }
 }
 
 /// A transcriber with no silence pre-check, like OpenRouter Whisper.
