@@ -111,6 +111,14 @@ import AppKit
         controller.setPhase("Saved", "Newer saved notice")
         RunLoop.main.run(until: Date().addingTimeInterval(2.8))
         precondition(controller.phase == "Saved" && controller.message == "Newer saved notice", "an old timer cannot dismiss a newer saved notice")
+        controller.setPhase("Inserted", "Inserted.")
+        RunLoop.main.run(until: Date().addingTimeInterval(5.3))
+        precondition(!controller.hasStatusToShow, "inserted notice dismisses after five seconds")
+        controller.setPhase("Error", "Transcription failed. Audio is saved for retry for up to 24 hours.")
+        RunLoop.main.run(until: Date().addingTimeInterval(5.3))
+        precondition(controller.phase == "Error", "an error stays readable past five seconds")
+        RunLoop.main.run(until: Date().addingTimeInterval(3))
+        precondition(!controller.hasStatusToShow, "an error notice dismisses after eight seconds")
         controller.phase = "Saved"
         // The check binary has no bundled artifact-pins.json: the model row offers nothing and refuses quietly, without an alert.
         precondition(controller.modelRow.actions.isEmpty && !controller.usesCustomModelFolder)

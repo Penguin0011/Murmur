@@ -55,6 +55,33 @@ enum Palette {
     static let accent16 = accent.opacity(0.16)
 }
 
+/// The Murmur mark: five bars falling from loud to quiet, on the logo sheet's 96-unit grid.
+enum Logo {
+    static let bars: [CGRect] = [
+        CGRect(x: 14, y: 16, width: 9, height: 64), CGRect(x: 29, y: 28, width: 9, height: 40),
+        CGRect(x: 44, y: 35, width: 9, height: 26), CGRect(x: 59, y: 40, width: 9, height: 16),
+        CGRect(x: 74, y: 44, width: 9, height: 8),
+    ]
+    static func path(in size: CGSize) -> Path {
+        Path { path in bars.forEach { path.addRect($0.applying(CGAffineTransform(scaleX: size.width / 96, y: size.height / 96))) } }
+    }
+    /// Full-colour mark: bars stay literal ink on accent in both appearances.
+    static func mark(size: CGFloat) -> some View {
+        path(in: CGSize(width: size, height: size)).fill(Color(red: 0x14 / 255, green: 0x14 / 255, blue: 0x14 / 255))
+            .frame(width: size, height: size).background(Palette.accent).accessibilityHidden(true)
+    }
+    /// One-colour menu bar mark; the template tint follows the menu bar.
+    static let menuBarImage: NSImage = {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { rect in
+            NSColor.black.setFill()
+            bars.forEach { $0.applying(CGAffineTransform(scaleX: rect.width / 96, y: rect.height / 96)).fill() }
+            return true
+        }
+        image.isTemplate = true; image.accessibilityDescription = "Murmur"
+        return image
+    }()
+}
+
 private struct InkButtonStyle: ButtonStyle {
     enum Kind { case filled, outline, accent, plain }
     var kind: Kind = .filled
@@ -271,7 +298,10 @@ struct SettingsView: View {
 
     private var header: some View {
         HStack(spacing: 32) {
-            wordmark("Murmur", size: 24)
+            HStack(spacing: 12) {
+                Logo.mark(size: 32)
+                wordmark("Murmur", size: 24)
+            }
             HStack(spacing: 4) {
                 tab("Settings", .settings, count: nil)
                 tab("History", .history, count: controller.history.count)
@@ -1014,16 +1044,7 @@ struct SettingsView: View {
                     .accessibilityElement(children: .combine).padding(.top, 16)
                     Text("Your voice, on your Mac.").font(.system(size: 18)).foregroundStyle(Palette.ink80).padding(.top, 20)
                     Spacer()
-                    Canvas { context, size in
-                        var path = Path()
-                        for x in stride(from: -size.height, to: size.width, by: 9) {
-                            path.move(to: CGPoint(x: x, y: size.height)); path.addLine(to: CGPoint(x: x + size.height, y: 0))
-                        }
-                        context.stroke(path, with: .color(Palette.accent.opacity(0.55)), lineWidth: 2)
-                    }
-                    .frame(width: 140, height: 140).clipped()
-                    .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 2))
-                    .rotationEffect(.degrees(-1.5)).accessibilityHidden(true)
+                    Logo.mark(size: 140).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 2)).rotationEffect(.degrees(-1.5))
                 }
                 .padding(40).frame(width: geometry.size.width * 5 / 12, alignment: .leading).frame(maxHeight: .infinity, alignment: .top)
                 .background(Palette.accent16)
@@ -1188,8 +1209,6 @@ private struct BubbleView: View {
                 Text(summary).font(.system(size: 12, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                     .help(message).allowsHitTesting(false).accessibilityHidden(true)
                 Spacer(minLength: 4)
-                Button(action: controller.dismissStatus) { Image(systemName: "xmark").font(.system(size: 11)) }
-                    .buttonStyle(.plain).help("Dismiss error").accessibilityLabel("Dismiss error")
             }
             // These keep only the pop-up; saved audio stays reachable from Murmur's window.
             if controller.recoveryAudio != nil || controller.hasRecoveryAudio,
