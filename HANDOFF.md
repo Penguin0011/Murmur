@@ -171,10 +171,12 @@ Merged state: module-one's standalone glass-dot indicator and error-only popup r
 **Product, release and housekeeping**
 12. ~~The PRD cleanup-failure conflict (section 3 vs section 4) is unresolved.~~ Resolved in PRD "Milestone 1 implementation decisions": cleanup errors and guard failures both save the raw transcript, show recovery, and require an explicit raw-text action before insertion.
 13. Builds are self-signed (`clouddev Development`); Developer ID signing and notarization need an Apple Developer Program account.
-14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders, notification names and the repository still use the old name.
+14. Bundle ID `cc.clouddev.dictation.development`, the `~/Library/{Application Support,Caches}/Dictation` folders, the `Dictation-preview-` temp folders and notification names still use the old name.
 15. Test transcripts from live runs remain in Murmur's History.
 16. ~~No LICENSE file~~: added (MIT, Aakash). `README.md`, `CONTRIBUTING.md` and `THIRD_PARTY_NOTICES.md` now exist.
 17. The new modules have never been compiled on the Mac; the Keychain store has never been compiled at all.
+
+Repository rename (October 4, 2026): GitHub repository is now `Penguin0011/Murmur`, and the local `origin` remote and release-check default use that name. The repository remains private; anonymous GitHub Releases checks return 404 until publication or a different feed is chosen. Apple Developer Program enrollment is deferred until much later because of its $99 cost. [Certain]
 
 **Processing and providers**
 18. No provider has been called with a real API key. Fireworks STT is deprecated upstream; the OpenRouter STT and Gemini/OpenRouter cleanup split is a proposal pending user approval.

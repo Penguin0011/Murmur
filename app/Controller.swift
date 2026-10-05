@@ -314,7 +314,7 @@ final class PreStart: @unchecked Sendable {
     private var started = false
     private let dictionaryModelDirectory = DictionaryModelFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser)
     private var lastAutomaticUpdateAttempt: Date?
-    // TODO(R12): UpdateConfiguration still defaults to Penguin0011/dictation; confirm the release repository before shipping.
+    // R12 uses the confirmed Penguin0011/Murmur release repository.
     private lazy var updateChecker: UpdateChecker? = (try? UpdateConfiguration(currentVersion: currentVersion)).map { UpdateChecker(configuration: $0) }
     private var retry: RetryAudio?
     private var processing: ProcessingCoordinator?

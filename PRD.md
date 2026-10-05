@@ -183,11 +183,13 @@ Each handoff includes owned files, inputs/outputs, acceptance criteria, assumpti
 
 Confirmed distribution intent: public GitHub source under MIT, with GitHub update checks and user-controlled updates. [Certain]
 
+The repository is currently private. The unauthenticated Releases API check returns 404, so release checks require the repository to be public or a different public update feed; visibility remains unchanged pending release authorization. [Certain]
+
 Proposed launch implementation: check stable GitHub Releases at launch and at most once daily, plus a manual “Check for Updates” action and an option to disable automatic checks. Show release notes and open the release page on user action; the user downloads and replaces the app. In-app installation is not assumed.
 
 Use proper version comparison, ignore drafts/prereleases by default, validate the configured repository and release link, and handle offline/rate-limited checks without interrupting dictation. Explain that release checks use the network even when inference is local. Never transmit transcripts, audio, dictionary, or API keys in update requests.
 
-Release handoff must include reproducible build instructions, architecture/macOS requirements, signed/notarized download artifacts where available, third-party notices, and source for the released version. GitHub account/repository name and signing identity remain to be supplied; do not invent them.
+Release handoff must include reproducible build instructions, architecture/macOS requirements, signed/notarized download artifacts where available, third-party notices, and source for the released version. The confirmed GitHub repository is `Penguin0011/Murmur`; signing identity remains to be supplied.
 
 ## 9. Release acceptance
 
@@ -208,7 +210,7 @@ Release handoff must include reproducible build instructions, architecture/macOS
 1. Minimum macOS 26 and Apple Silicon scope remain confirmed. M1/8 GB performance is deferred, with user-selected models and no validated minimum RAM guarantee. Intel remains deferred. [Certain]
 2. Select and benchmark local models on the available Mac; retain local-first and cleanup-on defaults and user model selection. Do not silently substitute cloud processing. [Certain]
 3. Establish supported automatic-learning apps through the required feasibility spike, with unsupported categories disclosed rather than blocking launch (approved); the 60-second window and two-observation threshold are approved. [Certain]
-4. Product name: **Murmur** (confirmed October 2, 2026). Signing identity and approval of manual download/replace updating remain open. Settled: GitHub account `Penguin0011`, repository `dictation` (to be renamed); the user is the MIT copyright holder; LICENSE added October 3, 2026 with holder "Aakash" as supplied by the user. No Apple Developer account exists yet: enrolling in the Apple Developer Program is a prerequisite for Developer ID signing and notarization, and the release milestone is blocked on it. The user deferred enrollment (October 3, 2026); development builds stay self-signed until then. [Certain]
+4. Product and GitHub repository name: **Murmur**; repository `Penguin0011/Murmur` confirmed and renamed October 4, 2026. Signing identity and approval of the update mechanism remain open. The user deferred Apple Developer Program enrollment until much later because it costs $99; development builds stay self-signed until enrollment. The user is the MIT copyright holder; LICENSE added October 3, 2026 with holder "Aakash" as supplied by the user. [Certain]
 5. Local cleanup model/runtime and verification of the named cloud providers (Fireworks, Gemini, OpenRouter); validation and exact artifact pinning for selected Parakeet Unified transcription. Update October 3, 2026: provider documentation is verified and a launch split is proposed in section 5, pending user approval and live key tests; the local cleanup baseline is recorded in the milestone 1 decisions, and the local cleanup model is still open. [Certain]
 
 This draft defines the confirmed product and proposed work boundaries; it is not yet a claim of full Wispr Flow feature parity. [Certain]
