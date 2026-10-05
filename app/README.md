@@ -120,6 +120,8 @@ app/check_ui.sh --light --dictionary
 
 `--dictionary` seeds three sample entries (one turned off); open Settings → Dictionary to see them. The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
 
+`--matrix` seeds the History delivery and held-result states in temporary storage, including one session-only row; `--empty` opens History with no entries. `--light` sets both the fixture window and Settings appearance. [Certain]
+
 The developer audio probe requires both flags and must target a disposable field:
 
 ```sh

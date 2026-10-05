@@ -327,7 +327,7 @@ final class PreStart: @unchecked Sendable {
     /// All history reads and writes; it keeps entries in memory only when history is off.
     private var records: HistoryRouter<HistoryEntry>?
     private var appliedHistoryMode: HistoryMode
-    private var dataDirectory: URL?
+    var dataDirectory: URL? // Internal so the isolated UI fixture can seed only its temporary history.
     private let downloader: ModelDownloader?
     private var modelDownloadInFlight = false
     /// Dictionary support for on-device transcription (the pinned CTC model) and the private
