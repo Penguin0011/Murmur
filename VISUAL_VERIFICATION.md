@@ -30,7 +30,7 @@ Read [app/INSERTION_REVIEW.md](app/INSERTION_REVIEW.md), [CONTRIBUTING.md](CONTR
 
 ## Verification results — October 5, 2026
 
-Environment: macOS 26.6.2; app bundle version 0.1.0 (build 1); arm64; fixture window 1000×680 points, compact 760×560 points; full application executable SHA-256 `424a560969b3dd40b33f5763c95a5df9c4a8d0681d8f7d10588d364352594997`. [Certain] `app/build.sh`, `codesign --verify --deep --strict runtime/Murmur.app`, and `runtime/Murmur.app/Contents/MacOS/Murmur --preview --quit-after 2` passed after the source change. [Certain]
+Environment: macOS 26.6.2; app bundle version 0.1.0 (build 1); arm64; fixture window 1000×680 points, compact 760×560 points; merged-source executable SHA-256 after the final signed build `82a6f673fcec798c8f6c38195db1a8cbc8b14afbf1afe26f511f9a9399921e2b`. [Certain] PR #24 merged as `fe70874f3fec392f38798c33fc2ba3ed9b7f7a91`; the local branch tree matches `origin/main`. [Certain] `app/build.sh`, `codesign --verify --deep --strict runtime/Murmur.app`, and `runtime/Murmur.app/Contents/MacOS/Murmur --preview --quit-after 2` passed after merge. [Certain]
 
 | Area / step | Expected and observed | Evidence / verdict |
 | --- | --- | --- |
@@ -42,6 +42,7 @@ Environment: macOS 26.6.2; app bundle version 0.1.0 (build 1); arm64; fixture wi
 | Isolated UI matrix | `app/check_ui.sh --history --saved --matrix`, light/full, light/compact/opaque, empty History, and listening/processing/recovery bubble fixtures were run. | PASS. [Certain] |
 | Source checks | Launch (normal/preview/probe and 13 invalid combinations), History persistence/retention/deletion, controller, insertion spike, dictionary, provider and processing checks passed. | PASS. [Certain] |
 | Build/signature/preview | Production build completed; deep/strict bundle signature verification succeeded; preview exited 0. | PASS. [Certain] |
+| Installed application after merge | `/Users/aakash/Applications/Murmur.app` signature verification passed and its executable remains `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`; the app and ModelBench processes are running. No replacement was needed because this task's runtime change only exposes the data directory to the synthetic fixture. | PASS for signature/hash/process; current Ready screen NOT RUN because macOS was locked during the final check. Previous Ready/permissions check is recorded in HANDOFF.md. [Certain] |
 | Physical speech and live model insertion | Not run: the pinned Parakeet model directory contains metadata/configuration only, not its model weight files. The production `--test-audio` probe therefore cannot reach transcription. | NOT RUN; no weights downloaded and no provider/preferences changed. [Certain] |
 | Live target-app insertion and recovery | TextEdit, browser fields, rich-text/canvas editors, chat composers, code editor/terminal, secure fields, focus changes, physical shortcut, alternate keyboard layout, remote client, and clipboard-manager race cases were not exercised in this run. | NOT RUN; no disposable target-app matrix was executed. Synthetic UI is not delivery evidence. [Certain] |
 | Reduce Motion / contrast preferences | Not run because exercising them would require changing persistent system appearance/accessibility settings; opaque rendering was exercised in the fixture. | NOT RUN. [Certain] |
