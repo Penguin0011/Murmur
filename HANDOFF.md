@@ -1,3 +1,45 @@
+# Dictionary feature — October 4, 2026
+
+Branch `aakash/dictionary-feature-523123`. Goal: make the custom dictionary matter on the main route (local transcription, then Gemini cleanup) and finish the editor. [Certain]
+
+Done:
+- `7a4e865` Sound-alike terms reach cleanup. `DictionaryStore.relevantEntries` now adds up to 10 enabled entries whose preferred spelling sounds like a 1–3 word span of the transcript (matching phonetic keys and similarity ≥ 0.5, or similarity ≥ 0.75 for terms of 6+ letters). `apply()` stays exact. The cleanup prompt says the dictionary respelling overrides "never respell". The guard lets one term join 2–3 raw words that spell it exactly ("cloud dev" → "clouddev"). [Certain]
+- Measured with a 20-term sample dictionary over the 425-utterance corpus: 9/425 transcripts pulled in a term, all genuine; 0 false positives after the 6-letter rule (before it, "I mean" pulled in "Sean" 20 times). Recall probe: shawn/seen→Sean, coopernetties→Kubernetes, a cash→Aakash, jiminy→Gemini, para keet→Parakeet matched; figment→Figma, germany→Gemini, shivon→Siobhan did not. [Certain]
+
+Known limits: "seen" sends "Sean" to the cleanup provider; the prompt tells it to respell only where the term is clearly meant. Not yet tested against a live Gemini call. [Certain]
+
+- `01f9fc3` Settings → Dictionary: Edit turns a row into fields with Save and Cancel (Return saves, Escape cancels). Each row has an on/off toggle; entries that are off are dimmed and no longer apply. A conflicting variant shows its error message. Return in the Add fields adds. There's an empty state, and the help text explains exact versus sound-alike matching. `ProcessingCoordinator.updateEntry` keeps an entry's source; learned promotions are keyed by entry ID, so editing a learned entry can't re-promote the old spelling. Checks pass: dictionary 140, processing 95, routes 89, providers, cleanup corpus, and the controller compile. [Certain]
+- Merged the live Gemini validation notes from local `main` (section below). That run found Gemini writing "shelf made"/"shelf-made" for Shelfmate. With this branch, a Shelfmate entry that has no variants reaches the cleanup prompt for both forms. `2135bac` lets the guard accept a term that replaces 2–3 words that sound like it, on the cloud path only ("shelf made" → "Shelfmate"; this also covers "cube cuddle" → kubectl). Checks: processing 96, routes 89, dictionary 140, providers, cleanup corpus. [Certain]
+- UI fixture (`app/check_ui.sh --light --dictionary`), inspected in pixels: found and fixed squeezed Add-row fields and a visible "Use <term>" label beside each toggle. After the fix: rows show the badge, toggle, Edit and ×; the disabled entry is dimmed; Edit → change variants → Save updated the row; the toggles carry VoiceOver labels ("Use Kubernetes"). Dark mode was not inspected. [Certain]
+
+Not done: a live Gemini call through this branch's sound-alike path; the earlier live run used exact variants on `main`. Next live check: remove Shelfmate's variants and say "Send the Shelfmate report". [Certain]
+
+**User decisions, October 4, 2026:** cloud transcription gets the dictionary; dictionary support in Parakeet is critical (most users run local transcription with cloud cleanup); the user runs the live Gemini test. [Certain]
+
+- `aa31965` Cloud transcription sends every enabled preferred spelling (manual first) as the vocabulary hint: Gemini 3.5 Transcribe as custom vocabulary, Gemini audio as spelling hints, OpenRouter Whisper none. Disclosures now say "your dictionary's spellings". [Certain]
+- `7f31ad1`, `10de932` Dictionary support in on-device transcription:
+  - Optional 103 MB download (Settings → Dictionary) of the pinned Parakeet CTC 110M model, `FluidInference/parakeet-ctc-110m-coreml` at `accdafd8`, CC-BY-4.0 (recorded in the pins and in THIRD_PARTY_NOTICES). [Certain]
+  - Installed in FluidAudio's own folder, `~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml`, because `VocabularyBoostingSession` reads the CTC tokenizer only from `CtcModels.defaultCacheDirectory`. Other FluidAudio apps (Handy, OpenWhispr are installed here) could share it, so it is hash-verified before every use and skipped when it does not match; the Download and Remove alerts name the folder and say it may be shared. [Certain]
+  - Helper: `ModelBench … --ctc DIR --vocabulary FILE` rescoring, then `BoostFilter` (see `app/README.md`). Vocabulary or model errors never fail transcription. `build.sh` now always builds the helper. [Certain]
+  - App: `refreshDictionary()` rewrites `dictionary/parakeet-vocabulary.json` and pre-warms; `HelperLaunch.make` builds arguments and key for warm, chunk and one-shot paths. [Certain]
+- Measured (synthetic `say -o` speech, never played; 20-term dictionary): 0/119 ordinary corpus sentences changed (6/119 before the filter: nothing→Notion, remind→Gemini, getting→Gemini, option→Notion); 6 misheard terms fixed (kubectl, Shelfmate, Aakash, Clouddev, Supabase, OpenRouter); +0.12 s per transcription; first load after download about 14 s (Core ML compile, pre-warmed). [Certain]
+- Verified: clean-state download through `ModelDownloader` with the real pins into the real folder (10 s, full hash pass); the bundled helper from `build.sh` with that folder; bad vocabulary and missing model still transcribe. All checks pass. [Certain]
+- Downloader fix found by a fresh-parent test: a target under `/private` lost every file to `pruneUnexpected` (paths standardized differently before and after the staging folder existed). Fixed with relative paths, plus a regression check that fails without the fix. `~/Library` targets were never affected. [Certain]
+- Launch now pre-warms once (dictionary refreshes pre-warm only after `start()`), and Download no longer blocks the window on the helper. [Certain]
+- Installed build: `~/Applications/Murmur.app` replaced at 13:22; previous build backed up at `~/Applications/Murmur-backups/20261004-132250/Murmur.app`; relaunched because it was running. The running helper was started with `--ctc ~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml --vocabulary ~/Library/Application Support/Dictation/dictionary/parakeet-vocabulary.json`; the file is 0600 with 1 enabled term. The installed helper with that file turned the synthetic "ShelfMud" clip into "Shelfmate", with no vocabulary error. [Certain]
+- Not verified: the Settings download row in pixels and dark mode (the screen was locked), a download clicked in the app, and any human speech. On this Mac the CTC folder is already installed (from the clean-state test), so the app shows it as downloaded. [Certain]
+- For the user's tests: local dictation of a dictionary word that has no "heard as" forms; for the sound-alike Gemini cleanup path, first remove Shelfmate's "heard as" forms, since those exact forms would hide the new behavior. [Certain]
+
+- Chunk cuts (October 4, later): measured that removing chunking costs far more than it saves with dictionary support on (release wait with rescoring: 0.29 s at 15 s, 1.33 s at 56 s, 2.51 s at 110 s, 4.90 s at 218 s of audio, against at most about 0.4 s for the last chunk), so chunking stays. Each cut now also emits a boundary clip; the helper returns its kept replacements and `Chunker.repair` applies only one that crosses the cut. With the cut forced inside the term (0.4 s pause), open router and cube cuddle were repaired to the whole-file result; super base, shelf mate and Kuber netties were not fixed by whole-file transcription either. 23 cuts on long control recordings: no change. [Certain] Installed in `~/Applications/Murmur.app` at 20:37 (previous build backed up at `~/Applications/Murmur-backups/20261004-203721/Murmur.app`); after relaunch the helper runs with `--ctc … --vocabulary …`. [Certain]
+
+- `2cb63a6` (from a Codex review on the PR): the cleanup guard let an inserted dictionary term excuse deleting any one unrelated word. Each term must now replace 1–3 raw words in its own alignment gap that spell it, are spelled at least half like it, or sound like it. Installed at 20:41 (previous build backed up at `~/Applications/Murmur-backups/20261004-204123/Murmur.app`). [Certain]
+
+Limits: casing-only fixes (tailscale→Tailscale) are not made by the helper (cloud cleanup handles them); a cut inside a term still leaves a stray period when the term is not in the dictionary ("super. Base"); History's raw text is the rescored transcript; a CTC folder with the right sizes but wrong content shows "Downloaded" while being skipped. [Certain]
+
+Deferred: automatic learning from edits (`TODO(observation)` in Controller.swift). [Certain]
+
+---
+
 # Live Gemini and dictionary validation — October 4, 2026
 
 Current checkout: `main` at `f077b53`; working tree was clean at start. The installed `~/Applications/Murmur.app` executable and `runtime/Murmur.app` executable have the same SHA-256 (`4d032d274013ab8abecb69a6468b1ab2873adc4b5c7a8069c8f18b2db5347fc6`). Older sections below are historical; their uncompiled/unwired/no-real-key claims do not describe this checkpoint. [Certain]

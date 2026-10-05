@@ -3,9 +3,8 @@ set -eu
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
 app_path="$project_root/runtime/Murmur.app"
 runner_path="$project_root/module-one/models/Runner/.build/release/ModelBench"
-if [[ ! -x "$runner_path" ]]; then
-  swift build --package-path "$project_root/module-one/models/Runner" -c release
-fi
+# Always build: it is incremental, and a stale helper would reject newer arguments (--ctc).
+swift build --package-path "$project_root/module-one/models/Runner" -c release
 mkdir -p "$app_path/Contents/MacOS" "$app_path/Contents/Resources"
 # -O: the model downloader verifies ~1.8 GB with pure-Swift SHA-256/SHA-1 (about 4x faster optimized).
 # No assert() runs in the app (only spike test helpers it never calls use it), so -O drops no checks;

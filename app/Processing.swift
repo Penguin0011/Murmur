@@ -168,7 +168,8 @@ final class ProcessingCoordinator {
         }
         var parts: [String] = []
         for (section, text) in zip(sections, cleaned) {
-            switch CleanupPipeline.judge(raw: section, cleaned: text, options: options, allowedTerms: terms) {
+            switch CleanupPipeline.judge(raw: section, cleaned: text, options: options, allowedTerms: terms,
+                                               soundsLike: DictionaryStore.soundsLike) {
             case .cleaned(let part), .unchanged(let part): if !part.isEmpty { parts.append(part) }
             case .heldForRecovery(_, let reason): return .heldForRecovery(raw: raw, reason: reason)
             }
@@ -203,10 +204,21 @@ final class ProcessingCoordinator {
     // MARK: Dictionary editing
 
     /// Variants are comma-separated; blanks are dropped.
+    private static func variantList(_ variants: String) -> [String] {
+        variants.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
     @discardableResult
     func addEntry(preferred: String, variants: String) throws -> DictionaryEntry {
-        let list = variants.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        return try dictionary.add(preferred: preferred, variants: list, source: .manual)
+        try dictionary.add(preferred: preferred, variants: Self.variantList(variants), source: .manual)
+    }
+
+    /// Edits an entry in place; a learned entry stays learned. Its ledger promotion is keyed by
+    /// entry ID, so old evidence cannot re-promote the original spelling alongside the edit.
+    func updateEntry(id: UUID, preferred: String, variants: String, enabled: Bool) throws {
+        guard var entry = dictionary.entries.first(where: { $0.id == id }) else { throw DictionaryError("Dictionary entry not found") }
+        entry.preferred = preferred; entry.variants = Self.variantList(variants); entry.enabled = enabled
+        try dictionary.update(entry)
     }
 
     /// A learned entry is tombstoned so old evidence cannot re-promote it.

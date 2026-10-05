@@ -49,6 +49,15 @@ Because Murmur downloads the weights rather than redistributing them, the NVIDIA
 
 > Licensed by NVIDIA Corporation under the NVIDIA Open Model License
 
+### Parakeet CTC 110M (dictionary support)
+
+Optional download from Settings → Dictionary. It rescores on-device transcripts toward the user's dictionary. It is not bundled; Murmur downloads the pinned files to FluidAudio's model folder (`~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml`) and verifies their checksums. [Certain]
+
+- Upstream model: `nvidia/parakeet-tdt_ctc-110m`, https://huggingface.co/nvidia/parakeet-tdt_ctc-110m. Its Hugging Face card is tagged `cc-by-4.0`. [Certain]
+- Converted model used by the app: `FluidInference/parakeet-ctc-110m-coreml`, revision `accdafd8cf8a2ff1cabe3c11e54416b405d409aa`, https://huggingface.co/FluidInference/parakeet-ctc-110m-coreml. Its card is tagged `cc-by-4.0` and names `base_model: nvidia/parakeet-tdt_ctc-110m`. [Certain] Both checked October 4, 2026 through the Hugging Face model API. [Certain]
+- License: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/. It is recorded in `module-one/models/artifact-pins.json`, so the app shows it as pinned before download. [Certain]
+- Attribution: "Parakeet TDT-CTC 110M" by NVIDIA, converted to Core ML by FluidInference, used under CC BY 4.0. Murmur uses the files unmodified. [Likely]
+
 ## Cloud services
 
 Gemini API and OpenRouter are optional services reached with the user's own API keys. No provider code or SDK is bundled; Murmur sends plain HTTPS requests. Their terms apply to the user's account, not to redistribution. [Certain] See `app/PROVIDERS.md` for data-use terms.

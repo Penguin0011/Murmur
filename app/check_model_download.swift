@@ -231,6 +231,11 @@ private func read(_ url: URL) -> Data? { try? Data(contentsOf: url) }
         check(license.declarations.allSatisfy { $0.url.scheme == "https" }, "license links are https")
         let downloader = ModelDownloader(manifest: manifest, target: URL(fileURLWithPath: "/tmp/never-used/model"), transport: FakeTransport())
         check(downloader.downloadSize == 1_801_783_964 && downloader.license == license, "downloader exposes size and license before download")
+        // Dictionary support: the CTC model, with its CC-BY-4.0 license recorded in the pins.
+        let ctc = try ModelManifest(contentsOf: url, repository: "FluidInference/parakeet-ctc-110m-coreml")
+        check(ctc.revision == "accdafd8cf8a2ff1cabe3c11e54416b405d409aa" && ctc.files.count == 12 && ctc.totalBytes == 102_802_455, "CTC pins: revision, 12 files, 102,802,455 bytes")
+        check(ctc.license.isPinned && ctc.license.declarations.map(\.name) == ["CC-BY-4.0"], "CTC license pinned")
+        check(Set(ctc.files.map(\.rfilename)).isSuperset(of: ["tokenizer.json", "vocab.json", "AudioEncoder.mlmodelc/weights/weight.bin", "MelSpectrogram.mlmodelc/weights/weight.bin"]), "CTC files FluidAudio loads are pinned")
     }
 
     static func installChecks(_ dir: URL) throws {
@@ -255,6 +260,17 @@ private func read(_ url: URL) -> Data? { try? Data(contentsOf: url) }
         check(progress.allSatisfy { $0.totalBytes == fixture.total }, "progress total is manifest total")
         check(seen.first == .notDownloaded && seen.contains(.verifying) && seen.contains { if case .downloading = $0 { return true }; return false },
               "status passes notDownloaded -> downloading -> verifying")
+        // A target whose path standardizes differently once it exists (macOS drops "/private") keeps
+        // every downloaded file instead of pruning them all as unexpected.
+        // (Foundation's own symlink resolution also drops "/private", so the prefix is added by hand.)
+        let realDir = URL(fileURLWithPath: dir.path.hasPrefix("/private/") ? dir.path : "/private" + dir.path)
+        if FileManager.default.fileExists(atPath: realDir.path) {
+            let privateTarget = realDir.appendingPathComponent("private-models/parakeet")
+            let privateFetch = FakeTransport(); fixture.serve(privateFetch)
+            let privateDownloader = ModelDownloader(manifest: try fixture.manifest(), target: privateTarget, transport: privateFetch, freeSpace: { _ in 1 << 40 })
+            try privateDownloader.install()
+            check(fixture.contents.allSatisfy { read(privateTarget.appendingPathComponent($0.0)) == $0.1 }, "a /private target keeps its files")
+        }
         check(hasher.calls.count == 3, "each file hashed once")
         check(downloader.verifyInstalled() == .ready, "full verification passes")
         let siblings = (try? FileManager.default.contentsOfDirectory(atPath: target.deletingLastPathComponent().path)) ?? []

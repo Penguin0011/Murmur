@@ -114,6 +114,10 @@ struct SettingsView: View {
     @State private var attentionOnly = false
     @State private var newPreferred = ""
     @State private var newVariants = ""
+    /// The dictionary row being edited, and its draft fields.
+    @State private var editingEntryID: UUID?
+    @State private var editPreferred = ""
+    @State private var editVariants = ""
     @State private var openKey: ProviderID?
     @State private var keyDraft = ""
     @State private var checkedSetup = false
@@ -522,51 +526,117 @@ struct SettingsView: View {
         }
     }
 
+    /// Download row for dictionary support in on-device transcription (the CTC model).
+    private var dictionaryModel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(DictionaryModelFacts.displayName).font(.system(size: 18, weight: .semibold))
+                    if !controller.dictionaryModelSummary.isEmpty { help(controller.dictionaryModelSummary) }
+                    Group {
+                        if controller.dictionaryModelRow.isReady && !controller.dictionarySupportFailed { mono("Ready ✓", color: Palette.accentInk) }
+                        else if !controller.dictionaryModelRow.isReady { Text(controller.dictionaryModelRow.statusText).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    .padding(.top, 5)
+                }
+                Spacer()
+                let row = controller.dictionaryModelRow
+                if row.actions.contains(.download) { Button("Download…", action: controller.downloadDictionaryModel).buttonStyle(InkButtonStyle()).fixedSize() }
+                if row.actions.contains(.retry) { Button("Retry…", action: controller.downloadDictionaryModel).buttonStyle(InkButtonStyle()).fixedSize() }
+                if row.actions.contains(.cancel) { Button("Cancel", action: controller.cancelDictionaryModelDownload).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+                if row.actions.contains(.remove) { Button("Remove…", role: .destructive, action: controller.removeDictionaryModel).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+            }
+            help(DictionaryModelFacts.explanation)
+            if let progress = controller.dictionaryModelRow.progress { progressBar(progress) }
+            if controller.dictionarySupportFailed { Text(DictionaryModelFacts.unavailableMessage).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
+            if !controller.dictionaryModelMessage.isEmpty { help(controller.dictionaryModelMessage) }
+            if let license = controller.dictionaryModelLicense, let declaration = license.declarations.first {
+                help("License: \(declaration.name) (\(declaration.url.absoluteString))", color: Palette.ink64)
+            }
+        }
+        .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 20)
+    }
+
     private var dictionary: some View {
         VStack(alignment: .leading, spacing: 0) {
+            dictionaryModel
             rule.padding(.top, 20)
             toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur learns it after the same fix twice. Where an app hides its text, Murmur follows the keys you type in that app for that minute; they are never saved. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
             HStack(spacing: 8) {
-                field("Preferred spelling", text: $newPreferred)
-                field("Heard as, comma-separated", text: $newVariants).layoutPriority(1)
-                Button("Add") {
-                    if controller.addDictionaryEntry(preferred: newPreferred, variants: newVariants) { newPreferred = ""; newVariants = "" }
-                }
-                .buttonStyle(InkButtonStyle(kind: newPreferred.trimmingCharacters(in: .whitespaces).isEmpty ? .outline : .filled))
-                .disabled(newPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
+                field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
+                field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
+                Button("Add", action: addEntry)
+                    .buttonStyle(InkButtonStyle(kind: newPreferred.trimmingCharacters(in: .whitespaces).isEmpty ? .outline : .filled)).fixedSize()
+                    .disabled(newPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(.top, 20)
             if !controller.dictionaryMessage.isEmpty {
                 Text(controller.dictionaryMessage).font(.system(size: 14, weight: .semibold)).padding(.top, 10)
             }
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                if controller.dictionaryEntries.isEmpty {
+                    help("No words yet. Add names, jargon and acronyms Murmur gets wrong.").padding(.vertical, 16)
+                }
                 ForEach(controller.dictionaryEntries) { entry in
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.preferred).font(.system(size: 16, weight: .semibold))
-                            if !entry.variants.isEmpty {
-                                Text("Heard as " + entry.variants.joined(separator: ", ")).font(.system(size: 13)).foregroundStyle(Palette.ink70).lineLimit(1)
-                            }
-                        }
-                        Spacer()
-                        mono(entry.source == .learned ? "Learned" : "Manual", size: 11, color: Palette.accentDeep)
-                            .padding(.horizontal, 8).padding(.vertical, 3).background(Palette.accent16)
-                        Button { controller.deleteDictionaryEntry(entry) } label: {
-                            Text("×").font(.system(size: 18)).frame(width: 44, height: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).help("Delete \(entry.preferred)").accessibilityLabel("Delete \(entry.preferred)")
-                    }
-                    .frame(minHeight: 56).padding(.vertical, 4).overlay(alignment: .bottom) { softRule }
+                    Group { if editingEntryID == entry.id { dictionaryEditRow(entry) } else { dictionaryRow(entry) } }
+                        .frame(minHeight: 56).padding(.vertical, 4).overlay(alignment: .bottom) { softRule }
                 }
             }
             .overlay(alignment: .top) { rule }.padding(.top, 20)
             HStack {
-                help("Spellings apply in every mode. Edits save immediately.")
+                help("“Heard as” forms are replaced exactly, in every mode. With cleanup on, a word that sounds like one of yours is sent to the cleanup route with its spelling, so it can be fixed. Edits save immediately.")
                 Spacer()
                 Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries).buttonStyle(InkButtonStyle(kind: .outline))
                     .disabled(!controller.dictionaryEntries.contains { $0.source == .learned })
             }
             .padding(.top, 16)
+        }
+    }
+
+    private func addEntry() {
+        guard !newPreferred.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        if controller.addDictionaryEntry(preferred: newPreferred, variants: newVariants) { newPreferred = ""; newVariants = "" }
+    }
+
+    private func dictionaryRow(_ entry: DictionaryEntry) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.preferred).font(.system(size: 16, weight: .semibold))
+                if !entry.variants.isEmpty {
+                    Text("Heard as " + entry.variants.joined(separator: ", ")).font(.system(size: 13)).foregroundStyle(Palette.ink70).lineLimit(1)
+                }
+            }
+            .opacity(entry.enabled ? 1 : 0.45)
+            Spacer()
+            mono(entry.source == .learned ? "Learned" : "Manual", size: 11, color: Palette.accentDeep)
+                .padding(.horizontal, 8).padding(.vertical, 3).background(Palette.accent16)
+            Toggle(isOn: Binding(get: { entry.enabled }, set: { on in
+                controller.updateDictionaryEntry(entry, preferred: entry.preferred, variants: entry.variants.joined(separator: ", "), enabled: on)
+            })) { EmptyView() }
+                .toggleStyle(SquareToggleStyle()).fixedSize().accessibilityLabel("Use \(entry.preferred)")
+            Button("Edit") {
+                editPreferred = entry.preferred; editVariants = entry.variants.joined(separator: ", ")
+                controller.dictionaryMessage = ""; editingEntryID = entry.id
+            }
+            .buttonStyle(.plain).font(.system(size: 14, weight: .semibold)).frame(height: 44).accessibilityLabel("Edit \(entry.preferred)")
+            Button { controller.deleteDictionaryEntry(entry) } label: {
+                Text("×").font(.system(size: 18)).frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("Delete \(entry.preferred)").accessibilityLabel("Delete \(entry.preferred)")
+        }
+    }
+
+    private func dictionaryEditRow(_ entry: DictionaryEntry) -> some View {
+        let save = {
+            if controller.updateDictionaryEntry(entry, preferred: editPreferred, variants: editVariants, enabled: entry.enabled) { editingEntryID = nil }
+        }
+        return HStack(spacing: 8) {
+            field("Preferred spelling", text: $editPreferred).frame(width: 220).onSubmit(save)
+            field("Heard as, comma-separated (optional)", text: $editVariants).onSubmit(save)
+            Button("Save", action: save).buttonStyle(InkButtonStyle(kind: .filled)).fixedSize()
+                .disabled(editPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel") { controller.dictionaryMessage = ""; editingEntryID = nil }.buttonStyle(InkButtonStyle(kind: .outline)).fixedSize()
+                .keyboardShortcut(.cancelAction)
         }
     }
 

@@ -119,7 +119,13 @@ final class Chunker {
     private var buffers: [(buffer: AVAudioPCMBuffer, energy: Double)] = []
     private var frames = 0
     /// `sentenceEnd`: the pause at this chunk's cut was long enough to end a sentence.
-    enum Event { case chunk(URL, last: Bool, sentenceEnd: Bool), end, failed }
+    /// `boundary`: audio spanning the cut after the previous chunk (`boundarySpan` each side), so a
+    /// dictionary term the cut split can be repaired. It always arrives before the next chunk.
+    enum Event { case chunk(URL, last: Bool, sentenceEnd: Bool), boundary(URL), end, failed }
+    /// Seconds of audio kept on each side of a cut for its boundary clip; spoken terms are shorter.
+    static let boundarySpan: TimeInterval = 3
+    /// The audio before the last cut, waiting for `boundarySpan` seconds after it.
+    private var boundaryBefore: [AVAudioPCMBuffer]?
     /// ponytail: fixed threshold; measured on `say` speech (comma pauses 0.2–0.3 s, sentence pauses 0.5–0.7 s). Tune on real voices.
     static let sentencePause: TimeInterval = 0.45
     private var pending: [Event] = []
@@ -141,23 +147,56 @@ final class Chunker {
         var energy = 0.0
         for i in 0..<Int(buffer.frameLength) { energy += Double(samples[0][i]) * Double(samples[0][i]) }
         buffers.append((buffer, energy)); frames += Int(buffer.frameLength)
+        if boundaryBefore != nil, Double(frames) >= Self.boundarySpan * format.sampleRate { emitBoundary() }
         guard Double(frames) >= (Self.target + Self.slack) * format.sampleRate else { return }
         let shape = buffers.map { (Int($0.buffer.frameLength), $0.energy) }
         let cut = Self.quietestCut(shape, rate: format.sampleRate)
-        emit(Array(buffers[..<cut].map(\.buffer)), final: false, sentenceEnd: Self.pauseLength(shape, at: cut, rate: format.sampleRate) >= Self.sentencePause)
+        let chunk = Array(buffers[..<cut].map(\.buffer))
+        emit(chunk, final: false, sentenceEnd: Self.pauseLength(shape, at: cut, rate: format.sampleRate) >= Self.sentencePause)
         buffers.removeFirst(cut); frames = buffers.reduce(0) { $0 + Int($1.buffer.frameLength) }
+        guard !failed else { return }
+        boundaryBefore = Self.tail(chunk, seconds: Self.boundarySpan, rate: format.sampleRate)
+        if Double(frames) >= Self.boundarySpan * format.sampleRate { emitBoundary() }
     }
 
     func finish() {
         guard !finished else { return }
         finished = true
         if failed { return }
+        if boundaryBefore != nil { emitBoundary() }
         emit(buffers.map(\.buffer), final: true, sentenceEnd: false); buffers = []
+    }
+
+    /// Writes the last cut's boundary clip: the tail before the cut and up to `boundarySpan` after it.
+    /// A failed write only skips the repair; the chunks are unaffected.
+    private func emitBoundary() {
+        guard let before = boundaryBefore, let directory = Self.directory else { boundaryBefore = nil; return }
+        boundaryBefore = nil
+        let after = Self.head(buffers.map(\.buffer), seconds: Self.boundarySpan, rate: format.sampleRate)
+        guard !after.isEmpty, let url = write(before + after, in: directory) else { return }
+        send(.boundary(url))
+    }
+
+    static func tail(_ chunk: [AVAudioPCMBuffer], seconds: TimeInterval, rate: Double) -> [AVAudioPCMBuffer] {
+        var kept: [AVAudioPCMBuffer] = [], total = 0
+        for buffer in chunk.reversed() where Double(total) < seconds * rate { kept.insert(buffer, at: 0); total += Int(buffer.frameLength) }
+        return kept
+    }
+
+    static func head(_ buffers: [AVAudioPCMBuffer], seconds: TimeInterval, rate: Double) -> [AVAudioPCMBuffer] {
+        var kept: [AVAudioPCMBuffer] = [], total = 0
+        for buffer in buffers where Double(total) < seconds * rate { kept.append(buffer); total += Int(buffer.frameLength) }
+        return kept
     }
 
     /// Unclaimed chunk files (a cloud-route or canceled recording) are deleted.
     func discardUnclaimed() {
-        for case .chunk(let url, _, _) in pending { try? FileManager.default.removeItem(at: url) }
+        for event in pending {
+            switch event {
+            case .chunk(let url, _, _), .boundary(let url): try? FileManager.default.removeItem(at: url)
+            case .end, .failed: break
+            }
+        }
         pending = []
     }
 
@@ -191,16 +230,44 @@ final class Chunker {
 
     private func emit(_ chunk: [AVAudioPCMBuffer], final: Bool, sentenceEnd: Bool) {
         guard !chunk.isEmpty else { send(.end); return }
-        guard let directory = Self.directory else { failed = true; send(.failed); return }
+        guard let directory = Self.directory, let url = write(chunk, in: directory) else { failed = true; send(.failed); return }
+        send(.chunk(url, last: final, sentenceEnd: sentenceEnd))
+    }
+
+    /// A new owner-only WAV, or nil (nothing left behind) when it cannot be written.
+    private func write(_ audio: [AVAudioPCMBuffer], in directory: URL) -> URL? {
         let url = directory.appendingPathComponent("\(UUID().uuidString).wav")
         do {
             let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
             guard fd >= 0 else { throw CaptureError("Cannot create chunk file") }
             close(fd)
             let file = try AVAudioFile(forWriting: url, settings: format.settings)
-            for buffer in chunk { try file.write(from: buffer) }
-            send(.chunk(url, last: final, sentenceEnd: sentenceEnd))
-        } catch { try? FileManager.default.removeItem(at: url); failed = true; send(.failed) }
+            for buffer in audio { try file.write(from: buffer) }
+            return url
+        } catch { try? FileManager.default.removeItem(at: url); return nil }
+    }
+
+    /// Applies a boundary clip's dictionary replacement to the two chunk texts around its cut, when
+    /// the replaced words are the last 1–3 words of `tail` plus the first 1–3 of `head` (letters
+    /// only, so a word the cut split in two also matches). The term goes at the end of `tail`; the
+    /// cut's own punctuation on the tail side is dropped, the head's following punctuation kept.
+    /// nil when the replacement does not cross this cut (chunks already handle the rest).
+    static func repair(tail: String, head: String, from: String, to: String) -> (tail: String, head: String)? {
+        func letters(_ text: Substring) -> String { String(text.lowercased().filter { $0.isLetter || $0.isNumber }) }
+        let target = letters(Substring(from))
+        let tailWords = tail.split(separator: " "), headWords = head.split(separator: " ")
+        guard !target.isEmpty, !tailWords.isEmpty, !headWords.isEmpty else { return nil }
+        for t in 1...min(3, tailWords.count) {
+            for h in 1...min(3, headWords.count) {
+                let spoken = tailWords.suffix(t).map(letters).joined() + headWords.prefix(h).map(letters).joined()
+                guard spoken == target else { continue }
+                let last = headWords[h - 1]
+                let trailing = String(last.reversed().prefix { !$0.isLetter && !$0.isNumber }.reversed())
+                let newTail = (tailWords.dropLast(t).map(String.init) + [to + trailing]).joined(separator: " ")
+                return (newTail, headWords.dropFirst(h).joined(separator: " "))
+            }
+        }
+        return nil
     }
 
     private func send(_ event: Event) { if let handler { handler(event) } else { pending.append(event) } }

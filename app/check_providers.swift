@@ -1014,7 +1014,7 @@ extension ProviderChecks {
         let d = provider.disclosure
         check(d.provider == .gemini && d.stage == .transcription && d.destinationHost == "generativelanguage.googleapis.com", "transcribe disclosure: Google host")
         check(d.leavesDevice.contains { $0.contains("audio") && $0.contains("stored by Google") }, "transcribe disclosure: audio sent to and stored by Google")
-        check(d.leavesDevice.contains { $0.contains("relevant dictionary terms") && $0.contains("stored by Google") }, "transcribe disclosure: relevant terms sent to and stored by Google")
+        check(d.leavesDevice.contains { $0.contains("dictionary's spellings") && $0.contains("stored by Google") }, "transcribe disclosure: dictionary spellings sent to and stored by Google")
         check(d.retentionNote.contains("55 days") && d.retentionNote.contains("1 day"), "transcribe disclosure: retention periods")
         check(d.retentionNote.contains("can be deleted earlier"), "transcribe disclosure: deletion")
         check(d.retentionNote.contains("human reviewers"), "transcribe disclosure: free-tier human review")
