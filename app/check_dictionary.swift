@@ -156,6 +156,9 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         check(CorrectionFilter.evaluate(source: "rust C", target: "rustc", isCommonWord: rustLexicon) == .accepted(source: "rust C", target: "rustc"), "capitalized single-letter term component is learned")
         check(CorrectionFilter.evaluate(source: "every one", target: "everyone", isCommonWord: ordinary) != .accepted(source: "every one", target: "everyone"), "joining ordinary words is not learned")
         check(CorrectionFilter.evaluate(source: "a boy", target: "aboy", isCommonWord: { ["a", "boy", "aboy"].contains($0) }) != .accepted(source: "a boy", target: "aboy"), "short function word join is not learned")
+        let functionWordLexicon: (String) -> Bool = { ["a", "boy", "i", "am"].contains($0) }
+        check(CorrectionFilter.evaluate(source: "A boy", target: "aboy", isCommonWord: functionWordLexicon) == .rejected(.contextualWord), "sentence-case A does not enable learning")
+        check(CorrectionFilter.evaluate(source: "I am", target: "iam", isCommonWord: functionWordLexicon) == .rejected(.contextualWord), "pronoun I does not enable learning")
         check(CorrectionFilter.evaluate(source: "jira", target: "Jira") == .rejected(.caseOnly), "no lexicon: case fix skipped")
         check(CorrectionFilter.evaluate(source: "git hub", target: "GitHub") == .rejected(.punctuationOnly), "no lexicon: spacing fix skipped")
         check(CorrectionFilter.evaluate(source: "Jon", target: "John") == .rejected(.tooShort), "no lexicon: short word skipped")

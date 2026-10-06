@@ -150,7 +150,8 @@ enum CorrectionFilter {
         let joinedAcronym = tw.allSatisfy { $0.text.count >= 2 && $0.text.allSatisfy { !$0.isLetter || $0.isUppercase } }
         let separatedTokens = sf.count == 1 ? tw : sw
         let separatedWordsAreTerms = joinedAcronym || separatedTokens.allSatisfy { token in
-            token.text.count >= 2 || (token.text.count == 1 && token.text.first?.isUppercase == true)
+            token.text.count >= 2 || (token.text.count == 1 && token.text.first?.isUppercase == true &&
+                                      !contextualWords.contains(token.folded))
         }
         if isSubsequence(tf, of: sf) { return .rejected(.deletion) }
         if isSubsequence(sf, of: tf) { return .rejected(.insertion) }
