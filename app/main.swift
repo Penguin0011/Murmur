@@ -19,10 +19,11 @@ import SwiftUI
         appItem.submenu = appMenu; mainMenu.addItem(appItem); mainMenu.addItem(standardEditMenuItem()); NSApp.mainMenu = mainMenu
         controller.openSettings = { [weak self] in self?.showWindow() }
         controller.updateMenu = { [weak self] in self?.refreshMenu() }
+        if !options.preview && options.testAudio == nil { controller.setOpenAtLogin(true) }
         controller.start(); refreshMenu()
         if let audio = options.testAudio, let expectedApp = options.expectedApp {
             controller.checkSavedAudio(URL(fileURLWithPath: audio), expectedApp: expectedApp) { NSApp.terminate(nil) }
-        } else { showWindow() }
+        } else if options.preview { showWindow() }
         if let seconds = options.quitAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
         }
