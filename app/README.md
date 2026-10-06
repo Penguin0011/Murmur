@@ -260,12 +260,13 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 /tmp/murmur-routes-check
 ```
 
-**Settings → Processing routes (R4).** Routes take effect on Apply Settings. The settings keys are `transcriptionRoute`, `cloudTranscriber`, `cleanupChoice`, `customAPIBaseURL` and `customAPIModel`. Keys are never stored in UserDefaults.
-- Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini audio, Gemini 3.5 Transcribe, and Custom Provider. The custom route uses an editable OpenAI-compatible base URL and transcription model, posting multipart audio and spelling hints to `/v1/audio/transcriptions`; it shares the endpoint and destination-bound key with custom cleanup, whose model name remains separate. The request format follows the [OpenAI transcription reference](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create). A compatible server must implement that format; arbitrary audio APIs are not supported. Legacy OpenRouter selections migrate to editable custom settings, with fresh disclosure acknowledgement and one-time key confirmation. [Certain]
-- Cleanup: Local rules (the default), Gemini or a Custom API provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. Add its optional key under Cleanup beside the endpoint. OpenRouter remains available as a dedicated transcription choice and can also be configured as a custom cleanup endpoint.
+**Settings → Processing routes (R4).** Route and model changes apply as soon as they are made. Custom transcription and cleanup have separate editable base URLs, model IDs and destination-bound Keychain keys. Only endpoint preferences are stored in UserDefaults. [Certain]
+- Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini and Custom Provider. Gemini defaults to `gemini-3.5-transcribe`; other model IDs use Gemini's general audio endpoint. Custom transcription posts multipart audio and spelling hints to `/v1/audio/transcriptions`; a compatible server must implement that format. [Certain]
+- Cleanup: Local rules (the default), Gemini or Custom Provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. [Certain]
+- Existing shared custom settings migrate to separate transcription and cleanup settings. Existing keys are copied to separate Keychain accounts; each remains usable only when its saved destination matches that route's endpoint. [Certain]
 
 **A dictation on a cloud route.**
-- At start, `RoutePlan` picks the transcriber and cleaner from the applied settings and the Keychain. It refuses, without fallback, when a key is missing, the custom endpoint or model is invalid, or a disclosure is unconfirmed. Local loopback endpoints do not need a key. The model gate applies only to local transcription.
+- At start, `RoutePlan` picks the transcriber and cleaner from the applied settings and the Keychain. It refuses, without fallback, when a key is missing or the custom endpoint or model is invalid. Local loopback endpoints do not need a key. The model gate applies only to local transcription.
 - `CloudTranscription.run` replaces the ModelBench runner. It converts the recording to 16 kHz mono 16-bit WAV (`CloudAudio`) and makes one provider call. If the provider has a silence pre-check (Gemini), silent or very short recordings are skipped and reported as "No speech was detected".
 - A transcript then follows the local path: history save, dictionary and cleanup, insertion. An empty transcript is "no speech".
 - A provider error shows its `userMessage` in the Error phase. On preserve dispositions the audio stays for retry (24-hour policy).
@@ -274,9 +275,9 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 - Nothing falls back to the local model, local rules or another provider.
 - Both calls run in a main-actor `CloudRequest` Task. Results are delivered behind the session's generation token. Escape while processing (through `ShortcutListener.onEscapeWhileProcessing`) or the menu bar's Cancel Request cancels the Task and its HTTP request. Nothing is inserted; during transcription the audio is deleted, and a transcript that was already saved stays in History. Escape is not swallowed in that state.
 
-**Disclosure before cloud use.** Settings shows cleanup disclosures inline, including the destination host and any plain-HTTP warning. Cloud transcription still asks for confirmation through an NSAlert when its route signature changes; Cancel reverts the route fields. Confirmed transcription signatures are stored in `acknowledgedCloudRoutes`. Loopback endpoints send nothing off this Mac. Custom API keys are omitted on unencrypted connections off this Mac. [Certain]
+**Cloud disclosures.** Settings shows disclosures inline, including destination hosts and any plain-HTTP warning. Selecting a cloud route and starting dictation do not show a disclosure popup. Loopback endpoints send nothing off this Mac. Custom API keys are omitted on unencrypted connections off this Mac. [Certain]
 
-**API keys (R5).** Settings → API keys has a row each for Gemini and OpenRouter (transcription). The optional Custom API key is entered with the custom endpoint under Cleanup. Keys use `KeychainCredentialStore(service: "Murmur")`; a typed key stays in a SecureField until Save, then the field clears. Messages come from fixed strings and `ProviderError.userMessage`, never from the key or a response body. Preview uses an in-memory store. Old saved cleanup choices migrate to the custom route. [Certain]
+**API keys (R5).** Settings → API keys has separate rows for Gemini, Custom transcription and Custom cleanup. Custom keys use distinct Keychain accounts and endpoint bindings; replacing or removing one does not change the other. A typed key stays in a SecureField until Save, then the field clears. Messages come from fixed strings and `ProviderError.userMessage`, never from the key or a response body. Preview uses an in-memory store. [Certain]
 
 **Learning lexicon.** `isCommonEnglishWord` in Controller.swift backs `CorrectionLedger.isCommonWord` with `NSSpellChecker` (language "en"): a word is common when no misspelling is found. `ProcessingCoordinator(directory:defaults:isCommonWord:)` injects it, including after Delete All Data. [Certain]
 
@@ -284,7 +285,7 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 - no fallback: an unconfigured route refuses, never uses the local model, makes one call and no retry;
 - the silence skip with the real `GeminiTranscriptionProvider` (no request sent);
 - the answer-suspected hold;
-- disclosure needed, acknowledged, provider or endpoint changed, and switched away and back; loopback versus LAN;
+- inline disclosure changes when a provider or endpoint changes; loopback versus LAN;
 - keys never in messages, including 401 bodies that echo the key, and no key in UserDefaults;
 - cancel preventing delivery (in flight, finished-but-canceled, superseded);
 - WAV conversion;

@@ -148,6 +148,7 @@ struct SettingsView: View {
     @State private var openKey: ProviderID?
     @State private var keyDraft = ""
     @State private var checkedSetup = false
+    @AppStorage("showDetailedSettingsInfo") private var showDetailedSettingsInfo = false
     /// A window preference only; the floating indicator keeps following the system appearance.
     @AppStorage("appearance") private var appearance = "light"
     /// API address and model apply when editing ends (Return or leaving the field), not per keystroke.
@@ -211,9 +212,17 @@ struct SettingsView: View {
 
     private func titled(_ title: String, _ detail: String?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.system(size: 16, weight: .semibold))
-            if let detail { help(detail) }
+            HStack(spacing: 4) {
+                Text(title).font(.system(size: 16, weight: .semibold))
+                if let detail, !showDetailedSettingsInfo { SettingInfoButton(text: detail) }
+            }
+            if let detail, showDetailedSettingsInfo { help(detail) }
         }
+    }
+
+    @ViewBuilder private func settingInfo(_ text: String) -> some View {
+        if showDetailedSettingsInfo { help(text) }
+        else { SettingInfoButton(text: text) }
     }
 
     private var microphonePicker: some View {
@@ -388,6 +397,8 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
+                    Toggle("Show detailed info", isOn: $showDetailedSettingsInfo)
+                        .toggleStyle(SquareToggleStyle()).padding(.bottom, 12)
                     Text(Self.sections[section]).font(.system(size: 36, weight: .bold)).tracking(-1.4)
                     Text(Self.ledes[section]).font(.system(size: 16)).foregroundStyle(Palette.ink70).padding(.top, 10).padding(.bottom, 8)
                     sectionBody.disabled(controller.isBusy)
@@ -458,8 +469,10 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(ModelFacts.displayName).font(.system(size: 18, weight: .semibold))
-                        if !controller.modelSummary.isEmpty { help(controller.modelSummary) }
+                        HStack(spacing: 4) {
+                            Text(ModelFacts.displayName).font(.system(size: 18, weight: .semibold))
+                            if !controller.modelSummary.isEmpty { settingInfo(controller.modelSummary) }
+                        }
                         Group {
                             if controller.modelRow.isReady { mono("Model ready ✓", color: Palette.accentInk) }
                             else { Text(controller.modelRow.statusText).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
@@ -492,19 +505,33 @@ struct SettingsView: View {
             if controller.transcriptionRoute == .local {
                 help("Audio stays on this Mac. Downloading the model uses the network once; dictation does not.").padding(.top, 12)
             } else {
-                segmented(CloudTranscriber.allCases.map { ($0, short($0.displayName)) }, $controller.cloudTranscriber, size: 14).padding(.top, 16)
+                segmented(CloudTranscriber.allCases.map { ($0, $0.displayName) }, $controller.cloudTranscriber, size: 14).padding(.top, 16)
                     .help(controller.cloudTranscriber.displayName)
+                if controller.cloudTranscriber == .gemini {
+                    let modelHint = controller.geminiTranscriptionModel.trimmingCharacters(in: .whitespacesAndNewlines) == GeminiTranscribeProvider.defaultModel
+                        ? "Recommended: Gemini 3.5 Transcribe. Dedicated speech recognition; Google's Interactions API stores audio and transcript."
+                        : "Other Gemini model IDs use general audio understanding to transcribe. They may follow spoken instructions, omit words, or invent text for silence."
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 4) {
+                            Text("Gemini transcription model").font(.system(size: 14, weight: .semibold))
+                            settingInfo(modelHint)
+                        }
+                        field(GeminiTranscribeProvider.defaultModel, text: $controller.geminiTranscriptionModel)
+                            .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+                        keyRow(.gemini)
+                    }.padding(.top, 16)
+                }
                 disclosure(controller.routeDisclosure(.transcription)).padding(.top, 16)
                 if controller.cloudTranscriber == .customAPI {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("OpenAI-compatible API base URL").font(.system(size: 14, weight: .semibold))
-                        field("https://api.example.com/v1", text: $controller.customAPIBaseURL)
+                        Text("Transcription API base URL").font(.system(size: 14, weight: .semibold))
+                        field("https://api.example.com/v1", text: $controller.customTranscriptionAPIBaseURL)
                             .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
                         Text("Transcription model name").font(.system(size: 14, weight: .semibold))
                         field("whisper-1", text: $controller.customTranscriptionModel)
                             .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
-                        keyRow(.customAPI)
-                        help("The server must support OpenAI-compatible POST /v1/audio/transcriptions. The server address and key are shared with custom cleanup; model names are separate.")
+                        keyRow(.customTranscription)
+                        help("This provider needs OpenAI-compatible POST /v1/audio/transcriptions. Its address and API key are separate from cleanup.")
                     }.padding(.top, 16)
                 }
             }
@@ -570,14 +597,14 @@ struct SettingsView: View {
             }
             if controller.cleanupChoice == .customAPI {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("OpenAI-compatible API base URL").font(.system(size: 14, weight: .semibold))
+                    Text("Cleanup API base URL").font(.system(size: 14, weight: .semibold))
                     field("https://api.cerebras.ai/v1", text: $controller.customAPIBaseURL)
                         .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
                     Text("Model name").font(.system(size: 14, weight: .semibold)).padding(.top, 4)
                     field("gpt-oss-120b", text: $controller.customAPIModel)
                         .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
-                    keyRow(.customAPI)
-                    help("The endpoint must accept OpenAI-compatible POST /v1/chat/completions requests. Its server address and key are shared with custom transcription. Enter the provider's base URL and exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
+                    keyRow(.customCleanup)
+                    help("This provider needs OpenAI-compatible POST /v1/chat/completions. Its address and API key are separate from transcription. Enter the provider's exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
                 }
                 .padding(.top, 16)
             }
@@ -589,8 +616,10 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(DictionaryModelFacts.displayName).font(.system(size: 18, weight: .semibold))
-                    if !controller.dictionaryModelSummary.isEmpty { help(controller.dictionaryModelSummary) }
+                    HStack(spacing: 4) {
+                        Text(DictionaryModelFacts.displayName).font(.system(size: 18, weight: .semibold))
+                        if !controller.dictionaryModelSummary.isEmpty { settingInfo(controller.dictionaryModelSummary) }
+                    }
                     Group {
                         if controller.dictionaryModelRow.isReady && !controller.dictionarySupportFailed { mono("Ready ✓", color: Palette.accentInk) }
                         else if !controller.dictionaryModelRow.isReady { Text(controller.dictionaryModelRow.statusText).font(.system(size: 14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
@@ -759,7 +788,7 @@ struct SettingsView: View {
                 ForEach(KeyText.providers, id: \.self) { provider in keyRow(provider) }
             }
             .overlay(alignment: .top) { rule }.padding(.top, 20)
-            help("Keys are stored in your Keychain and never shown again after saving. Custom Provider uses one server address and API key for transcription and cleanup, with separate model names. Configure it in either section.").padding(.top, 16)
+            help("Keys are stored in your Keychain and never shown again after saving. Custom transcription and cleanup use separate server addresses and API keys.").padding(.top, 16)
         }
     }
 
@@ -786,9 +815,10 @@ struct SettingsView: View {
                         .buttonStyle(InkButtonStyle(kind: .accent)).disabled(keyDraft.isEmpty)
                 }
             }
-            if provider == .customAPI {
-                help("Server address: \(controller.customAPIBaseURL)")
-                if controller.customAPIKeyNeedsConfirmation {
+            if provider == .customTranscription || provider == .customCleanup {
+                let address = provider == .customTranscription ? controller.customTranscriptionAPIBaseURL : controller.customAPIBaseURL
+                help("Server address: \(address)")
+                if controller.customAPIKeyNeedsConfirmation(provider) {
                     help("Save the API key again to confirm this server address. The existing key stays in Keychain and will not be sent until confirmed.", color: Palette.accentInk)
                 }
             }
@@ -1111,6 +1141,29 @@ func standardEditMenuItem() -> NSMenuItem {
 }
 
 /// Split in two so the compiler can type-check the chains.
+private struct SettingInfoButton: View {
+    let text: String
+    @State private var isPresented = false
+
+    var body: some View {
+        Button { isPresented = true } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 14))
+                .foregroundStyle(Palette.ink70)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(text)
+        .accessibilityLabel("More information")
+        .accessibilityHint(text)
+        .popover(isPresented: $isPresented, arrowEdge: .trailing) {
+            Text(text).font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                .padding(16).frame(width: 300, alignment: .leading)
+        }
+    }
+}
+
 private struct AutoApplyGeneral: ViewModifier {
     @ObservedObject var controller: AppController
     func body(content: Content) -> some View {
@@ -1144,7 +1197,9 @@ private struct AutoApplyRoutes: ViewModifier {
             // Typing in a provider field waits for Return or focus loss.
             .onChange(of: controller.customAPIModel) { if !apiFieldFocused { controller.settingsChanged() } }
             .onChange(of: controller.customTranscriptionModel) { if !apiFieldFocused { controller.settingsChanged() } }
+            .onChange(of: controller.geminiTranscriptionModel) { if !apiFieldFocused { controller.settingsChanged() } }
             .onChange(of: controller.customAPIBaseURL) { if !apiFieldFocused { controller.settingsChanged() } }
+            .onChange(of: controller.customTranscriptionAPIBaseURL) { if !apiFieldFocused { controller.settingsChanged() } }
             .onChange(of: apiFieldFocused) { _, focused in if !focused { controller.settingsChanged() } }
     }
 }
