@@ -152,6 +152,8 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         let phraseWords = words.union(["spacey", "boy"])
         let phraseLexicon: (String) -> Bool = { phraseWords.contains($0) }
         check(CorrectionFilter.evaluate(source: "spacey boy", target: "spaceyboi", isCommonWord: phraseLexicon) == .accepted(source: "spacey boy", target: "spaceyboi"), "joined name learned despite contextual component")
+        let rustLexicon: (String) -> Bool = { ["rust", "c"].contains($0) }
+        check(CorrectionFilter.evaluate(source: "rust C", target: "rustc", isCommonWord: rustLexicon) == .accepted(source: "rust C", target: "rustc"), "capitalized single-letter term component is learned")
         check(CorrectionFilter.evaluate(source: "every one", target: "everyone", isCommonWord: ordinary) != .accepted(source: "every one", target: "everyone"), "joining ordinary words is not learned")
         check(CorrectionFilter.evaluate(source: "a boy", target: "aboy", isCommonWord: { ["a", "boy", "aboy"].contains($0) }) != .accepted(source: "a boy", target: "aboy"), "short function word join is not learned")
         check(CorrectionFilter.evaluate(source: "jira", target: "Jira") == .rejected(.caseOnly), "no lexicon: case fix skipped")
