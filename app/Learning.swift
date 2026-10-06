@@ -31,8 +31,8 @@ enum CandidateVerdict: Equatable {
 /// 1. Structure: after removing shared leading/trailing words, both sides hold 1...3 words made of
 ///    letters/digits (apostrophe/hyphen inside words only). Case-only and punctuation-only changes,
 ///    deletions, insertions/appends and longer rewrites are rejected. Joined/split spellings require
-///    a lexicon, at least two characters per separated word, and a joined spelling the lexicon
-///    does not recognize (except acronyms).
+///    a lexicon, at least two characters per separated word (unless a one-letter component was
+///    explicitly capitalized), and a joined spelling the lexicon does not recognize (except acronyms).
 /// 2. Meaning guards (reject): a negation word or negating prefix differs (not, never, n't, un-,
 ///    dis-, ...); either side contains a digit or a number word; the pair is a listed antonym;
 ///    either side contains a common function word or a listed homophone (their/there, to/too,
@@ -148,6 +148,10 @@ enum CorrectionFilter {
         let separated = sf.count == 1 ? tf : sf
         let joined = (sf.count == 1 ? sf : tf).joined()
         let joinedAcronym = tw.allSatisfy { $0.text.count >= 2 && $0.text.allSatisfy { !$0.isLetter || $0.isUppercase } }
+        let separatedTokens = sf.count == 1 ? tw : sw
+        let separatedWordsAreTerms = joinedAcronym || separatedTokens.allSatisfy { token in
+            token.text.count >= 2 || (token.text.count == 1 && token.text.first?.isUppercase == true)
+        }
         if isSubsequence(tf, of: sf) { return .rejected(.deletion) }
         if isSubsequence(sf, of: tf) { return .rejected(.insertion) }
         if negationFlip(sf, tf) { return .rejected(.negation) }
@@ -161,7 +165,7 @@ enum CorrectionFilter {
         // the contextual-word guard because their meaning may depend on the sentence.
         if (spacingFix ? separated : sf + tf).contains(where: { contextualWords.contains($0) }) {
             let verifiedSpacing = spacingFix && isCommonWord.map { common in
-                separated.allSatisfy { $0.count >= 2 || joinedAcronym } && (!common(joined) || joinedAcronym)
+                separatedWordsAreTerms && (!common(joined) || joinedAcronym)
             } == true
             if !verifiedSpacing { return .rejected(.contextualWord) }
         }
@@ -177,7 +181,7 @@ enum CorrectionFilter {
         let acronym = joinedAcronym
         if let isCommonWord, spacingFix {
             guard separated.count > 1,
-                  separated.allSatisfy({ $0.count >= 2 || acronym }),
+                  separatedWordsAreTerms,
                   !isCommonWord(joined) || acronym else {
                 return .rejected(.ordinaryWords)
             }
