@@ -149,7 +149,11 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         }
         check(CorrectionFilter.evaluate(source: "call jira", target: "call Jira", isCommonWord: ordinary) == .accepted(source: "jira", target: "Jira"), "case fix trims its context")
         check(CorrectionFilter.evaluate(source: "notion", target: "Notion", isCommonWord: ordinary) == .rejected(.ordinaryWords), "recasing an ordinary word is not learned")
+        let phraseWords = words.union(["spacey", "boy"])
+        let phraseLexicon: (String) -> Bool = { phraseWords.contains($0) }
+        check(CorrectionFilter.evaluate(source: "spacey boy", target: "spaceyboi", isCommonWord: phraseLexicon) == .accepted(source: "spacey boy", target: "spaceyboi"), "joined name learned despite contextual component")
         check(CorrectionFilter.evaluate(source: "every one", target: "everyone", isCommonWord: ordinary) != .accepted(source: "every one", target: "everyone"), "joining ordinary words is not learned")
+        check(CorrectionFilter.evaluate(source: "a boy", target: "aboy", isCommonWord: { ["a", "boy", "aboy"].contains($0) }) != .accepted(source: "a boy", target: "aboy"), "short function word join is not learned")
         check(CorrectionFilter.evaluate(source: "jira", target: "Jira") == .rejected(.caseOnly), "no lexicon: case fix skipped")
         check(CorrectionFilter.evaluate(source: "git hub", target: "GitHub") == .rejected(.punctuationOnly), "no lexicon: spacing fix skipped")
         check(CorrectionFilter.evaluate(source: "Jon", target: "John") == .rejected(.tooShort), "no lexicon: short word skipped")
