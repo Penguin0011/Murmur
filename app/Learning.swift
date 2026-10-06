@@ -29,8 +29,10 @@ enum CandidateVerdict: Equatable {
 /// source, i.e. the kind of error a transcriber makes on a name or term, not a change in meaning:
 ///
 /// 1. Structure: after removing shared leading/trailing words, both sides hold 1...3 words made of
-///    letters/digits (apostrophe/hyphen inside words only). Case-only and punctuation/spacing-only
-///    changes, deletions, insertions/appends and longer rewrites are rejected.
+///    letters/digits (apostrophe/hyphen inside words only). Case-only and punctuation-only changes,
+///    deletions, insertions/appends and longer rewrites are rejected. Joined/split spellings require
+///    a lexicon, at least two characters per separated word, and a joined spelling the lexicon
+///    does not recognize (except acronyms).
 /// 2. Meaning guards (reject): a negation word or negating prefix differs (not, never, n't, un-,
 ///    dis-, ...); either side contains a digit or a number word; the pair is a listed antonym;
 ///    either side contains a common function word or a listed homophone (their/there, to/too,
@@ -141,6 +143,11 @@ enum CorrectionFilter {
         guard sw.count <= maxWords, tw.count <= maxWords else { return .rejected(.tooManyWords) }
 
         let sf = sw.map(\.folded), tf = tw.map(\.folded)
+        let spacingFix = letters(TermText.fold(source)) == letters(TermText.fold(target)) &&
+            TermText.tokens(source).count != TermText.tokens(target).count
+        let separated = sf.count == 1 ? tf : sf
+        let joined = (sf.count == 1 ? sf : tf).joined()
+        let joinedAcronym = tw.allSatisfy { $0.text.count >= 2 && $0.text.allSatisfy { !$0.isLetter || $0.isUppercase } }
         if isSubsequence(tf, of: sf) { return .rejected(.deletion) }
         if isSubsequence(sf, of: tf) { return .rejected(.insertion) }
         if negationFlip(sf, tf) { return .rejected(.negation) }
@@ -149,7 +156,15 @@ enum CorrectionFilter {
         }
         for a in sf { for b in tf where antonymSet.contains("\(a)|\(b)") { return .rejected(.antonym) } }
         // Spelled-out letters ("a p i" -> API) are not the function words they look like.
-        if (spacing ? tf : sf + tf).contains(where: { contextualWords.contains($0) }) { return .rejected(.contextualWord) }
+        // A joined/split spelling can contain an ordinary word such as "boy". Allow that
+        // word only for lexicon-verified spacing fixes; other multiword respellings keep
+        // the contextual-word guard because their meaning may depend on the sentence.
+        if (spacingFix ? separated : sf + tf).contains(where: { contextualWords.contains($0) }) {
+            let verifiedSpacing = spacingFix && isCommonWord.map { common in
+                separated.allSatisfy { $0.count >= 2 || joinedAcronym } && (!common(joined) || joinedAcronym)
+            } == true
+            if !verifiedSpacing { return .rejected(.contextualWord) }
+        }
 
         let sLetters = letters(sf.joined()), tLetters = letters(tf.joined())
         let floor = isCommonWord == nil ? minLetters : minLettersWithLexicon
@@ -159,8 +174,16 @@ enum CorrectionFilter {
         let reduced = CandidateVerdict.accepted(source: sw.map(\.text).joined(separator: " "),
                                                 target: tw.map(\.text).joined(separator: " "))
         // An all-capitals target (API, SQL, JSON) is a deliberate acronym, not an ordinary word.
-        let acronym = tw.allSatisfy { $0.text.count >= 2 && $0.text.allSatisfy { !$0.isLetter || $0.isUppercase } }
-        if let isCommonWord, !acronym, (sf + tf).allSatisfy(isCommonWord) { return .rejected(.ordinaryWords) }
+        let acronym = joinedAcronym
+        if let isCommonWord, spacingFix {
+            guard separated.count > 1,
+                  separated.allSatisfy({ $0.count >= 2 || acronym }),
+                  !isCommonWord(joined) || acronym else {
+                return .rejected(.ordinaryWords)
+            }
+        } else if let isCommonWord, !acronym, (sf + tf).allSatisfy(isCommonWord) {
+            return .rejected(.ordinaryWords)
+        }
         if manualPreferred.contains(tf.joined(separator: " ")) { return reduced }
         let similarity = self.similarity(sLetters, tLetters)
         if similarity >= directSimilarity { return reduced }
