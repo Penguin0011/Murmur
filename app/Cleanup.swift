@@ -231,14 +231,15 @@ enum CleanupText {
         "havent", "hasnt", "hadnt", "cant", "wont", "aint", "mustnt",
     ]
 
-    /// Negative contractions speech recognition sometimes returns without "'t" ("it doesn spread").
+    /// Negative contractions speech recognition sometimes returns without "'t" ("it doesn spread"),
+    /// each with the completions cleanup may write in its place: its own, plus listed exceptions.
     /// Not "haven", "don", "won" or "can": those are also ordinary words.
-    static let truncatedNegations: Set<String> = [
-        "doesn", "didn", "isn", "wasn", "couldn", "wouldn", "shouldn", "hasn", "hadn", "aren", "weren", "mustn", "needn",
-    ]
+    static let truncatedNegations: [String: Set<String>] = Dictionary(uniqueKeysWithValues:
+        ["doesn", "didn", "isn", "wasn", "couldn", "wouldn", "shouldn", "hasn", "hadn", "aren", "weren", "mustn", "needn"].map { ($0, [$0 + "'t"]) })
+        .merging(["doesn": ["don't"]]) { $0.union($1) }
 
     static func isNegation(_ lower: String) -> Bool {
-        negationWords.contains(lower) || lower.hasSuffix("n't") || truncatedNegations.contains(lower)
+        negationWords.contains(lower) || lower.hasSuffix("n't") || truncatedNegations[lower] != nil
     }
 
     static let cardinals: [String: Int] = [
@@ -603,9 +604,9 @@ enum CleanupGuard {
             if let i = rawWords.indices.first(where: { window.contains($0) && !consumedRaw.contains($0) && a[$0] == w.lower }) {
                 consumedRaw.insert(i); continue
             }
-            // A negative contraction may complete one speech recognition truncated in the same place
-            // ("doesn" -> "doesn't" or "don't"); the negation count check above keeps the meaning.
-            if w.lower.hasSuffix("n't"), let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.truncatedNegations.contains(a[$0]) }) {
+            // A negative contraction may complete one speech recognition truncated in the same place,
+            // with the same auxiliary ("couldn" -> "couldn't", never "shouldn't"; "doesn" may be "don't").
+            if let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.truncatedNegations[a[$0]]?.contains(w.lower) == true }) {
                 consumedRaw.insert(i); continue
             }
             if w.isName && !rawSet.contains(w.lower) { return .fail(.nameAdded) }

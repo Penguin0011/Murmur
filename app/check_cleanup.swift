@@ -278,6 +278,8 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "so it doesn spread so we can eat it", cleaned: "So it don't spread, so we can eat it.", options: .standard) == .pass, "truncated contraction completed differently")
         expect(CleanupGuard.check(raw: "so it doesn spread so we can eat it", cleaned: "So it spreads, so we can eat it.", options: .standard) != .pass, "truncated negation cannot be dropped")
         expect(CleanupGuard.check(raw: "so it doesn spread so we can eat it", cleaned: "So it spread, so we can't eat it.", options: .standard) != .pass, "truncated negation cannot move")
+        expect(CleanupGuard.check(raw: "we couldn go", cleaned: "We couldn't go.", options: .standard) == .pass, "truncated contraction keeps its auxiliary")
+        expect(CleanupGuard.check(raw: "we couldn go", cleaned: "We shouldn't go.", options: .standard) != .pass, "completion cannot change the auxiliary")
         // Punctuation transfer: the model's punctuation on the transcript's words.
         expect(CleanupPipeline.punctuated(raw: "every like give or take twenty seconds okay", cleaned: "Every give or take twenty seconds. Okay?") == "Every like give or take twenty seconds. Okay?", "transfer keeps a dropped filler")
         expect(CleanupPipeline.punctuated(raw: "Last model I mean last agent left", cleaned: "Last agent left.") == "Last model I mean last agent left.", "transfer recapitalizes after a dropped reparandum")
