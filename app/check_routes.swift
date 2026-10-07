@@ -412,11 +412,11 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         p.cloudCleaner = MockCleaner(.success("Call Akme."))
         await checkA(await p.processAsync("Um, call Akme.") == .insert("Call Akme."), "configured cloud cleanup inserts")
         p.cloudCleaner = MockCleaner(.failure(.quota(.gemini)))
-        let held = await p.processAsync("Um, call Akme.")
-        check(held == .heldForRecovery(raw: "Um, call Akme.", reason: .cleanerFailed), "cleanup error holds, no local fallback")
-        check(p.lastProviderError == .quota(.gemini), "provider error kept for the hold message")
+        let fellBack = await p.processAsync("Um, call Akme.")
+        check(fellBack == .insert("Call Akme."), "cleanup error uses local rules: \(fellBack)")
+        check(p.lastProviderError == .quota(.gemini), "provider error kept for the notice")
         p.cloudCleaner = nil
-        await checkA(await p.processAsync("Um, call Akme.") == .heldForRecovery(raw: "Um, call Akme.", reason: .cleanerFailed), "unconfigured cloud cleanup holds")
+        await checkA(await p.processAsync("Um, call Akme.") == .insert("Call Akme."), "unconfigured cloud cleanup uses local rules")
         check(p.lastProviderError == nil, "error cleared per call")
         settings.route = .local; try p.update(settings)
     }

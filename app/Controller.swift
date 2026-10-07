@@ -994,6 +994,10 @@ final class PreStart: @unchecked Sendable {
             catch { setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History; its status could not be saved.") }
             destination = nil; historySaved(); done(); return
         }
+        // Content-free: why the full cleanup was not used (the punctuation transfer or local rules was).
+        if let why = processing?.lastFallback {
+            timingLog.notice("cleanup-fallback reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError.map { Mirror(reflecting: $0).children.first?.label ?? "\($0)" } ?? "none", privacy: .public)")
+        }
         // Only filler words were heard: keep the raw transcript, insert nothing, show no error.
         if processed.isEmpty {
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "saved-not-inserted")
@@ -1037,6 +1041,10 @@ final class PreStart: @unchecked Sendable {
                 try store.save(entry)
                 watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
                 showInsertionResult(insertion)
+                // A provider failure is not silent: a bad key or quota would otherwise degrade every dictation.
+                if insertion.status != .failed, let error = processing?.lastProviderError {
+                    setPhase("Ready", "Inserted with local cleanup. \(error.userMessage)")
+                }
             } catch {
                 setPhase("Error", attempted
                     ? "\(saved) Delivery status could not be saved. Check the destination before pasting again."

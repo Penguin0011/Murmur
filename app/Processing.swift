@@ -7,8 +7,11 @@ import Foundation
 // preferred spellings are already in the text the cleanup guard compares against. Relevant
 // entries are also passed as allowed terms, and as prompt terms on the cloud route.
 //
-// Failure policy (PRD §3, §4, Milestone 1 decisions): a cleaner error or a guard failure holds the
-// raw transcript for recovery with a content-free reason. Nothing falls back to another route.
+// Failure policy (user decision, October 6, 2026: behave like Wispr Flow): a dictation is never held.
+// When the guard rejects the cleaned words, the transcript's own words go in with the model's
+// punctuation (`CleanupPipeline.punctuated`). A provider error, or a transfer that also fails the
+// guard, falls back to local rules, and failing those, to the dictionary-applied transcript. Every
+// text inserted has passed the guard or is the user's own words. Reasons stay content-free.
 
 /// Where cleanup runs. `.local` is the RuleCleaner. `.cloud` means "through a `CleanupProvider`":
 /// Gemini, OpenRouter, or a user-run local model server (see `CleanupChoice` in Routes.swift).
@@ -21,8 +24,8 @@ enum CleanupRoute: String, Codable, CaseIterable, Sendable {
 enum ProcessingOutcome: Equatable, Sendable {
     /// Insert (or save, if insertion is off or unsafe) this text.
     case insert(String)
-    /// Save `raw` (the unmodified transcript) for recovery and do not insert automatically.
-    /// `reason` is content-free and safe to log.
+    /// Save `raw` (the unmodified transcript) for recovery and do not insert automatically. Only
+    /// the controller produces this now (processing unavailable); `reason` is content-free.
     case heldForRecovery(raw: String, reason: CleanupFailureReason)
 }
 
@@ -84,11 +87,15 @@ final class ProcessingCoordinator {
     private let defaults: UserDefaults
     /// The local route's cleaner. Tests substitute failing or misbehaving cleaners.
     var localCleaner: Cleaner = RuleCleaner()
-    /// The cloud route's provider. Nil means the cloud route is not configured, so it holds.
+    /// The cloud route's provider. Nil means the cloud route is not configured, so local rules run.
     /// AppController sets it from `RoutePlan` (selected provider and Keychain key) at each start.
     var cloudCleaner: CleanupProvider?
-    /// The last provider error from `processAsync`, for a content-free hold message. Main thread.
+    /// The last provider error from `processAsync`, for a content-free notice. Main thread.
     private(set) var lastProviderError: ProviderError?
+    /// Why the last dictation did not get its full cleanup (content-free), or nil. Main thread.
+    private(set) var lastFallback: CleanupFailureReason?
+    /// What the punctuation transfer is guarded as: sentence punctuation and capitals, no word changes.
+    static let punctuationOnly = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
 
     /// `directory` holds dictionary.json and ledger.json (MurmurDataLocations.standard layout).
     /// `isCommonWord` is the learning lexicon (NSSpellChecker in the app; a fake set in checks).
@@ -121,64 +128,76 @@ final class ProcessingCoordinator {
         return (applied, terms)
     }
 
-    private static func outcome(_ cleanup: CleanupOutcome, raw: String) -> ProcessingOutcome {
-        switch cleanup {
-        case .cleaned(let text), .unchanged(let text): return .insert(text)
-        case .heldForRecovery(_, let reason): return .heldForRecovery(raw: raw, reason: reason)
+    /// Local rules, guarded; the dictionary-applied text itself if they fail the guard.
+    private func localClean(_ text: String, terms: [String]) -> String {
+        switch CleanupPipeline.process(raw: text, options: settings.options, cleaner: localCleaner, allowedTerms: terms) {
+        case .cleaned(let cleaned), .unchanged(let cleaned): return cleaned
+        case .heldForRecovery(_, let reason): lastFallback = lastFallback ?? reason; return text
         }
     }
 
-    /// Synchronous path, used by the app on the local route. On the cloud route this never calls
-    /// the network and never substitutes the local cleaner: it holds, unless no cleanup option is
-    /// enabled. The app calls `processAsync` whenever the route is not local rules.
+    /// Synchronous path, used by the app on the local route. It never calls the network: on the
+    /// cloud route it uses local rules. The app calls `processAsync` whenever the route is not local rules.
     func process(_ raw: String) -> ProcessingOutcome {
-        lastProviderError = nil
+        lastProviderError = nil; lastFallback = nil
         let prepared = prepare(raw)
-        let options = settings.options
-        switch settings.route {
-        case .local:
-            return Self.outcome(CleanupPipeline.process(raw: prepared.text, options: options, cleaner: localCleaner, allowedTerms: prepared.terms), raw: raw)
-        case .cloud:
-            if !options.anyEnabled || prepared.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .insert(prepared.text) }
-            return .heldForRecovery(raw: raw, reason: .cleanerFailed)
-        }
+        if settings.route == .cloud && settings.options.anyEnabled { lastFallback = .cleanerFailed }
+        return .insert(localClean(prepared.text, terms: prepared.terms))
     }
 
-    /// Full path including the cloud route: one provider call, no retry, no fallback to local.
-    /// Main actor: the dictionary is read on the main thread; only the provider call runs elsewhere.
+    /// Full path including the cloud route. Always inserts: see the failure policy above.
+    /// Main actor: the dictionary is read on the main thread; only the provider calls run elsewhere.
     @MainActor func processAsync(_ raw: String) async -> ProcessingOutcome {
-        lastProviderError = nil
+        lastProviderError = nil; lastFallback = nil
         guard settings.route == .cloud else { return process(raw) }
         let prepared = prepare(raw)
-        let options = settings.options
+        let options = settings.options, terms = prepared.terms
         if !options.anyEnabled || prepared.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .insert(prepared.text) }
-        guard let provider = cloudCleaner else { return .heldForRecovery(raw: raw, reason: .cleanerFailed) }
+        guard let provider = cloudCleaner else { lastFallback = .cleanerFailed; return .insert(localClean(prepared.text, terms: terms)) }
         // On the slow Gemma fallback, long text is cleaned in parallel sections, each guarded on its own.
         let sections = (provider as? GeminiCleanupProvider)?.onFallback == true ? CleanupSections.split(prepared.text) : [prepared.text]
-        let terms = prepared.terms
-        let cleaned: [String]
-        do {
-            cleaned = try await withThrowingTaskGroup(of: (Int, String).self) { group in
-                for (index, section) in sections.enumerated() {
-                    group.addTask { (index, try await provider.cleanup(CleanupPrompt.build(transcript: section, options: options, dictionaryTerms: terms))) }
-                }
-                var out = Array(repeating: "", count: sections.count)
-                for try await (index, text) in group { out[index] = text }
-                return out
+        let results = await withTaskGroup(of: (Int, CloudAttempt).self) { group in
+            for (index, section) in sections.enumerated() {
+                group.addTask { (index, await Self.cloudClean(section, provider: provider, options: options, terms: terms)) }
             }
-        } catch {
-            lastProviderError = error as? ProviderError
-            return .heldForRecovery(raw: raw, reason: .cleanerFailed)
+            var out = Array(repeating: CloudAttempt(text: nil, reason: .cleanerFailed, error: nil), count: sections.count)
+            for await (index, attempt) in group { out[index] = attempt }
+            return out
         }
         var parts: [String] = []
-        for (section, text) in zip(sections, cleaned) {
-            switch CleanupPipeline.judge(raw: section, cleaned: text, options: options, allowedTerms: terms,
-                                               soundsLike: DictionaryStore.soundsLike) {
-            case .cleaned(let part), .unchanged(let part): if !part.isEmpty { parts.append(part) }
-            case .heldForRecovery(_, let reason): return .heldForRecovery(raw: raw, reason: reason)
-            }
+        for (section, attempt) in zip(sections, results) {
+            if let reason = attempt.reason { lastFallback = lastFallback ?? reason }
+            if let error = attempt.error { lastProviderError = lastProviderError ?? error }
+            let text = attempt.text ?? localClean(section, terms: terms)
+            if !text.isEmpty { parts.append(text) }
         }
         return .insert(parts.joined(separator: " "))
+    }
+
+    /// One section's cloud result. Nil `text` means use local rules; `reason` is why the full
+    /// cleanup was not used, and `error` the provider error, if any.
+    struct CloudAttempt: Sendable {
+        var text: String?
+        var reason: CleanupFailureReason?
+        var error: ProviderError?
+    }
+
+    /// One provider call, no retry (a rate limit or an outage would only fail again). If the guard
+    /// rejects the cleaned words, the transcript's words take the model's punctuation instead.
+    private static func cloudClean(_ section: String, provider: CleanupProvider, options: CleanupOptions, terms: [String]) async -> CloudAttempt {
+        let output: String
+        do { output = try await provider.cleanup(CleanupPrompt.build(transcript: section, options: options, dictionaryTerms: terms)) }
+        catch { return CloudAttempt(text: nil, reason: .cleanerFailed, error: error as? ProviderError) }
+        let reason: CleanupFailureReason
+        switch CleanupPipeline.judge(raw: section, cleaned: output, options: options, allowedTerms: terms, soundsLike: DictionaryStore.soundsLike) {
+        case .cleaned(let text), .unchanged(let text): return CloudAttempt(text: text, reason: nil, error: nil)
+        case .heldForRecovery(_, let why): reason = why
+        }
+        if options.punctuation, let words = CleanupPipeline.punctuated(raw: section, cleaned: output, terms: terms),
+           case .cleaned(let text) = CleanupPipeline.judge(raw: section, cleaned: words, options: punctuationOnly, allowedTerms: terms) {
+            return CloudAttempt(text: text, reason: reason, error: nil)
+        }
+        return CloudAttempt(text: nil, reason: reason, error: nil)
     }
 
     // MARK: Learning
