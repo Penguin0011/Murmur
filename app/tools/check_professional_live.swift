@@ -10,6 +10,7 @@ import Foundation
 struct Case { var raw: String; var must: [String]; var mustNot: [String] }
 @main enum ProfessionalLiveCheck {
 static func main() async throws {
+setvbuf(stdout, nil, _IOLBF, 0) // One line per result, so a rate-limited run shows progress.
 let test = "yeah you know me and john was going to buy like 42 apples but he don't want to go so we are not going to do that wait no i meant he is not going to do that so instead we need to buy item one milk item two eggs and yeah item three bread"
 let cases: [Case] = [
   Case(raw: test, must: ["John and I", "42", "doesn't want to go", "1. Milk", "2. Eggs", "3. Bread"], mustNot: ["we are not", "item", "Item", "yeah", "Yeah", "you know", "wait", "meant", "me and"]),

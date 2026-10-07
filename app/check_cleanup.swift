@@ -390,6 +390,11 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "I told him I meant he told me", cleaned: "He told me.", options: professional) != .pass, "professional refuses a dropped outer clause")
         expect(CleanupGuard.check(raw: "Yesterday I told him about it", cleaned: "Yesterday he told me about it.", options: professional) != .pass, "professional refuses swapped pronoun roles")
         expect(CleanupGuard.check(raw: "tell sam the update", cleaned: "Tell the client the update.", options: professional) != .pass, "professional refuses replacing a lowercase name")
+        // Fourth review: a repair restates right away; moved words stay local.
+        let serious = "I was serious actually I meant every word when I said I was serious"
+        expect(CleanupGuard.applyCommaFreeCorrections(serious) == serious, "declarative actually I meant kept")
+        expect(CleanupGuard.check(raw: serious, cleaned: "Every word when I said I was serious.", options: professional) != .pass, "professional refuses a dropped assertion")
+        expect(CleanupGuard.check(raw: "Alice likes cats and Bob likes dogs", cleaned: "Alice likes dogs and Bob likes cats.", options: professional) != .pass, "professional refuses swapped objects")
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),

@@ -465,7 +465,9 @@ enum CleanupGuard {
                 // across that one period into the previous sentence.
                 var limit = scratch ? 30 : 8
                 if commaFree {
-                    let repair = (wi + cue.count)..<min(tokenOfWord.count, wi + cue.count + 8)
+                    // The repair restates right away: within its first four words, not later in the sentence
+                    // ("actually I meant every word when I said I was serious" is not a repair).
+                    let repair = (wi + cue.count)..<min(tokenOfWord.count, wi + cue.count + 4)
                     // Interregnum words, including "know" misheard for "no" ("wait I know I meant"), do not count.
                     func interregnum(_ w: String) -> Bool { ["wait", "no", "know", "oh", "ah", "sorry", "actually"].contains(w) || CleanupText.hesitations.contains(w) }
                     func recurs(_ w: String) -> Bool {
@@ -719,6 +721,11 @@ enum CleanupGuard {
             let before = pairedOut.filter { $0 < j }.count
             return (before == 0 ? 0 : pairedRaw[before - 1] + 1)..<(before < pairedRaw.count ? pairedRaw[before] : rawWords.count)
         }
+        /// `gap` widened by one kept word on each side.
+        func nearGap(_ j: Int) -> Range<Int> {
+            let before = pairedOut.filter { $0 < j }.count
+            return (before < 2 ? 0 : pairedRaw[before - 2] + 1)..<(before + 1 < pairedRaw.count ? pairedRaw[before + 1] : rawWords.count)
+        }
         var polishInserted: [Int] = []
         for (j, w) in outWords.enumerated() where !matchedOut.contains(j) && !termWords.contains(w.lower) {
             if let i = rawWords.indices.first(where: { window.contains($0) && !consumedRaw.contains($0) && a[$0] == w.lower }) {
@@ -740,8 +747,9 @@ enum CleanupGuard {
                 guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.isNegation(a[$0]) }) else { return .fail(.negationChanged) }
                 consumedRaw.insert(i); continue
             }
-            // Professional may reorder ("me and John was" -> "John and I were"): a moved word consumes its raw copy.
-            if options.professional, let i = rawWords.indices.first(where: { !consumedRaw.contains($0) && a[$0] == w.lower }) {
+            // Professional may reorder locally ("me and John was" -> "John and I were"): a moved word consumes its
+            // raw copy within one kept word of its gap, so objects cannot trade clauses ("likes cats ... likes dogs").
+            if options.professional, let i = nearGap(j).first(where: { !consumedRaw.contains($0) && a[$0] == w.lower }) {
                 consumedRaw.insert(i); continue
             }
             if options.polish { polishInserted.append(j); continue }
