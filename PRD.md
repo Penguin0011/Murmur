@@ -260,6 +260,23 @@ The feasibility deliverable must prove range identity, replacements, undo, curso
 
 Validation gate: test automatic learning in at least one real app per representative category and publish pass/partial/unsupported for each. Unsupported categories are disclosed and do not block launch (approved); at least one category must pass. Test the approved 60-second window and two-observation threshold; propose any changes with evidence.
 
+### Decision: cleanup thresholds from the corpus baseline — October 7, 2026
+
+Recorded from the measured baseline in `app/README.md` (corpus `app/cleanup-corpus.json`, 425 utterances, `check_cleanup`; first measured on Linux October 3, 2026, re-run on macOS October 7, 2026 with the same numbers). Thresholds are set just below the measured values. [Certain]
+
+| Measure | Threshold | Baseline (RuleCleaner, deterministic) |
+|---|---|---|
+| Spoken-correction exact match | ≥ 95% | 95.8% (96 utterances) |
+| Ambiguous corrections kept unchanged | 100% | 22/22 |
+| List formatting precision | ≥ 97% | 97.7% (43/44) |
+| List formatting recall | ≥ 95% | 100% (43/43) |
+| Unintended name, number, or negation edits | ≤ 1% of utterances | 0.2% (1/425), after guard |
+| Adversarial outputs accepted by the guard | 0 | 0 of 2349 (polish 0 of 2220; professional 0) |
+
+Polish and Professional: the corpus labels cover fillers, corrections, and lists only, so the rule-based baseline does not measure their rewrites. Their evidence is the guard results above and the live Professional check (11 synthetic dictations, 22/22 passing; commit `b5481a5`). No live Polish run is recorded, so Polish stays at guard-level evidence until one is added. [Certain]
+
+Any local candidate or cloud route must meet these thresholds on the same corpus before it is offered as the cleanup default. The 425-utterance corpus was written by the same agent that wrote the rules, so these numbers overstate real-world quality (see `app/README.md`). [Certain]
+
 ### Milestone 1 implementation decisions — October 2, 2026
 
 Continue with the selected Unified model and batch processing; available-host inference remains unverified. M1/8 GB performance is deferred and does not block implementation or release. No silent model/provider substitution is permitted. [Certain]
