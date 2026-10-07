@@ -581,12 +581,12 @@ struct SettingsView: View {
             segmented([(0, "Strict"), (1, "Polish"), (2, "Professional")], controller.cleanupChoice == .localRules ? .constant(0) : cleanupStyle, size: 14).padding(.top, 8)
                 .disabled(controller.cleanupChoice == .localRules)
             help(controller.cleanupChoice == .localRules
-                 ? "On this Mac uses Strict rules. Choose a model cleanup route to use Polish or Professional."
+                 ? "On this Mac always uses Strict. Pick a model route for Polish or Professional."
                  : controller.cleanupProfessional
-                 ? "Professional rewrites your dictation into clear, correct writing: it fixes grammar such as “me and John was”, drops false starts and corrections like “wait no I meant”, and formats spoken lists. It may reword your sentences and change their tone; names, numbers and “not” are still never changed."
+                 ? "Rewrites into clear, professional writing. May reword and change tone; names, numbers and “not” stay."
                  : controller.cleanupPolish
-                 ? "Polish also removes fillers such as “yeah” and “you know” without commas, drops false starts, and fixes small grammar slips and misheard words. It can occasionally change a word's meaning; names, numbers and “not” are still never changed."
-                 : "Strict makes only the edits below and never changes your wording otherwise. If cleanup goes further, Murmur inserts your own words with its punctuation.")
+                 ? "Keeps your voice and fixes small slips: fillers, false starts, grammar. Names, numbers and “not” stay."
+                 : "Only the edits below. Your wording never changes.")
                 .padding(.top, 8)
             rule.padding(.top, 20)
             toggleRow("Remove filler words", "Takes out “um”, “uh” and similar.", isOn: $controller.cleanupFillers)
