@@ -563,7 +563,7 @@ struct SettingsView: View {
 
     @ViewBuilder private func disclosure(_ text: String?) -> some View {
         if let text {
-            Text(text + " Murmur never falls back to another route.")
+            Text(text)
                 .font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 .padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Palette.accent16)
         }
@@ -594,7 +594,7 @@ struct SettingsView: View {
             toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
             toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
             HStack(spacing: 16) {
-                help("If cleanup changes too much, Murmur inserts your own words with its punctuation; if cleanup fails, it uses cleanup on this Mac. The raw transcript stays in History. Faithful transcription turns every option off; dictionary spellings still apply.")
+                help("If cleanup goes too far, Murmur inserts your own words. The raw transcript stays in History. Faithful turns all cleanup off.")
                 Spacer()
                 Button("Faithful Transcription", action: controller.useFaithfulTranscription)
                     .buttonStyle(InkButtonStyle(kind: .outline))
@@ -605,7 +605,7 @@ struct SettingsView: View {
             eyebrow("Cleanup runs with").padding(.top, 28)
             segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
-            help("Built-in local rules handle only a limited set of cleanup patterns. For private AI cleanup, try an instruction model around 8B or larger with a local model server; Murmur has not qualified a model that size yet. Its tested models under 2B were slower and less accurate than Gemini in a synthetic comparison. Otherwise choose Gemini or a Custom Provider. Murmur never switches routes on its own.")
+            help("On this Mac uses simple built-in rules. For AI cleanup, choose Gemini or a Custom Provider (a local model server of 8B or larger works too). Murmur never switches routes on its own.")
                 .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)

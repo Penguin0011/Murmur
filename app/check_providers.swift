@@ -717,7 +717,7 @@ extension ProviderChecks {
         check(local.staysOnThisMac && local.leavesDevice.isEmpty && local.warning == nil && local.destinationHost == "localhost:11434", "loopback disclosure: nothing leaves")
         check(local.summary.contains("nothing leaves this Mac") && local.staysOnDevice.contains("the transcript text"), "loopback summary")
         let lan = try! OpenAICompatibleCleanupProvider(baseURL: "http://192.168.1.20:11434", model: "m")
-        check(!lan.disclosure.staysOnThisMac && lan.disclosure.leavesDevice.joined().contains("transcript") && lan.disclosure.summary.contains("leaves this Mac to 192.168.1.20"), "LAN disclosure: transcript leaves to host")
+        check(!lan.disclosure.staysOnThisMac && lan.disclosure.leavesDevice.joined().contains("transcript") && lan.disclosure.summary.contains("to 192.168.1.20"), "LAN disclosure: transcript leaves to host")
         check(lan.disclosure.warning?.contains("not encrypted") == true && lan.disclosure.summary.contains("not encrypted") && !(lan.disclosure.warning ?? "").contains("API key"), "plain http to LAN warns (no key mentioned without key)")
         var lanKeyed = lan; lanKeyed.apiKey = key
         check(lanKeyed.disclosure.warning?.contains("API key") == true && !lanKeyed.disclosure.summary.contains(fakeSecret), "http with key warns about key, never shows it")
@@ -729,7 +729,7 @@ extension ProviderChecks {
         var loopKeyed = ollama; loopKeyed.apiKey = key
         check(loopKeyed.makeGetRequest(loopKeyed.modelsURL).value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "http to loopback sends the key (it never leaves this Mac)")
         let dotLocal = try! OpenAICompatibleCleanupProvider(baseURL: "http://studio.local:1234", model: "m")
-        check(dotLocal.disclosure.summary.contains("leaves this Mac to studio.local"), ".local disclosed as leaving")
+        check(dotLocal.disclosure.summary.contains("to studio.local"), ".local disclosed as leaving")
         let remote = try! OpenAICompatibleCleanupProvider(baseURL: "https://gpu.example.com", model: "m")
         check(remote.disclosure.warning == nil && remote.disclosure.summary.contains("gpu.example.com"), "https remote: disclosed, no unencrypted warning")
         let trick = try! OpenAICompatibleCleanupProvider(baseURL: "http://127.0.0.1.evil.com:11434", model: "m")

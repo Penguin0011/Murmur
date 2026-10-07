@@ -372,6 +372,13 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Meet Tuesday, sorry, Thursday.", "Meet Tuesday, sorry, Thursday."),
         ] { expect(CleanupGuard.applyCommaFreeCorrections(raw) == out, "comma-free correction: \(raw)") }
         expect(CleanupGuard.check(raw: "I did not say that I meant it", cleaned: "I did not say it.", options: professional) != .pass, "professional keeps an unrestated I meant")
+        // Numbers and negations keep their place; numeric "one" is never a pronoun (PR review).
+        for (raw, out, label) in [
+            ("Alice paid 10 dollars and Bob paid 20 dollars", "Alice paid 20 dollars and Bob paid 10 dollars.", "swapped numbers"),
+            ("he did not call and she wrote back", "He called, and she did not write back.", "moved negation"),
+            ("we won one", "We won.", "numeric one at the end"),
+            ("send one", "Send.", "numeric one after a verb"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),

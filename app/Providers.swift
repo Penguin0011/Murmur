@@ -57,8 +57,8 @@ struct DataDisclosure: Equatable, Sendable {
         if staysOnThisMac {
             main = "\(provider.displayName) \(stage.rawValue) runs on this Mac (\(destinationHost)); nothing leaves this Mac. \(retentionNote)"
         } else {
-            main = "\(provider.displayName) \(stage.rawValue) sends \(leavesDevice.joined(separator: ", ")) to \(destinationHost). "
-                + "Not sent: \(staysOnDevice.joined(separator: ", ")). \(retentionNote)"
+            func list(_ items: [String]) -> String { items.count < 2 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items.last! }
+            main = "Sends \(list(leavesDevice)) to \(destinationHost). \(list(staysOnDevice).prefix(1).uppercased() + list(staysOnDevice).dropFirst()) stay on this Mac. \(retentionNote)"
         }
         return warning.map { main + " " + $0 } ?? main
     }
@@ -755,7 +755,7 @@ struct GeminiCleanupProvider: CleanupProvider {
 
     var disclosure: DataDisclosure {
         DataDisclosure(provider: id, stage: .cleanup, destinationHost: baseURL.host ?? "generativelanguage.googleapis.com",
-                       leavesDevice: ["the transcript text", "relevant dictionary terms included in the cleanup prompt"],
+                       leavesDevice: ["the transcript text", "relevant dictionary terms"],
                        staysOnDevice: ["audio", "history", "the rest of the dictionary"],
                        retentionNote: "Paid tier: Google logs prompts for a limited time for abuse detection only. Free tier: content may be used to improve Google products and read by human reviewers.")
     }
@@ -902,7 +902,7 @@ struct OpenRouterCleanupProvider: CleanupProvider {
 
     var disclosure: DataDisclosure {
         DataDisclosure(provider: id, stage: .cleanup, destinationHost: endpoint.host ?? "openrouter.ai",
-                       leavesDevice: ["the transcript text", "relevant dictionary terms included in the cleanup prompt"],
+                       leavesDevice: ["the transcript text", "relevant dictionary terms"],
                        staysOnDevice: ["audio", "history", "the rest of the dictionary"],
                        retentionNote: zeroDataRetention
                            ? "Routed only to zero-data-retention endpoints; OpenRouter does not store prompts unless you opt in."
@@ -1718,9 +1718,9 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
                                   retentionNote: "The transcript and relevant dictionary terms go only to the model server on this Mac; that server's own logging settings apply.")
         case .leavesDevice(let host, let encrypted):
             return DataDisclosure(provider: id, stage: .cleanup, destinationHost: host,
-                                  leavesDevice: ["the transcript text", "relevant dictionary terms included in the cleanup prompt"],
+                                  leavesDevice: ["the transcript text", "relevant dictionary terms"],
                                   staysOnDevice: ["audio", "history", "the rest of the dictionary"],
-                                  retentionNote: "The transcript leaves this Mac to \(host). Retention depends on whoever runs that server.",
+                                  retentionNote: "Retention is up to whoever runs that server.",
                                   warning: encrypted ? nil : "The connection uses plain http and is not encrypted: anyone on the network path can read the transcript.\(apiKey == nil ? "" : " Your API key is not sent over plain http; use https to send it.")")
         }
     }

@@ -670,9 +670,12 @@ enum CleanupGuard {
         }
 
         // Professional: "one" as a pronoun ("the quarterly one not the monthly one") may go.
+        // It needs a determiner right before it or before one modifier ("the quarterly one"), never "won one".
         func pronounOne(_ i: Int) -> Bool {
-            options.professional && a[i] == "one" && i > 0 && !["item", "number", "step"].contains(a[i - 1])
-                && (i + 1 == a.count || grammarWords.contains(a[i + 1]) || CleanupText.isNegation(a[i + 1]))
+            let determiners: Set<String> = ["the", "this", "that", "which", "each", "every", "another", "a", "any"]
+            guard options.professional, a[i] == "one", i > 0,
+                  determiners.contains(a[i - 1]) || (i > 1 && determiners.contains(a[i - 2]) && CleanupText.numberValue(a[i - 1]) == nil) else { return false }
+            return i + 1 == a.count || grammarWords.contains(a[i + 1]) || CleanupText.isNegation(a[i + 1])
         }
         // Numbers: nothing new; drops only inside a correction or as a list marker.
         var rawNumbers: [String: Int] = [:], outNumbers: [String: Int] = [:], allowedNumberDrops: [String: Int] = [:]
@@ -716,6 +719,16 @@ enum CleanupGuard {
                 consumedRaw.insert(i); continue
             }
             if w.isName && !rawSet.contains(w.lower) { return .fail(.nameAdded) }
+            // Professional: a number or negation never moves; a new one replaces one in its own gap
+            // ("don't" -> "doesn't"), so "paid 10 ... paid 20" cannot swap and "not" cannot change clause.
+            if options.professional, let v = CleanupText.numberValue(w.lower) {
+                guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.numberValue(a[$0]) == v }) else { return .fail(.numberAdded) }
+                consumedRaw.insert(i); continue
+            }
+            if options.professional, CleanupText.isNegation(w.lower) {
+                guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.isNegation(a[$0]) }) else { return .fail(.negationChanged) }
+                consumedRaw.insert(i); continue
+            }
             // Professional may reorder ("me and John was" -> "John and I were"): a moved word consumes its raw copy.
             if options.professional, let i = rawWords.indices.first(where: { !consumedRaw.contains($0) && a[$0] == w.lower }) {
                 consumedRaw.insert(i); continue
