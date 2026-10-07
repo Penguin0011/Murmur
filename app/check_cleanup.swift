@@ -444,6 +444,12 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Send the report", "Send and delete the report.", "inserted instruction"),
             ("First floor is open and second floor is closed", "1. Floor is open\n2. Floor is closed", "ordinal adjectives as a list"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Twelfth review: real inflections, no bare inserted pronoun, prepositions stay.
+        for (raw, out, label) in [
+            ("We plan the garden", "We plant the garden.", "plan to plant"),
+            ("Alice approves today", "Alice approves it today.", "inserted it"),
+            ("This is for Bob", "This is Bob.", "dropped preposition"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),

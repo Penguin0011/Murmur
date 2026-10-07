@@ -916,6 +916,14 @@ enum CleanupGuard {
         // Professional: budgets only. ponytail: a reworded word can change meaning ("accept" ->
         // "decline"); names, numbers, negations, answers and quotes are checked above, and the
         // settings say so. Polish stays the voice-keeping choice.
+        // `long` is `short` with a regular English ending: plan/planned, make/making, try/tried, table/tables;
+        // never plan/plant.
+        func inflection(_ short: String, _ long: String) -> Bool {
+            guard short.count >= 2, long.count > short.count, !polarityFlip(short, long) else { return false }
+            let endings = ["s", "es", "ed", "d", "ing", "er", "est", "ly"]
+            let stems = [short, String(short.dropLast()), String(short.dropLast()) + "i", short + String(short.last!)]
+            return stems.contains { stem in endings.contains { stem + $0 == long } }
+        }
         if options.professional {
             // A kept number or negation keeps its context: a content word dropped on one side of it may
             // not come back on the other ("Book table 5" -> "Book 5 tables").
@@ -960,6 +968,8 @@ enum CleanupGuard {
                 // A preposition is never swapped for another ("to Paris" -> "from Paris", "for Bob" -> "with Bob").
                 let prepositions: Set<String> = ["to", "from", "for", "with", "in", "on", "at", "by", "of", "into", "off", "up", "out", "about", "than", "as"]
                 if prepositions.contains(a[i]), polishInserted.contains(where: { gap($0).contains(i) && prepositions.contains(b[$0]) && b[$0] != a[i] }) { return .fail(.unexplainedDeletion) }
+                // Nor is a relational one dropped: "This is for Bob" never becomes "This is Bob".
+                if ["for", "from", "with", "by", "at", "on", "in", "into", "about"].contains(a[i]) { return .fail(.unexplainedDeletion) }
                 // A tense word may change only within its tense ("was" -> "were", never "was" -> "is").
                 let tenses: [Set<String>] = [["was", "were", "had", "did"], ["is", "are", "am", "has", "have", "do", "does"], ["will", "shall"]]
                 if let tense = tenses.firstIndex(where: { $0.contains(a[i]) }),
@@ -979,18 +989,21 @@ enum CleanupGuard {
                 // The same word elsewhere is a move, not a replacement, and moves are limited above.
                 // A replacement is an inflection of the same word in the same place ("table" -> "tables"),
                 // not a similar-looking different word ("liked" -> "loved", "increase" -> "decrease").
-                func inflection(_ x: String, _ y: String) -> Bool {
-                    let p = zip(x, y).prefix { $0 == $1 }.count
-                    return x != y && p >= 3 && p >= min(x.count, y.count) - 2 && !polarityFlip(x, y)
-                }
-                guard let r = replacements.firstIndex(where: { gap($0).contains(i) && inflection(a[i], b[$0]) }) else { return .fail(.unexplainedDeletion) }
+                guard let r = replacements.firstIndex(where: { gap($0).contains(i) && (inflection(a[i], b[$0]) || inflection(b[$0], a[i])) }) else { return .fail(.unexplainedDeletion) }
                 replacements.remove(at: r)
             }
             // Every new content word or modal replaces a dropped word; a pronoun contraction ("he's") is the
             // only free one. "I approve" never becomes "I should approve", nor "send" "send and delete".
-            // An extended form of a dropped word in the same place also counts ("do" -> "doing").
-            if replacements.contains(where: { j in !persons.contains { $0.contains(b[j]) }
-                && !gap(j).contains { unexplained.contains($0) && a[$0].count >= 2 && b[j].hasPrefix(a[$0]) } }) { return .fail(.insertedWords) }
+            // A bare pronoun is new only as a same-person swap in its place ("me" -> "I"), never an added
+            // object ("Alice approves it today").
+            for j in polishInserted where !b[j].contains("'") {
+                guard let person = persons.first(where: { $0.contains(b[j]) }) else { continue }
+                if !gap(j).contains(where: { unexplained.contains($0) && person.contains(a[$0]) }) { return .fail(.insertedWords) }
+            }
+            // An inflection of a dropped word in the same place also counts ("do" -> "doing"); a contraction
+            // ("he's") is the only free word, never a bare pronoun ("approves it today").
+            if replacements.contains(where: { j in !(b[j].contains("'") && persons.contains { $0.contains(b[j]) })
+                && !gap(j).contains { unexplained.contains($0) && inflection(a[$0], b[j]) } }) { return .fail(.insertedWords) }
             return dropped > max(4, a.count / 4) ? .fail(.unexplainedDeletion) : .pass
         }
         if options.polish { return polishCheck(unexplained: unexplained, inserted: polishInserted) }
