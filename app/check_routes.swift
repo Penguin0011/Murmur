@@ -305,6 +305,16 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         await checkA(await CloudTranscription.run(provider: whisper, audioData: silence) == .noSpeech(skipped: false), "empty transcript is no speech")
         check(whisper.calls == 1, "no pre-check for Whisper")
 
+        // Whisper echoes its prompt (the dictionary) on silence; the echo is not dictation.
+        let vocab = ["Aakash", "spaceyboi", "Open Router"]
+        await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success("Aakash.")), audioData: silence, vocabulary: vocab) == .noSpeech(skipped: false), "a lone hint echo is no speech")
+        await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success(" Aakash, spaceyboi, open router.")), audioData: silence, vocabulary: vocab) == .noSpeech(skipped: false), "an echoed hint list is no speech")
+        check(CloudTranscription.stripHintEcho("Meet at three. Aakash.", vocabulary: vocab) == "Meet at three.", "trailing echo sentence dropped")
+        check(CloudTranscription.stripHintEcho("Meet at three, Aakash, spaceyboi", vocabulary: vocab) == "Meet at three", "trailing echo list dropped")
+        check(CloudTranscription.stripHintEcho("Thanks, Aakash.", vocabulary: vocab) == "Thanks, Aakash.", "a name ending a sentence is kept")
+        check(CloudTranscription.stripHintEcho("Ask Aakash about it.", vocabulary: vocab) == "Ask Aakash about it.", "a term mid-sentence is kept")
+        check(CloudTranscription.stripHintEcho("Aakash.", vocabulary: []) == "Aakash.", "no vocabulary, no stripping")
+
         // Errors: one call, no retry, no other provider; audio kept for retry.
         let failing = SpyTranscriber(.failure(.authentication(.openrouter)))
         let bystander = SpyTranscriber(.success("should never run"))
