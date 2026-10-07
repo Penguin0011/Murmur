@@ -573,7 +573,10 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             eyebrow("Cleanup style").padding(.top, 20)
             segmented([(false, "Strict"), (true, "Polish")], $controller.cleanupPolish, size: 14).padding(.top, 8)
-            help(controller.cleanupPolish
+                .disabled(controller.cleanupChoice == .localRules)
+            help(controller.cleanupChoice == .localRules
+                 ? "On this Mac uses Strict rules. Choose a model cleanup route to use Polish."
+                 : controller.cleanupPolish
                  ? "Polish also removes fillers such as “yeah” and “you know” without commas, drops false starts, and fixes small grammar slips and misheard words. It can occasionally change a word's meaning; names, numbers and “not” are still never changed."
                  : "Strict makes only the edits below and never changes your wording otherwise. If cleanup goes further, Murmur inserts your own words with its punctuation.")
                 .padding(.top, 8)

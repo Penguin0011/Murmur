@@ -321,8 +321,6 @@ enum CleanupGuard {
     ]
     /// Grammar words polish may drop: not pronouns or the joins and, or, but, if ("salt and pepper").
     static let droppableGrammarWords = grammarWords.subtracting(persons.reduce(into: Set<String>()) { $0.formUnion($1) }).subtracting(["and", "or", "but", "if"])
-    /// "you know" is content before what is known ("you know the answer"), so not a filler there.
-    static let knownObjects: Set<String> = ["the", "a", "an", "that", "what", "how", "why", "where", "who", "when", "it", "him", "her", "them", "me", "us", "this", "these", "those", "about", "your", "my", "his", "their", "our"]
     static let modals: Set<String> = ["can", "could", "should", "shall", "may", "might", "must", "will", "would"]
     /// A grammar fix may change a pronoun's case ("him" -> "he") but not whom it refers to.
     static let persons: [Set<String>] = [
@@ -708,9 +706,14 @@ enum CleanupGuard {
             }
             func filler(_ i: Int) -> Bool {
                 func pair(_ x: Int) -> Bool {
-                    x >= 0 && x + 1 < a.count && polishFillerPairs.contains([a[x], a[x + 1]]) && !(x + 2 < a.count && knownObjects.contains(a[x + 2]))
+                    guard x >= 0, x + 2 < a.count, polishFillerPairs.contains([a[x], a[x + 1]]) else { return false }
+                    // Without punctuation, only a following personal subject clearly starts a new thought.
+                    return ["i", "we", "you", "he", "she", "they", "it's", "we're", "you're", "they're"].contains(a[x + 2])
                 }
-                if a[i] == "like" { return i > 0 && !meaningfulLikeAfter.contains(a[i - 1]) }
+                if a[i] == "like" {
+                    return i > 0 && i + 1 < a.count && !meaningfulLikeAfter.contains(a[i - 1])
+                        && !["the", "a", "an", "this", "that", "these", "those"].contains(a[i + 1])
+                }
                 return CleanupText.hesitations.contains(a[i]) || polishFillers.contains(a[i]) || pair(i) || pair(i - 1)
             }
             // Removed words: fillers (with the fillers option), grammar words, or a false start that the

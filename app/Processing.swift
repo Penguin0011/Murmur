@@ -134,7 +134,9 @@ final class ProcessingCoordinator {
 
     /// Local rules, guarded; the dictionary-applied text itself if they fail the guard.
     private func localClean(_ text: String, terms: [String]) -> String {
-        switch CleanupPipeline.process(raw: text, options: settings.options, cleaner: localCleaner, allowedTerms: terms) {
+        var options = settings.options
+        options.polish = false // Local rules do not implement Polish edits, including on cloud fallback.
+        switch CleanupPipeline.process(raw: text, options: options, cleaner: localCleaner, allowedTerms: terms) {
         case .cleaned(let cleaned), .unchanged(let cleaned): return cleaned
         case .heldForRecovery(_, let reason): lastFallback = lastFallback ?? reason; return text
         }

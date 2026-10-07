@@ -313,6 +313,8 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("please send the quarterly report to the whole team", "Please send the quarterly report to the whole team. I hope this helps you all.", "appended sentence"),
             ("every like give or take twenty seconds of audio", "Every give or take twenty seconds of audio.", "filler removal needs the fillers option"),
             ("we must call the police send the report today", "We must send the report today.", "unrestated phrase"),
+            ("He runs like the wind every morning", "He runs the wind every morning.", "meaningful comparison"),
+            ("I mean business when I say this", "Business when I say this.", "meaningful I mean"),
         ] {
             var o = polish
             if label.hasPrefix("filler removal") { o.fillers = false }

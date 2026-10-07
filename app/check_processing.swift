@@ -264,6 +264,9 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         p.localCleaner = RuleCleaner()
         await expect(p, "Um, call acme.", .insert("Call Akme."), "async local route")
         check(idle.messages.isEmpty, "local route never calls the provider")
+        settings.options.polish = true
+        try p.update(settings)
+        await expect(p, "it's awesome yeah it really is", .insert("It's awesome yeah it really is"), "local Polish uses strict rules")
     }
 
     /// Punctuation: local capitals only; the guard allows an added "?" only with the option on; old saved options decode with it off.
