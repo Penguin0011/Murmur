@@ -312,11 +312,13 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("make sure the build passes before you merge it", "Sure, make sure the build passes before you merge it.", "answer prefix"),
             ("please send the quarterly report to the whole team", "Please send the quarterly report to the whole team. I hope this helps you all.", "appended sentence"),
             ("every like give or take twenty seconds of audio", "Every give or take twenty seconds of audio.", "filler removal needs the fillers option"),
+            ("we must call the police send the report today", "We must send the report today.", "unrestated phrase"),
         ] {
             var o = polish
             if label.hasPrefix("filler removal") { o.fillers = false }
             expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "polish refuses: \(label)")
         }
+        expect(CleanupGuard.check(raw: "Call John and Akme today", cleaned: "Call on and Akme today.", options: polish, allowedTerms: ["Akme"]) != .pass, "polish never swaps a name")
         // Polish asks for these edits; strict's prompt is unchanged.
         let polishPrompt = CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system
         expect(polishPrompt.contains("false starts") && polishPrompt.contains("grammar slips") && !polishPrompt.contains("respell words"), "polish prompt")

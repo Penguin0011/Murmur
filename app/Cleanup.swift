@@ -702,7 +702,8 @@ enum CleanupGuard {
             var deleted = Set(unexplained)
             for j in inserted {
                 let w = outWords[j].lower
-                if let i = gap(j).first(where: { deleted.contains($0) && polishSwap(a[$0], w) }) { deleted.remove(i); continue }
+                // A name is never swapped, whatever dictionary terms explained earlier.
+                if let i = gap(j).first(where: { deleted.contains($0) && !rawWords[$0].isName && polishSwap(a[$0], w) }) { deleted.remove(i); continue }
                 if !grammarWords.contains(w) { return .fail(.insertedWords) }
             }
             func filler(_ i: Int) -> Bool {
@@ -716,6 +717,7 @@ enum CleanupGuard {
             // speaker restates within the next four words (with the corrections option).
             var dropped: [Int] = []
             for i in deleted.sorted() {
+                if rawWords[i].isName { return .fail(.nameDropped) }
                 if filler(i) { if options.fillers { continue } else { return .fail(.unexplainedDeletion) } }
                 dropped.append(i)
             }
@@ -725,7 +727,9 @@ enum CleanupGuard {
                 var end = k
                 while end + 1 < dropped.count, dropped[end + 1] == dropped[end] + 1 { end += 1 }
                 let run = dropped[k...end], after = (run.last! + 1)..<min(a.count, run.last! + 5)
-                let restated = run.contains { i in after.contains { CleanupText.similarity(a[i], a[$0]) >= 0.5 } }
+                // Every content word of the dropped phrase must come back, not just a shared "the".
+                let content = run.filter { !grammarWords.contains(a[$0]) }
+                let restated = !content.isEmpty && content.allSatisfy { i in after.contains { CleanupText.similarity(a[i], a[$0]) >= 0.5 } }
                 if !run.allSatisfy({ droppableGrammarWords.contains(a[$0]) }) && !(options.corrections && restated) { return .fail(.unexplainedDeletion) }
                 k = end + 1
             }
