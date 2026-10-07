@@ -1,3 +1,9 @@
+# Build SDK fallback and cleanup fallback reasons — October 6, 2026
+
+`app/build.sh` and `app/check_ui.sh` now use the Command Line Tools' `MacOSX26.sdk` when present (their macOS 27 SDK lacks the SwiftUI macro plugin); both ran without `SDKROOT`. History entries now carry `cleanupFallback`, the content-free reason the full cleanup was not used, and the `cleanup-fallback` log line names the entry ID. All 397 existing History files decode unchanged. [Certain]
+
+Installed `/Users/aakash/Applications/Murmur.app` from this branch: executable SHA-256 `ab6637f3fe1ba27771cd7fae0239d62de7a5baa09c27bb089d678f914bba3b67` matches the build; deep/strict verification passed; same designated requirement. [Certain] The previous bundle (`a95c740a…`) is backed up at `/Users/aakash/Applications/Murmur-backups/20261006-191632/Murmur.app`; it was quit normally while idle and exited with its helper. [Certain] The relaunch opened Settings; tccd allowed Microphone, Accessibility and Input Monitoring; the warm helper started; all 397 History filenames are unchanged. [Certain]
+
 # Cleanup never holds a dictation — October 6, 2026
 
 Cleanup no longer holds dictations for review (user decision: behave like Wispr Flow). When the guard rejects the cleaned words, the transcript's own words are inserted with the model's punctuation; a provider error or a transfer that fails the guard uses local rules, then the dictionary-applied transcript. Guard fixes: punctuation added after a dictated "sure", repeated 2–6 word restarts, and "Oh, no, I mean" after a sentence break. Rationale and replay evidence are in `PRD.md` (decision, October 6, 2026) and the PR. [Certain]

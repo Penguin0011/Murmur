@@ -7,7 +7,7 @@ app/build.sh
 open runtime/Murmur.app
 ```
 
-The bundle uses the pinned local ModelBench helper. `build.sh` compiles the app with `-O` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)). Cloud transcription and cleanup routes and API keys are wired in (see [Processing routes and API keys](#processing-routes-and-api-keys-wired-in)) but untested with real keys. Signing/notarization, and production release remain separate work. [Certain]
+`build.sh` and `check_ui.sh` build against the Command Line Tools' macOS 26 SDK when it is installed, because their macOS 27 SDK lacks the SwiftUI macro plugin; other commands that compile `UI.swift` need `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk`. The bundle uses the pinned local ModelBench helper. `build.sh` compiles the app with `-O` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)). Cloud transcription and cleanup routes and API keys are wired in (see [Processing routes and API keys](#processing-routes-and-api-keys-wired-in)) but untested with real keys. Signing/notarization, and production release remain separate work. [Certain]
 
 ## Recovery and interface
 

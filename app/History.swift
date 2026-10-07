@@ -8,6 +8,8 @@ struct HistoryEntry: Codable, Identifiable {
     let rawText: String
     let finalText: String
     var insertionStatus: String
+    /// Why the full cleanup was not used (a content-free `CleanupFailureReason`), or nil.
+    var cleanupFallback: String? = nil
 }
 
 struct HistoryStore {
