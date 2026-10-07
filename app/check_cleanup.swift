@@ -258,6 +258,21 @@ struct EchoAsyncCleaner: AsyncCleaner {
         // Punctuation added after a dictated "sure" is not an answer phrase.
         expect(CleanupGuard.check(raw: "let's make sure", cleaned: "Let's make sure.", options: .standard) == .pass, "period after dictated sure passes")
         expect(CleanupGuard.check(raw: "i'm sorry but i can't make it", cleaned: "I'm sorry, but I can't make it.", options: .standard) == .pass, "comma inside dictated answer phrase passes")
+        // Paragraph breaks after a sentence end are not added structure, with or without lists.
+        let longRaw = "we met on monday. the plan changed twice. then the budget moved. finally we shipped it"
+        let paragraphs = "We met on Monday. The plan changed twice.\n\nThen the budget moved.\n\nFinally we shipped it."
+        expect(CleanupGuard.check(raw: longRaw, cleaned: paragraphs, options: .standard) == .pass, "paragraph breaks pass")
+        expect(CleanupGuard.check(raw: longRaw, cleaned: paragraphs, options: CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)) == .pass, "paragraph breaks pass without lists")
+        expect(CleanupGuard.check(raw: "we need eggs and milk and bread and rice", cleaned: "We need eggs\nand milk\nand bread\nand rice", options: .standard) == .fail(.structureAdded), "mid-sentence line breaks are structure")
+        expect(CleanupGuard.check(raw: longRaw, cleaned: "We met on Monday.\n- The plan changed twice.\n- Then the budget moved.\n- Finally we shipped it.", options: .standard) == .fail(.structureAdded), "bullets after a sentence are structure")
+        let punctuationOnly = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
+        expect(CleanupGuard.check(raw: longRaw, cleaned: paragraphs, options: CleanupOptions(fillers: true, corrections: false, lists: false, punctuation: false)) == .fail(.structureAdded), "paragraphs need the punctuation option")
+        expect(CleanupGuard.check(raw: "we met dr. smith and mr. jones today", cleaned: "We met Dr.\n\nSmith and Mr.\n\nJones today.", options: punctuationOnly) == .fail(.structureAdded), "an honorific is not a sentence end")
+        expect(CleanupGuard.check(raw: "we need more eggs", cleaned: "We.\n\nNeed.\n\nMore.\n\nEggs.", options: .standard) == .fail(.structureAdded), "one-word paragraphs are structure")
+        expect(CleanupPipeline.punctuated(raw: "one two three four five six", cleaned: "One two three.\n\nFour five six.") == "One two three.\n\nFour five six.", "transfer keeps a paragraph break")
+        expect(CleanupPipeline.punctuated(raw: "one two three four", cleaned: "One two\nthree four.") == "One two three four.", "transfer drops a mid-sentence line break")
+        expect(CleanupPipeline.punctuated(raw: "wow! this is very new", cleaned: "Wow!\n\nThis is new.") == "Wow! This is very new.", "transfer keeps the transcript's ! and no one-word paragraph")
+        expect(CleanupPipeline.punctuated(raw: "that went great! now the next part is hard", cleaned: "That went great!\n\nNow the next part is hard.") == "That went great!\n\nNow the next part is hard.", "transfer keeps a paragraph after an existing !")
         // Punctuation transfer: the model's punctuation on the transcript's words.
         expect(CleanupPipeline.punctuated(raw: "every like give or take twenty seconds okay", cleaned: "Every give or take twenty seconds. Okay?") == "Every like give or take twenty seconds. Okay?", "transfer keeps a dropped filler")
         expect(CleanupPipeline.punctuated(raw: "Last model I mean last agent left", cleaned: "Last agent left.") == "Last model I mean last agent left.", "transfer recapitalizes after a dropped reparandum")

@@ -201,6 +201,28 @@ enum CleanupText {
         return mask
     }
 
+    /// Words a paragraph needs before its closing line break counts as a paragraph break.
+    /// ponytail: a word floor, not a sentence model; it stops one-word paragraphs ("We.\n\nNeed.").
+    static let paragraphMinWords = 3
+
+    /// `text` with its paragraph breaks joined into spaces: line breaks right after a sentence end
+    /// (a . ? or ! token, so not "Dr.") that close at least `paragraphMinWords` words.
+    static func joiningParagraphs(_ text: String) -> String {
+        let t = tokenize(text)
+        var out = "", words = 0, i = 0
+        while i < t.count {
+            if t[i].text == "\n" {
+                if words >= paragraphMinWords, let p = prevNonSpace(t, i), t[p].kind == .punct, [".", "?", "!"].contains(t[p].text) {
+                    while i < t.count, t[i].text == "\n" || t[i].kind == .space { i += 1 }
+                    out += " "; words = 0; continue
+                }
+                words = 0
+            } else if t[i].kind == .word { words += 1 }
+            out += t[i].text; i += 1
+        }
+        return out
+    }
+
     static let hesitations: Set<String> = ["um", "umm", "ummm", "uh", "uhh", "uhm", "erm", "er", "hmm", "hm", "mm", "mmm"]
 
     static let negationWords: Set<String> = [
@@ -462,9 +484,12 @@ enum CleanupGuard {
             }
         }
         let rawLines = raw.split(separator: "\n", omittingEmptySubsequences: true).count
+        // With punctuation on, paragraph breaks change no words, so only other line breaks count
+        // as added structure.
+        let lines = options.punctuation ? CleanupText.joiningParagraphs(cleaned) : cleaned
         if options.lists {
-            if nonListLineCount(cleaned) > rawLines + 2 { return .fail(.structureAdded) }
-        } else if cleaned.split(separator: "\n", omittingEmptySubsequences: true).count > rawLines {
+            if nonListLineCount(lines) > rawLines + 2 { return .fail(.structureAdded) }
+        } else if lines.split(separator: "\n", omittingEmptySubsequences: true).count > rawLines {
             return .fail(.structureAdded)
         }
 
@@ -639,7 +664,7 @@ enum CleanupPrompt {
             ops.append("- Apply explicit spoken self-corrections only when the replaced words are unambiguous, e.g. \"Tuesday, sorry, Thursday\" becomes \"Thursday\". An apology such as \"sorry\" on its own is not a correction. If the scope of a correction is unclear, keep the original wording.")
         }
         if options.punctuation {
-            ops.append("- Fix sentence punctuation and capitalization: end sentences with a period, or a question mark for a question; add commas only where the speech clearly separates clauses; capitalize sentence starts and the word \"I\". Never add, remove, reorder, or respell words, and never add exclamation marks.")
+            ops.append("- Fix sentence punctuation and capitalization: end sentences with a period, or a question mark for a question; add commas only where the speech clearly separates clauses; capitalize sentence starts and the word \"I\". In a longer dictation, start a new paragraph (a blank line) between sentences where the topic shifts. Never add, remove, reorder, or respell words, and never add exclamation marks.")
         }
         if options.lists {
             ops.append("- Format a numbered list only when the speaker explicitly announces a list and enumerates items with ordinal markers (first, second, third). Keep every item's wording. Never turn ordinary prose into a list.")
@@ -742,7 +767,7 @@ enum CleanupPipeline {
     /// The raw words with `cleaned`'s sentence punctuation: the fallback when the cleaned words fail
     /// the guard. No word is added, dropped or respelled. A word the cleanup kept takes the . , ? :
     /// after it there, and its casing when mid-sentence there (names, "I"); a word it dropped keeps
-    /// its own. Sentence starts are recapitalized. A dictionary term the cleanup wrote in place of one
+    /// its own. Sentence starts are recapitalized, and the cleanup's paragraph breaks kept. A dictionary term the cleanup wrote in place of one
     /// word spelled at least half like it ("akash" -> "Aakash") is kept, as the guard allows.
     /// Nil when the raw text has quotes or line breaks.
     static func punctuated(raw: String, cleaned: String, terms: [String] = []) -> String? {
@@ -763,20 +788,23 @@ enum CleanupPipeline {
             }
         }
         let marks: Set<String> = [".", ",", "?", ":"], rawMarks = marks.union(["!", ";"])
-        var out = "", start = true
+        var out = "", start = true, paragraph = false, paragraphWords = 0
         for (k, ti) in rw.enumerated() {
-            var word = r[ti].text, after: [String]
+            let rawEnd = k + 1 < rw.count ? rw[k + 1] : r.count
+            let own = r[(ti + 1)..<rawEnd].filter { $0.kind == .punct && rawMarks.contains($0.text) }.map(\.text)
+            var word = r[ti].text, after = own, breaks = false
             if let j = pair[k] {
                 let oi = ow[j], end = j + 1 < ow.count ? ow[j + 1] : o.count
                 if respelled.contains(k) || (!start && !CleanupText.isSentenceStart(o, oi)) { word = o[oi].text }
-                after = o[(oi + 1)..<end].filter { $0.kind == .punct && marks.contains($0.text) }.map(\.text)
-            } else {
-                let end = k + 1 < rw.count ? rw[k + 1] : r.count
-                after = r[(ti + 1)..<end].filter { $0.kind == .punct && rawMarks.contains($0.text) }.map(\.text)
+                // The model's . , ? : and any ! or ; the transcript already has here.
+                after = o[(oi + 1)..<end].filter { $0.kind == .punct && (marks.contains($0.text) || own.contains($0.text)) }.map(\.text)
+                breaks = o[(oi + 1)..<end].contains { $0.text == "\n" }
             }
             if start || word.lowercased() == "i" || word.lowercased().hasPrefix("i'") { word = CleanupText.capitalized(word) }
-            out += (out.isEmpty ? "" : " ") + word + after.joined()
+            out += (out.isEmpty ? "" : paragraph ? "\n\n" : " ") + word + after.joined()
+            paragraphWords = paragraph ? 1 : paragraphWords + 1
             start = after.last.map { [".", "?", "!"].contains($0) } ?? false
+            paragraph = start && breaks && paragraphWords >= CleanupText.paragraphMinWords
         }
         return out
     }
