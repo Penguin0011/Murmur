@@ -849,7 +849,7 @@ enum CleanupPrompt {
             ops.append("- Remove hesitation fillers (um, uh, er) and filler uses of \"like\" or \"you know\" set off by commas. Keep \"like\", \"so\", and \"well\" whenever they carry meaning (\"I like it\", \"looks like rain\", \"so that\").")
         }
         if options.corrections && options.professional {
-            ops.append("- Apply spoken self-corrections, with or without a cue (\"wait no I meant\", \"actually\"): delete the cue and the earlier words it replaces, and keep only the corrected version. Never keep both versions: \"we can meet Tuesday wait no I meant we can meet Thursday\" becomes \"We can meet Thursday.\" Remove false starts and abandoned phrases.")
+            ops.append("- Apply spoken self-corrections, with or without a cue (\"wait no I meant\", \"actually\"): delete the cue and only the phrase just before it that the correction restates, and keep only the corrected version. Never keep both versions, and keep everything said before the restated phrase: \"I'll send it Monday so we can meet Tuesday wait no I meant we can meet Thursday\" becomes \"I'll send it Monday, so we can meet Thursday.\" Remove false starts and abandoned phrases.")
         } else if options.corrections && options.polish {
             ops.append("- Apply spoken self-corrections, and remove false starts: words the speaker abandons and then restates (\"we need to, we have to go\" becomes \"we have to go\"). Keep the speaker's final wording.")
         } else if options.corrections {
