@@ -359,6 +359,9 @@ struct EchoAsyncCleaner: AsyncCleaner {
                     "John and I were going to buy 42 apples, but he doesn't want to go, so he is not going to do that. Instead, we need to buy milk, eggs, and bread."] {
             expect(CleanupGuard.check(raw: digits, cleaned: out, options: professional) == .pass, "professional accepts digit list markers")
         }
+        expect(CleanupGuard.check(raw: digits.replacingOccurrences(of: "wait no i meant", with: "wait i know i meant"),
+                                  cleaned: "John and I were going to buy 42 apples, but he doesn't want to go. He is not going to do that. Instead we need to buy:\n1. Milk\n2. Eggs\n3. Bread",
+                                  options: professional) == .pass, "professional accepts a misheard cue")
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
         expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")

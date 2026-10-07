@@ -451,12 +451,18 @@ enum CleanupGuard {
                 var limit = scratch ? 30 : 8
                 if commaFree {
                     let repair = (wi + cue.count)..<min(tokenOfWord.count, wi + cue.count + 8)
-                    func recurs(_ x: Int) -> Bool {
-                        let w = tokens[tokenOfWord[x]].lower
-                        return grammarWords.contains(w) || repair.contains { CleanupText.similarity(w, tokens[tokenOfWord[$0]].lower) >= 0.5 }
+                    // Interregnum words, including "know" misheard for "no" ("wait I know I meant"), do not count.
+                    func interregnum(_ w: String) -> Bool { ["wait", "no", "know", "oh", "ah", "sorry", "actually"].contains(w) || CleanupText.hesitations.contains(w) }
+                    func recurs(_ w: String) -> Bool {
+                        grammarWords.contains(w) || repair.contains { CleanupText.similarity(w, tokens[tokenOfWord[$0]].lower) >= 0.5 }
                     }
                     limit = 0
-                    while limit < 8, wi - 1 - limit >= 0, recurs(wi - 1 - limit) { limit += 1 }
+                    var reach = 8
+                    while limit < reach, wi - 1 - limit >= 0 {
+                        let w = tokens[tokenOfWord[wi - 1 - limit]].lower
+                        if interregnum(w) { reach += 1 } else if !recurs(w) { break }
+                        limit += 1
+                    }
                 }
                 var k = wi - 1
                 var count = 0
