@@ -258,6 +258,15 @@ struct EchoAsyncCleaner: AsyncCleaner {
         // Punctuation added after a dictated "sure" is not an answer phrase.
         expect(CleanupGuard.check(raw: "let's make sure", cleaned: "Let's make sure.", options: .standard) == .pass, "period after dictated sure passes")
         expect(CleanupGuard.check(raw: "i'm sorry but i can't make it", cleaned: "I'm sorry, but I can't make it.", options: .standard) == .pass, "comma inside dictated answer phrase passes")
+        // Paragraph breaks after a sentence end are not added structure, with or without lists.
+        let longRaw = "we met on monday. the plan changed twice. then the budget moved. finally we shipped it"
+        let paragraphs = "We met on Monday. The plan changed twice.\n\nThen the budget moved.\n\nFinally we shipped it."
+        expect(CleanupGuard.check(raw: longRaw, cleaned: paragraphs, options: .standard) == .pass, "paragraph breaks pass")
+        expect(CleanupGuard.check(raw: longRaw, cleaned: paragraphs, options: CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)) == .pass, "paragraph breaks pass without lists")
+        expect(CleanupGuard.check(raw: "we need eggs and milk and bread and rice", cleaned: "We need eggs\nand milk\nand bread\nand rice", options: .standard) == .fail(.structureAdded), "mid-sentence line breaks are structure")
+        expect(CleanupGuard.check(raw: longRaw, cleaned: "We met on Monday.\n- The plan changed twice.\n- Then the budget moved.\n- Finally we shipped it.", options: .standard) == .fail(.structureAdded), "bullets after a sentence are structure")
+        expect(CleanupPipeline.punctuated(raw: "one two three four", cleaned: "One two.\n\nThree four.") == "One two.\n\nThree four.", "transfer keeps a paragraph break")
+        expect(CleanupPipeline.punctuated(raw: "one two three four", cleaned: "One two\nthree four.") == "One two three four.", "transfer drops a mid-sentence line break")
         // Punctuation transfer: the model's punctuation on the transcript's words.
         expect(CleanupPipeline.punctuated(raw: "every like give or take twenty seconds okay", cleaned: "Every give or take twenty seconds. Okay?") == "Every like give or take twenty seconds. Okay?", "transfer keeps a dropped filler")
         expect(CleanupPipeline.punctuated(raw: "Last model I mean last agent left", cleaned: "Last agent left.") == "Last model I mean last agent left.", "transfer recapitalizes after a dropped reparandum")

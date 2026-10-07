@@ -462,9 +462,12 @@ enum CleanupGuard {
             }
         }
         let rawLines = raw.split(separator: "\n", omittingEmptySubsequences: true).count
+        // Paragraph breaks (a line break right after . ? or !) change no words, so only other line
+        // breaks count as added structure.
+        let lines = cleaned.replacingOccurrences(of: #"(?<=[.?!])[ \t]*\n[\s]*"#, with: " ", options: .regularExpression)
         if options.lists {
-            if nonListLineCount(cleaned) > rawLines + 2 { return .fail(.structureAdded) }
-        } else if cleaned.split(separator: "\n", omittingEmptySubsequences: true).count > rawLines {
+            if nonListLineCount(lines) > rawLines + 2 { return .fail(.structureAdded) }
+        } else if lines.split(separator: "\n", omittingEmptySubsequences: true).count > rawLines {
             return .fail(.structureAdded)
         }
 
@@ -639,7 +642,7 @@ enum CleanupPrompt {
             ops.append("- Apply explicit spoken self-corrections only when the replaced words are unambiguous, e.g. \"Tuesday, sorry, Thursday\" becomes \"Thursday\". An apology such as \"sorry\" on its own is not a correction. If the scope of a correction is unclear, keep the original wording.")
         }
         if options.punctuation {
-            ops.append("- Fix sentence punctuation and capitalization: end sentences with a period, or a question mark for a question; add commas only where the speech clearly separates clauses; capitalize sentence starts and the word \"I\". Never add, remove, reorder, or respell words, and never add exclamation marks.")
+            ops.append("- Fix sentence punctuation and capitalization: end sentences with a period, or a question mark for a question; add commas only where the speech clearly separates clauses; capitalize sentence starts and the word \"I\". In a longer dictation, start a new paragraph (a blank line) between sentences where the topic shifts. Never add, remove, reorder, or respell words, and never add exclamation marks.")
         }
         if options.lists {
             ops.append("- Format a numbered list only when the speaker explicitly announces a list and enumerates items with ordinal markers (first, second, third). Keep every item's wording. Never turn ordinary prose into a list.")
@@ -742,7 +745,7 @@ enum CleanupPipeline {
     /// The raw words with `cleaned`'s sentence punctuation: the fallback when the cleaned words fail
     /// the guard. No word is added, dropped or respelled. A word the cleanup kept takes the . , ? :
     /// after it there, and its casing when mid-sentence there (names, "I"); a word it dropped keeps
-    /// its own. Sentence starts are recapitalized. A dictionary term the cleanup wrote in place of one
+    /// its own. Sentence starts are recapitalized, and the cleanup's paragraph breaks kept. A dictionary term the cleanup wrote in place of one
     /// word spelled at least half like it ("akash" -> "Aakash") is kept, as the guard allows.
     /// Nil when the raw text has quotes or line breaks.
     static func punctuated(raw: String, cleaned: String, terms: [String] = []) -> String? {
@@ -763,20 +766,22 @@ enum CleanupPipeline {
             }
         }
         let marks: Set<String> = [".", ",", "?", ":"], rawMarks = marks.union(["!", ";"])
-        var out = "", start = true
+        var out = "", start = true, paragraph = false
         for (k, ti) in rw.enumerated() {
-            var word = r[ti].text, after: [String]
+            var word = r[ti].text, after: [String], breaks = false
             if let j = pair[k] {
                 let oi = ow[j], end = j + 1 < ow.count ? ow[j + 1] : o.count
                 if respelled.contains(k) || (!start && !CleanupText.isSentenceStart(o, oi)) { word = o[oi].text }
                 after = o[(oi + 1)..<end].filter { $0.kind == .punct && marks.contains($0.text) }.map(\.text)
+                breaks = o[(oi + 1)..<end].contains { $0.text == "\n" }
             } else {
                 let end = k + 1 < rw.count ? rw[k + 1] : r.count
                 after = r[(ti + 1)..<end].filter { $0.kind == .punct && rawMarks.contains($0.text) }.map(\.text)
             }
             if start || word.lowercased() == "i" || word.lowercased().hasPrefix("i'") { word = CleanupText.capitalized(word) }
-            out += (out.isEmpty ? "" : " ") + word + after.joined()
+            out += (out.isEmpty ? "" : paragraph ? "\n\n" : " ") + word + after.joined()
             start = after.last.map { [".", "?", "!"].contains($0) } ?? false
+            paragraph = start && breaks
         }
         return out
     }
