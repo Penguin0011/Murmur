@@ -466,6 +466,12 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("I told Alice actually I meant Alice left early", "I told Alice left early.", "spliced lexical clause"),
             ("First floor is open and second floor is closed. My list is milk and eggs", "1. Floor is open\n2. Floor is closed. My list is milk and eggs.", "distant list cue"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Fifteenth review: exact negations, no comparative degree.
+        for (raw, out, label) in [
+            ("Alice is not late", "Alice is never late.", "not to never"),
+            ("The plan is safe now", "The plan is safer now.", "comparative"),
+            ("This is the small box", "This is the smallest box.", "superlative"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),

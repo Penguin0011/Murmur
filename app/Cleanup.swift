@@ -805,7 +805,9 @@ enum CleanupGuard {
                 consumedRaw.insert(i); continue
             }
             if options.professional, CleanupText.isNegation(w.lower) {
-                guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.isNegation(a[$0]) }) else { return .fail(.negationChanged) }
+                // Only within the not/n't family ("don't" -> "doesn't", "not" -> "won't"); never/no/nothing stay exact.
+                func notFamily(_ t: String) -> Bool { t == "not" || t.hasSuffix("n't") || CleanupText.truncatedNegations[t] != nil }
+                guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.isNegation(a[$0]) && (a[$0] == w.lower || (notFamily(a[$0]) && notFamily(w.lower))) }) else { return .fail(.negationChanged) }
                 consumedRaw.insert(i); continue
             }
             // Professional may reorder locally ("me and John was" -> "John and I were"): a moved word consumes its
@@ -940,7 +942,7 @@ enum CleanupGuard {
         // never plan/plant.
         func inflection(_ short: String, _ long: String) -> Bool {
             guard short.count >= 2, long.count > short.count, !polarityFlip(short, long) else { return false }
-            let endings = ["s", "es", "ed", "d", "ing", "er", "est"] // Not -ly: "hard" and "hardly" differ.
+            let endings = ["s", "es", "ed", "d", "ing"] // Not -ly, -er, -est: hard/hardly, safe/safer differ.
             let stems = [short, String(short.dropLast()), String(short.dropLast()) + "i", short + String(short.last!)]
             return stems.contains { stem in endings.contains { stem + $0 == long } }
         }
