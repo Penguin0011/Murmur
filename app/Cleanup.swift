@@ -231,8 +231,14 @@ enum CleanupText {
         "havent", "hasnt", "hadnt", "cant", "wont", "aint", "mustnt",
     ]
 
+    /// Negative contractions speech recognition sometimes returns without "'t" ("it doesn spread").
+    /// Not "haven", "don", "won" or "can": those are also ordinary words.
+    static let truncatedNegations: Set<String> = [
+        "doesn", "didn", "isn", "wasn", "couldn", "wouldn", "shouldn", "hasn", "hadn", "aren", "weren", "mustn", "needn",
+    ]
+
     static func isNegation(_ lower: String) -> Bool {
-        negationWords.contains(lower) || lower.hasSuffix("n't")
+        negationWords.contains(lower) || lower.hasSuffix("n't") || truncatedNegations.contains(lower)
     }
 
     static let cardinals: [String: Int] = [
@@ -586,8 +592,20 @@ enum CleanupGuard {
         // A correction may restate a word from its corrected span in a new position ("three
         // pizzas, sorry, four" -> "four pizzas"); such a word consumes that unmatched raw word.
         var consumedRaw = matchedRaw
+        // Matches keep order, so the raw words an unmatched output word could replace lie between the
+        // raw words matched to its matched neighbors: the k-th matched raw word pairs with the k-th output.
+        let pairedRaw = matchedRaw.sorted(), pairedOut = matchedOut.sorted()
+        func gap(_ j: Int) -> Range<Int> {
+            let before = pairedOut.filter { $0 < j }.count
+            return (before == 0 ? 0 : pairedRaw[before - 1] + 1)..<(before < pairedRaw.count ? pairedRaw[before] : rawWords.count)
+        }
         for (j, w) in outWords.enumerated() where !matchedOut.contains(j) && !termWords.contains(w.lower) {
             if let i = rawWords.indices.first(where: { window.contains($0) && !consumedRaw.contains($0) && a[$0] == w.lower }) {
+                consumedRaw.insert(i); continue
+            }
+            // A negative contraction may complete one speech recognition truncated in the same place
+            // ("doesn" -> "doesn't" or "don't"); the negation count check above keeps the meaning.
+            if w.lower.hasSuffix("n't"), let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.truncatedNegations.contains(a[$0]) }) {
                 consumedRaw.insert(i); continue
             }
             if w.isName && !rawSet.contains(w.lower) { return .fail(.nameAdded) }
@@ -614,11 +632,9 @@ enum CleanupGuard {
         // term's own alignment gap: matches keep order, so the k-th matched raw word pairs with the
         // k-th matched output word.
         func spelled(_ text: String) -> String { String(text.filter { $0.isLetter || $0.isNumber }) }
-        let pairedRaw = matchedRaw.sorted(), pairedOut = matchedOut.sorted()
         for (j, w) in outWords.enumerated() where !matchedOut.contains(j) && termWords.contains(w.lower) {
             let target = spelled(w.lower)
-            let before = pairedOut.filter { $0 < j }.count
-            let gap = (before == 0 ? 0 : pairedRaw[before - 1] + 1)..<(before < pairedRaw.count ? pairedRaw[before] : rawWords.count)
+            let gap = gap(j)
             var replaced: Range<Int>? = nil
             search: for length in stride(from: 3, through: 1, by: -1) {
                 for start in gap where start + length <= gap.upperBound {
