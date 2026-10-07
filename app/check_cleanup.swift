@@ -353,6 +353,12 @@ struct EchoAsyncCleaner: AsyncCleaner {
             (rewritten.replacingOccurrences(of: " Instead", with: "\n\nInstead"), "paragraph before the list"),
             (sentence + " Instead, we need to buy milk, eggs, and bread.", "inline list"),
         ] { expect(CleanupGuard.check(raw: broken, cleaned: out, options: professional) == .pass, "professional accepts: \(label)") }
+        // Speech recognition writes list numbers as digits ("item 1 milk").
+        let digits = " yeah you know me and john was going to buy like 42 apples but he don't want to go so we are not going to do that wait no i meant he is not going to do that so instead we need to buy item 1 milk item 2 eggs and yeah item 3 bread"
+        for out in ["John and I were going to buy 42 apples, but he doesn't want to go, so he is not going to do that. Instead, we need to buy:\n\n1. Milk\n2. Eggs\n3. Bread",
+                    "John and I were going to buy 42 apples, but he doesn't want to go, so he is not going to do that. Instead, we need to buy milk, eggs, and bread."] {
+            expect(CleanupGuard.check(raw: digits, cleaned: out, options: professional) == .pass, "professional accepts digit list markers")
+        }
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
         expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")

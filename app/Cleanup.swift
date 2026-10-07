@@ -581,7 +581,7 @@ enum CleanupGuard {
         // Professional may write spoken markers ("item one milk item two eggs") as an inline list:
         // they count as markers when the raw counts 1, 2, ... with them.
         if options.professional && options.lists {
-            let spoken = a.indices.dropLast().filter { ["number", "step", "item"].contains(a[$0]) }.compactMap { CleanupText.cardinals[a[$0 + 1]] }
+            let spoken = a.indices.dropLast().filter { ["number", "step", "item"].contains(a[$0]) }.compactMap { CleanupText.cardinals[a[$0 + 1]] ?? Int(a[$0 + 1]) }
             if spoken.count >= 2, spoken == Array(1...spoken.count) { markerValues.formUnion(spoken.map(String.init)) }
         }
         // Stutters and restarts ("I I", "don't, uh, don't") that filler removal may collapse.
@@ -624,8 +624,10 @@ enum CleanupGuard {
             guard options.lists && hasListMarkers else { return false }
             let w = a[i]
             if CleanupText.ordinals[w] != nil { return true }
-            if CleanupText.cardinals[w] != nil, i > 0, listMarkerWords.contains(a[i - 1]), a[i - 1] != "and", a[i - 1] != "then" { return true }
-            if ["number", "step", "item"].contains(w), i + 1 < a.count, CleanupText.cardinals[a[i + 1]] != nil { return true }
+            // Professional also takes digits, as speech recognition often writes them ("item 1 milk").
+            func cardinal(_ x: String) -> Bool { CleanupText.cardinals[x] != nil || (options.professional && Int(x) != nil) }
+            if cardinal(w), i > 0, listMarkerWords.contains(a[i - 1]), a[i - 1] != "and", a[i - 1] != "then" { return true }
+            if ["number", "step", "item"].contains(w), i + 1 < a.count, cardinal(a[i + 1]) { return true }
             if w == "and" || w == "then", i + 1 < a.count, isMarkerWord(i + 1) { return true }
             // Professional: also across a filler ("eggs and yeah item three").
             if options.professional, w == "and" || w == "then", i + 2 < a.count,
@@ -841,7 +843,7 @@ enum CleanupPrompt {
             ops.append("- Remove hesitation fillers (um, uh, er) and filler uses of \"like\" or \"you know\" set off by commas. Keep \"like\", \"so\", and \"well\" whenever they carry meaning (\"I like it\", \"looks like rain\", \"so that\").")
         }
         if options.corrections && options.professional {
-            ops.append("- Apply spoken self-corrections, with or without a cue (\"wait no I meant\", \"actually\"), and remove false starts and abandoned phrases. Keep only the speaker's final intent.")
+            ops.append("- Apply spoken self-corrections, with or without a cue (\"wait no I meant\", \"actually\"): remove the words the correction replaces as well as the cue, so \"so we are not going to do that wait no I meant he is not going to do that\" becomes \"so he is not going to do that\". Remove false starts and abandoned phrases. Keep only the speaker's final intent.")
         } else if options.corrections && options.polish {
             ops.append("- Apply spoken self-corrections, and remove false starts: words the speaker abandons and then restates (\"we need to, we have to go\" becomes \"we have to go\"). Keep the speaker's final wording.")
         } else if options.corrections {
