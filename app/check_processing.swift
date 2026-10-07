@@ -236,6 +236,10 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         await expect(p, "every like give or take twenty seconds okay", .insert("Every like give or take twenty seconds. Okay?"), "punctuation transferred to the transcript")
         check(dropped.messages.count == 1, "no retry call")
         check(p.lastFallback == .unexplainedDeletion && p.lastProviderError == nil, "rejection reason kept, no provider error")
+        check(p.lastRejectedOutput == "Every give or take twenty seconds. Okay?", "rejected model output kept for debugging")
+        p.cloudCleaner = MockCloudCleaner(.success("Call Akme."))
+        await expect(p, "Um, call acme.", .insert("Call Akme."), "next dictation passes")
+        check(p.lastRejectedOutput == nil, "rejected output cleared per dictation")
 
         // Provider obeys the dictation: the answer never goes in; the dictation's words do.
         let obeying = MockCloudCleaner(.success("Sure! The capital of France is Paris.")); p.cloudCleaner = obeying

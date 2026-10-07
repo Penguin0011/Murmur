@@ -10,6 +10,9 @@ struct HistoryEntry: Codable, Identifiable {
     var insertionStatus: String
     /// Why the full cleanup was not used (a content-free `CleanupFailureReason`), or nil.
     var cleanupFallback: String? = nil
+    /// The cleanup model's output the guard rejected, kept for debugging (user request, October 6,
+    /// 2026). It is dictation text, so it lives and expires with the rest of the entry.
+    var cleanupRejectedOutput: String? = nil
 }
 
 struct HistoryStore {
