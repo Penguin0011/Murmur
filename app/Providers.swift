@@ -742,7 +742,7 @@ struct GeminiCleanupProvider: CleanupProvider {
     var baseURL: URL = GeminiCleanupProvider.defaultBaseURL
     var model: String = GeminiCleanupProvider.defaultModel
     var timeout: TimeInterval = 30
-    var maxOutputTokens: Int? = 4096
+    var maxOutputTokens: Int? = 8192
     var transport: HTTPTransport = URLSessionTransport()
     /// nil disables failover (one request, as for other providers).
     var fallback: String? = GeminiCleanupProvider.fallbackModel
@@ -766,7 +766,7 @@ struct GeminiCleanupProvider: CleanupProvider {
     private struct GenerationConfig: Encodable { let temperature: Double; let candidateCount: Int; let maxOutputTokens: Int?; let thinkingConfig: ThinkingConfig? }
     private struct Body: Encodable { let systemInstruction: Content; let contents: [Content]; let generationConfig: GenerationConfig }
 
-    static func makeRequest(messages: CleanupMessages, apiKey: APIKey, model: String = defaultModel, baseURL: URL = defaultBaseURL, maxOutputTokens: Int? = 4096) throws -> URLRequest {
+    static func makeRequest(messages: CleanupMessages, apiKey: APIKey, model: String = defaultModel, baseURL: URL = defaultBaseURL, maxOutputTokens: Int? = 8192) throws -> URLRequest {
         let url = try GeminiResponse.generateContentURL(baseURL: baseURL, model: model)
         let body = Body(systemInstruction: Content(role: nil, parts: [Part(text: messages.system)]),
                         contents: [Content(role: "user", parts: [Part(text: messages.user)])],
@@ -892,7 +892,7 @@ struct OpenRouterCleanupProvider: CleanupProvider {
     var endpoint: URL = OpenRouterCleanupProvider.defaultEndpoint
     var model: String = OpenRouterCleanupProvider.defaultModel
     var timeout: TimeInterval = 30
-    var maxTokens: Int? = 4096
+    var maxTokens: Int? = 8192
     /// Sends `provider.zdr = true`, which restricts routing to Zero Data Retention endpoints.
     /// A model with no such endpoint then fails (typically 503) instead of falling back.
     var zeroDataRetention = false
@@ -909,7 +909,7 @@ struct OpenRouterCleanupProvider: CleanupProvider {
                            : "OpenRouter does not store prompts unless you opt in; the upstream model provider's retention policy applies.")
     }
 
-    static func makeRequest(messages: CleanupMessages, apiKey: APIKey, model: String = defaultModel, endpoint: URL = defaultEndpoint, maxTokens: Int? = 4096, zeroDataRetention: Bool = false) throws -> URLRequest {
+    static func makeRequest(messages: CleanupMessages, apiKey: APIKey, model: String = defaultModel, endpoint: URL = defaultEndpoint, maxTokens: Int? = 8192, zeroDataRetention: Bool = false) throws -> URLRequest {
         try requireModel(model, provider: .openrouter)
         return try OpenAIChatFormat.makeRequest(endpoint: endpoint, bearer: apiKey, model: model, messages: messages, maxTokens: maxTokens, zeroDataRetention: zeroDataRetention)
     }
@@ -990,7 +990,7 @@ struct GeminiTranscriptionProvider: TranscriptionProvider {
     var model: String = GeminiTranscriptionProvider.defaultModel
     var schemaStyle: SchemaStyle = .responseFormat
     var timeout: TimeInterval = 60
-    /// Bounds runaway output (a hallucinating model); two minutes of speech is well under 1,000 tokens.
+    /// Bounds runaway output (a hallucinating model); five minutes of speech is about 1,500 tokens.
     var maxOutputTokens: Int? = 8192
     var transport: HTTPTransport = URLSessionTransport()
 
@@ -1685,7 +1685,7 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
     var apiKey: APIKey?
     /// Clamped to 1...`maximumTimeout` when used.
     var timeout: TimeInterval = OpenAICompatibleCleanupProvider.defaultTimeout
-    var maxTokens: Int? = 4096
+    var maxTokens: Int? = 8192
     var transport: HTTPTransport = URLSessionTransport()
 
     /// Throws `invalidConfiguration(.localServer)` for a URL `LocalEndpoint.normalize` rejects.
@@ -1725,7 +1725,7 @@ struct OpenAICompatibleCleanupProvider: CleanupProvider {
         }
     }
 
-    static func makeRequest(messages: CleanupMessages, endpoint: URL, model: String, apiKey: APIKey?, maxTokens: Int? = 4096, provider: ProviderID = .localServer) throws -> URLRequest {
+    static func makeRequest(messages: CleanupMessages, endpoint: URL, model: String, apiKey: APIKey?, maxTokens: Int? = 8192, provider: ProviderID = .localServer) throws -> URLRequest {
         try requireLocalModel(model, provider: provider)
         return try OpenAIChatFormat.makeRequest(endpoint: endpoint, bearer: apiKey, model: model, messages: messages, maxTokens: maxTokens)
     }

@@ -398,7 +398,7 @@ enum CloudTranscription {
 
 /// Converts the recorder's WAV (any channel count, 16/24/32-bit integer or float samples) to
 /// 16 kHz mono 16-bit PCM before upload, and measures its peak for the silence pre-check. This
-/// keeps two minutes of speech near 3.8 MB, well under the providers' 20–25 MB limits. A file it
+/// keeps a five-minute dictation (the recording limit) near 9.6 MB, under the providers' 20–25 MB limits. A file it
 /// cannot parse is sent unchanged, with no peak (the silence pre-check is then skipped).
 enum CloudAudio {
     static let targetRate = 16_000

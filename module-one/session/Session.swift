@@ -10,6 +10,9 @@ final class CaptureSession {
     let stopCapture: () -> Bool
     let process: (URL, @escaping () -> Void) -> Void
     var timer: Timer?
+    /// A dictation finishes and is processed after five minutes, so one left on by accident stops
+    /// (user decision, October 6, 2026).
+    static let recordingLimit: TimeInterval = 300
     var finishRecording: (() -> Void)?
     var resetShortcut: (() -> Void)?
     /// Capture keeps running this long after release so the last word, still in the input
@@ -31,18 +34,18 @@ final class CaptureSession {
         case .start:
             guard state == .idle else { return }
             if let url = early ?? takePrestarted?() {
-                // ponytail: the 120 s cap restarts at adoption, not at the early press.
+                // ponytail: the recording limit restarts at adoption, not at the early press.
                 early = nil; audio = url; state = .listening
-                timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in self?.finishRecording?() }
-                resumeCapture?(); print("capture=listening adopted limit=120s")
+                timer = Timer.scheduledTimer(withTimeInterval: Self.recordingLimit, repeats: false) { [weak self] _ in self?.finishRecording?() }
+                resumeCapture?(); print("capture=listening adopted limit=\(Int(Self.recordingLimit))s")
                 return
             }
             do {
                 let url = try store.create(); audio = url
                 try startCapture(url)
                 state = .listening
-                timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in self?.finishRecording?() }
-                print("capture=listening limit=120s")
+                timer = Timer.scheduledTimer(withTimeInterval: Self.recordingLimit, repeats: false) { [weak self] _ in self?.finishRecording?() }
+                print("capture=listening limit=\(Int(Self.recordingLimit))s")
             } catch {
                 discard(); resetShortcut?(); completed()
                 fputs("capture=start-failed; audio deleted\n", stderr)

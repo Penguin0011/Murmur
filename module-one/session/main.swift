@@ -107,7 +107,7 @@ func sessionCheck() throws {
     var cappedQueued = 0
     cappedListener.onQueuedPress = { cappedQueued += 1; return capped2.startEarly() }
     cappedListener.receive(type: .flagsChanged, event: fnEvent(true, 40)); cappedListener.receive(type: .flagsChanged, event: fnEvent(false, 40.1))
-    cappedListener.emit(cappedListener.machine.finish())      // the 120 s cap, not the user
+    cappedListener.emit(cappedListener.machine.finish())      // the recording limit, not the user
     cappedListener.receive(type: .flagsChanged, event: fnEvent(true, 45)); cappedListener.receive(type: .flagsChanged, event: fnEvent(false, 45.1))
     assert(cappedQueued == 0 && capped2.early == nil && cappedListener.queued.isEmpty && cappedListener.machine.state == .processing)
     try? FileManager.default.removeItem(at: capped2.audio!)
