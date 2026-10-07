@@ -379,6 +379,13 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("we won one", "We won.", "numeric one at the end"),
             ("send one", "Send.", "numeric one after a verb"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Second review: declarative "I meant" is not a repair; a number keeps its context.
+        for raw in ["What I meant was what we discussed", "I meant to send the report today"] {
+            expect(CleanupGuard.applyCommaFreeCorrections(raw) == raw, "declarative I meant kept: \(raw)")
+        }
+        expect(CleanupGuard.check(raw: "What I meant was what we discussed", cleaned: "Was what we discussed.", options: professional) != .pass, "professional refuses a dropped declarative I meant")
+        expect(CleanupGuard.check(raw: "Book table 5 for Alice", cleaned: "Book 5 tables for Alice.", options: professional) != .pass, "professional refuses a number changing role")
+        expect(CleanupGuard.check(raw: "Book table 5 for Alice", cleaned: "Book table 5 for Alice.", options: professional) == .pass, "professional keeps a number in place")
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),

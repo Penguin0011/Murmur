@@ -426,6 +426,13 @@ enum CleanupGuard {
                 if commaFree && cue == ["i", "mean"] {
                     guard wi + 2 < tokenOfWord.count, ["the", "a", "an", "this", "that"].contains(tokens[tokenOfWord[wi + 2]].lower) else { continue }
                 }
+                // Declarative uses are not repairs: "what I meant was", "I meant to", "I meant it".
+                if commaFree {
+                    let before = wi > 0 ? tokens[tokenOfWord[wi - 1]].lower : ""
+                    let after = wi + cue.count < tokenOfWord.count ? tokens[tokenOfWord[wi + cue.count]].lower : ""
+                    if ["what", "which", "who", "how", "whatever", "all", "if"].contains(before)
+                        || ["was", "is", "to", "it", "that", "by", "for", "well", "business"].contains(after) { continue }
+                }
                 // A repair must follow the cue before the sentence ends.
                 let lastCueToken = tokenOfWord[wi + cue.count - 1]
                 var j = lastCueToken + 1
@@ -465,7 +472,8 @@ enum CleanupGuard {
                     var reach = 8, restated = false
                     while limit < reach, wi - 1 - limit >= 0 {
                         let w = tokens[tokenOfWord[wi - 1 - limit]].lower
-                        if interregnum(w) { reach += 1 } else if !recurs(w) { break } else if !grammarWords.contains(w) { restated = true }
+                        if interregnum(w) { reach += 1 } else if !recurs(w) { break }
+                        else if !grammarWords.contains(w) && !["what", "which", "who", "how", "when", "where", "why"].contains(w) { restated = true }
                         limit += 1
                     }
                     // Without a restated content word it is not a correction ("I did not say that I meant
@@ -840,6 +848,18 @@ enum CleanupGuard {
         // "decline"); names, numbers, negations, answers and quotes are checked above, and the
         // settings say so. Polish stays the voice-keeping choice.
         if options.professional {
+            // A kept number or negation keeps its context: a content word dropped on one side of it may
+            // not come back on the other ("Book table 5" -> "Book 5 tables").
+            for k in pairedRaw.indices where CleanupText.numberValue(a[pairedRaw[k]]) != nil || CleanupText.isNegation(a[pairedRaw[k]]) {
+                let i = pairedRaw[k], j = pairedOut[k]
+                let rawBefore = (k > 0 ? pairedRaw[k - 1] + 1 : 0)..<i, outBefore = (k > 0 ? pairedOut[k - 1] + 1 : 0)..<j
+                let rawAfter = (i + 1)..<(k + 1 < pairedRaw.count ? pairedRaw[k + 1] : a.count)
+                let outAfter = (j + 1)..<(k + 1 < pairedOut.count ? pairedOut[k + 1] : b.count)
+                func crosses(_ from: Range<Int>, _ to: Range<Int>) -> Bool {
+                    from.contains { x in !grammarWords.contains(a[x]) && !filler(x) && to.contains { CleanupText.similarity(a[x], b[$0]) >= 0.5 } }
+                }
+                if crosses(rawBefore, outAfter) || crosses(rawAfter, outBefore) { return .fail(.numberAdded) }
+            }
             let inserted = polishInserted.map { outWords[$0].lower }
             if inserted.count > max(4, a.count / 4) { return .fail(.insertedWords) }
             if let first = pairedOut.first, let last = pairedOut.last, polishInserted.contains(where: { $0 < first || $0 > last }) { return .fail(.insertedWords) }
