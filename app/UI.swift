@@ -665,8 +665,8 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur adds the spelling to your dictionary; after the same fix in two dictations it also replaces the misheard form. Where an app hides its text, Murmur follows keys in that app for that minute. Raw key events stay in memory; filtered spellings are saved. Some editors hide field changes, so unrelated typing can be mistaken for a correction. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
-            toggleRow("Limit learning to readable fields", "Skips keystroke learning in editors whose text cannot be read back. Corrections in readable fields still learn; names in hidden editors must be added manually.", isOn: $controller.learningRequiresReadableField)
+            toggleRow("Learn from my corrections", "Fix a misheard word within a minute and Murmur adds it to your dictionary. Where an app hides its text, it follows your keys for that minute; raw keys stay in memory.", isOn: $controller.learningEnabled)
+            toggleRow("Limit learning to readable fields", "No keystroke learning in editors Murmur can't read. Add those words by hand.", isOn: $controller.learningRequiresReadableField)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
@@ -680,7 +680,7 @@ struct SettingsView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 if controller.dictionaryEntries.isEmpty {
-                    help("No words yet. Add names, jargon and acronyms Murmur gets wrong.").padding(.vertical, 16)
+                    help("No words yet. Add names and jargon Murmur gets wrong.").padding(.vertical, 16)
                 }
                 ForEach(controller.dictionaryEntries) { entry in
                     Group { if editingEntryID == entry.id { dictionaryEditRow(entry) } else { dictionaryRow(entry) } }
@@ -690,14 +690,14 @@ struct SettingsView: View {
             .overlay(alignment: .top) { rule }.padding(.top, 20)
             if !controller.blockedWords.isEmpty {
                 eyebrow("Not learned").padding(.top, 24)
-                help("Murmur skips these because your fixes for them conflicted, or you undid, reversed or deleted them.").padding(.top, 4)
+                help("Skipped because your fixes conflicted or were undone.").padding(.top, 4)
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(controller.blockedWords, id: \.self) { item in blockedRow(item).overlay(alignment: .bottom) { softRule } }
                 }
                 .overlay(alignment: .top) { rule }.padding(.top, 12)
             }
             HStack {
-                help("“Heard as” forms are replaced exactly, in every mode. With cleanup on, a word that sounds like one of yours is sent to the cleanup route with its spelling, so it can be fixed. Edits save immediately.")
+                help("“Heard as” forms are always replaced. With cleanup on, sound-alikes get fixed too. Edits save immediately.")
                 Spacer()
                 Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries).buttonStyle(InkButtonStyle(kind: .outline))
                     .disabled(!controller.dictionaryEntries.contains { $0.source == .learned } && controller.blockedWords.isEmpty)

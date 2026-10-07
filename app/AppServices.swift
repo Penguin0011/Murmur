@@ -71,7 +71,7 @@ enum DictionaryModelFacts {
         "\(modelName) · \(ModelFacts.formatBytes(downloadSize)) download · \(ModelFacts.location)"
     }
 
-    static let explanation = "Helps on-device transcription spell your dictionary words. It checks what was heard against your words and changes only words that are not ordinary English, so everyday speech is left alone. Your words stay on this Mac."
+    static let explanation = "Helps on-device transcription spell your dictionary words without touching everyday English. Your words stay on this Mac."
 
     static func confirmation(downloadSize: Int64, license: ModelLicenseInfo, folder: URL) -> (title: String, body: String) {
         ("Download \(modelName) (\(ModelFacts.formatBytes(downloadSize)))?",
