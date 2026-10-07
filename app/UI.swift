@@ -509,8 +509,8 @@ struct SettingsView: View {
                     .help(controller.cloudTranscriber.displayName)
                 if controller.cloudTranscriber == .gemini {
                     let modelHint = controller.geminiTranscriptionModel.trimmingCharacters(in: .whitespacesAndNewlines) == GeminiTranscribeProvider.defaultModel
-                        ? "Recommended: Gemini 3.5 Transcribe. Dedicated speech recognition; Google's Interactions API stores audio and transcript."
-                        : "Other Gemini model IDs use general audio understanding to transcribe. They may follow spoken instructions, omit words, or invent text for silence."
+                        ? "Recommended: Gemini 3.5 Transcribe, dedicated speech recognition."
+                        : "Other Gemini models may follow spoken instructions, skip words, or invent text."
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 4) {
                             Text("Gemini transcription model").font(.system(size: 14, weight: .semibold))
@@ -531,7 +531,7 @@ struct SettingsView: View {
                         field("whisper-1", text: $controller.customTranscriptionModel)
                             .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
                         keyRow(.customTranscription)
-                        help("This provider needs OpenAI-compatible POST /v1/audio/transcriptions. Its address and API key are separate from cleanup.")
+                        help("Needs an OpenAI-compatible /v1/audio/transcriptions endpoint. Separate from cleanup.")
                     }.padding(.top, 16)
                 }
             }
@@ -563,22 +563,30 @@ struct SettingsView: View {
 
     @ViewBuilder private func disclosure(_ text: String?) -> some View {
         if let text {
-            Text(text + " Murmur never falls back to another route.")
+            Text(text)
                 .font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 .padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Palette.accent16)
         }
     }
 
+    /// Strict, Polish or Professional; Professional sets Polish too.
+    private var cleanupStyle: Binding<Int> {
+        Binding(get: { controller.cleanupProfessional ? 2 : controller.cleanupPolish ? 1 : 0 },
+                set: { controller.cleanupPolish = $0 >= 1; controller.cleanupProfessional = $0 == 2 })
+    }
+
     private var cleanup: some View {
         VStack(alignment: .leading, spacing: 0) {
             eyebrow("Cleanup style").padding(.top, 20)
-            segmented([(false, "Strict"), (true, "Polish")], controller.cleanupChoice == .localRules ? .constant(false) : $controller.cleanupPolish, size: 14).padding(.top, 8)
+            segmented([(0, "Strict"), (1, "Polish"), (2, "Professional")], controller.cleanupChoice == .localRules ? .constant(0) : cleanupStyle, size: 14).padding(.top, 8)
                 .disabled(controller.cleanupChoice == .localRules)
             help(controller.cleanupChoice == .localRules
-                 ? "On this Mac uses Strict rules. Choose a model cleanup route to use Polish."
+                 ? "On this Mac always uses Strict. Pick a model route for Polish or Professional."
+                 : controller.cleanupProfessional
+                 ? "Rewrites into clear, professional writing. May reword and change tone; names, numbers and “not” stay."
                  : controller.cleanupPolish
-                 ? "Polish also removes fillers such as “yeah” and “you know” without commas, drops false starts, and fixes small grammar slips and misheard words. It can occasionally change a word's meaning; names, numbers and “not” are still never changed."
-                 : "Strict makes only the edits below and never changes your wording otherwise. If cleanup goes further, Murmur inserts your own words with its punctuation.")
+                 ? "Keeps your voice and fixes small slips: fillers, false starts, grammar. Names, numbers and “not” stay."
+                 : "Only the edits below. Your wording never changes.")
                 .padding(.top, 8)
             rule.padding(.top, 20)
             toggleRow("Remove filler words", "Takes out “um”, “uh” and similar.", isOn: $controller.cleanupFillers)
@@ -586,7 +594,7 @@ struct SettingsView: View {
             toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
             toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
             HStack(spacing: 16) {
-                help("If cleanup changes too much, Murmur inserts your own words with its punctuation; if cleanup fails, it uses cleanup on this Mac. The raw transcript stays in History. Faithful transcription turns every option off; dictionary spellings still apply.")
+                help("If cleanup goes too far, Murmur inserts your own words. The raw transcript stays in History. Faithful turns all cleanup off.")
                 Spacer()
                 Button("Faithful Transcription", action: controller.useFaithfulTranscription)
                     .buttonStyle(InkButtonStyle(kind: .outline))
@@ -597,7 +605,7 @@ struct SettingsView: View {
             eyebrow("Cleanup runs with").padding(.top, 28)
             segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
-            help("Built-in local rules handle only a limited set of cleanup patterns. For private AI cleanup, try an instruction model around 8B or larger with a local model server; Murmur has not qualified a model that size yet. Its tested models under 2B were slower and less accurate than Gemini in a synthetic comparison. Otherwise choose Gemini or a Custom Provider. Murmur never switches routes on its own.")
+            help("On this Mac uses simple built-in rules. For AI cleanup, choose Gemini or a Custom Provider (a local model server of 8B or larger works too). Murmur never switches routes on its own.")
                 .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
@@ -657,8 +665,8 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "When you fix a misheard name or term within a minute of dictating, Murmur adds the spelling to your dictionary; after the same fix in two dictations it also replaces the misheard form. Where an app hides its text, Murmur follows keys in that app for that minute. Raw key events stay in memory; filtered spellings are saved. Some editors hide field changes, so unrelated typing can be mistaken for a correction. Learned entries keep applying until you delete or reset them.", isOn: $controller.learningEnabled)
-            toggleRow("Limit learning to readable fields", "Skips keystroke learning in editors whose text cannot be read back. Corrections in readable fields still learn; names in hidden editors must be added manually.", isOn: $controller.learningRequiresReadableField)
+            toggleRow("Learn from my corrections", "Fix a misheard word within a minute and Murmur adds it to your dictionary. Where an app hides its text, it follows your keys for that minute; raw keys stay in memory.", isOn: $controller.learningEnabled)
+            toggleRow("Limit learning to readable fields", "No keystroke learning in editors Murmur can't read. Add those words by hand.", isOn: $controller.learningRequiresReadableField)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
@@ -672,7 +680,7 @@ struct SettingsView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 if controller.dictionaryEntries.isEmpty {
-                    help("No words yet. Add names, jargon and acronyms Murmur gets wrong.").padding(.vertical, 16)
+                    help("No words yet. Add names and jargon Murmur gets wrong.").padding(.vertical, 16)
                 }
                 ForEach(controller.dictionaryEntries) { entry in
                     Group { if editingEntryID == entry.id { dictionaryEditRow(entry) } else { dictionaryRow(entry) } }
@@ -682,14 +690,14 @@ struct SettingsView: View {
             .overlay(alignment: .top) { rule }.padding(.top, 20)
             if !controller.blockedWords.isEmpty {
                 eyebrow("Not learned").padding(.top, 24)
-                help("Murmur skips these because your fixes for them conflicted, or you undid, reversed or deleted them.").padding(.top, 4)
+                help("Skipped because your fixes conflicted or were undone.").padding(.top, 4)
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(controller.blockedWords, id: \.self) { item in blockedRow(item).overlay(alignment: .bottom) { softRule } }
                 }
                 .overlay(alignment: .top) { rule }.padding(.top, 12)
             }
             HStack {
-                help("“Heard as” forms are replaced exactly, in every mode. With cleanup on, a word that sounds like one of yours is sent to the cleanup route with its spelling, so it can be fixed. Edits save immediately.")
+                help("“Heard as” forms are always replaced. With cleanup on, sound-alikes get fixed too. Edits save immediately.")
                 Spacer()
                 Button("Reset Learned…", role: .destructive, action: controller.resetLearnedEntries).buttonStyle(InkButtonStyle(kind: .outline))
                     .disabled(!controller.dictionaryEntries.contains { $0.source == .learned } && controller.blockedWords.isEmpty)
@@ -1199,6 +1207,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupLists) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPunctuation) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPolish) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupProfessional) { controller.settingsChanged() }
             .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
             .onChange(of: controller.learningRequiresReadableField) { controller.settingsChanged() }
             .onChange(of: controller.transcriptionRoute) { controller.settingsChanged() }
