@@ -94,6 +94,8 @@ final class ProcessingCoordinator {
     private(set) var lastProviderError: ProviderError?
     /// Why the last dictation did not get its full cleanup (content-free), or nil. Main thread.
     private(set) var lastFallback: CleanupFailureReason?
+    /// The cleanup model's output the guard rejected in the last dictation, or nil. Main thread.
+    private(set) var lastRejectedOutput: String?
     /// What the punctuation transfer is guarded as: sentence punctuation and capitals, no word changes.
     static let punctuationOnly = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
 
@@ -139,7 +141,7 @@ final class ProcessingCoordinator {
     /// Synchronous path, used by the app on the local route. It never calls the network: on the
     /// cloud route it uses local rules. The app calls `processAsync` whenever the route is not local rules.
     func process(_ raw: String) -> ProcessingOutcome {
-        lastProviderError = nil; lastFallback = nil
+        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil
         let prepared = prepare(raw)
         if settings.route == .cloud && settings.options.anyEnabled { lastFallback = .cleanerFailed }
         return .insert(localClean(prepared.text, terms: prepared.terms))
@@ -148,7 +150,7 @@ final class ProcessingCoordinator {
     /// Full path including the cloud route. Always inserts: see the failure policy above.
     /// Main actor: the dictionary is read on the main thread; only the provider calls run elsewhere.
     @MainActor func processAsync(_ raw: String) async -> ProcessingOutcome {
-        lastProviderError = nil; lastFallback = nil
+        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil
         guard settings.route == .cloud else { return process(raw) }
         let prepared = prepare(raw)
         let options = settings.options, terms = prepared.terms
@@ -168,6 +170,7 @@ final class ProcessingCoordinator {
         for (section, attempt) in zip(sections, results) {
             if let reason = attempt.reason { lastFallback = lastFallback ?? reason }
             if let error = attempt.error { lastProviderError = lastProviderError ?? error }
+            if let rejected = attempt.rejected { lastRejectedOutput = (lastRejectedOutput.map { $0 + "\n\n" } ?? "") + rejected }
             let text = attempt.text ?? localClean(section, terms: terms)
             if !text.isEmpty { parts.append(text) }
         }
@@ -175,11 +178,12 @@ final class ProcessingCoordinator {
     }
 
     /// One section's cloud result. Nil `text` means use local rules; `reason` is why the full
-    /// cleanup was not used, and `error` the provider error, if any.
+    /// cleanup was not used, `error` the provider error, and `rejected` the output the guard refused.
     struct CloudAttempt: Sendable {
         var text: String?
         var reason: CleanupFailureReason?
         var error: ProviderError?
+        var rejected: String? = nil
     }
 
     /// One provider call, no retry (a rate limit or an outage would only fail again). If the guard
@@ -195,9 +199,9 @@ final class ProcessingCoordinator {
         }
         if options.punctuation, let words = CleanupPipeline.punctuated(raw: section, cleaned: output, terms: terms),
            case .cleaned(let text) = CleanupPipeline.judge(raw: section, cleaned: words, options: punctuationOnly, allowedTerms: terms) {
-            return CloudAttempt(text: text, reason: reason, error: nil)
+            return CloudAttempt(text: text, reason: reason, error: nil, rejected: output)
         }
-        return CloudAttempt(text: nil, reason: reason, error: nil)
+        return CloudAttempt(text: nil, reason: reason, error: nil, rejected: output)
     }
 
     // MARK: Learning
