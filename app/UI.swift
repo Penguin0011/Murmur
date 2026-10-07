@@ -577,7 +577,7 @@ struct SettingsView: View {
             toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
             toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
             HStack(spacing: 16) {
-                help("If cleanup fails or changes too much, Murmur keeps the raw transcript in History and does not insert it. Faithful transcription turns every option off; dictionary spellings still apply.")
+                help("If cleanup changes too much, Murmur inserts your own words with its punctuation; if cleanup fails, it uses cleanup on this Mac. The raw transcript stays in History. Faithful transcription turns every option off; dictionary spellings still apply.")
                 Spacer()
                 Button("Faithful Transcription", action: controller.useFaithfulTranscription)
                     .buttonStyle(InkButtonStyle(kind: .outline))

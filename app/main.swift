@@ -19,11 +19,18 @@ import SwiftUI
         appItem.submenu = appMenu; mainMenu.addItem(appItem); mainMenu.addItem(standardEditMenuItem()); NSApp.mainMenu = mainMenu
         controller.openSettings = { [weak self] in self?.showWindow() }
         controller.updateMenu = { [weak self] in self?.refreshMenu() }
-        if !options.preview && options.testAudio == nil { controller.setOpenAtLogin(true) }
+        // Open at login is on by default once; after that the Settings toggle decides.
+        if !options.preview && options.testAudio == nil && !UserDefaults.standard.bool(forKey: "openAtLoginDefaulted") {
+            controller.setOpenAtLogin(true); UserDefaults.standard.set(true, forKey: "openAtLoginDefaulted")
+        }
+        // A login-item launch starts quietly; any launch the user makes opens Settings.
+        let event = NSAppleEventManager.shared().currentAppleEvent
+        let launchedAtLogin = event?.eventID == kAEOpenApplication
+            && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
         controller.start(); refreshMenu()
         if let audio = options.testAudio, let expectedApp = options.expectedApp {
             controller.checkSavedAudio(URL(fileURLWithPath: audio), expectedApp: expectedApp) { NSApp.terminate(nil) }
-        } else if options.preview { showWindow() }
+        } else if options.preview || !launchedAtLogin { showWindow() }
         if let seconds = options.quitAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
         }
