@@ -436,6 +436,9 @@ enum CleanupGuard {
                 }
                 // Declarative uses are not repairs: "what I meant was", "I meant to", "I meant it".
                 if commaFree {
+                    // "no" quantifying the next word is not a cue: "wait no one blamed Bob".
+                    if cue.last == "no", wi + cue.count < tokenOfWord.count,
+                       ["one", "body", "longer", "matter", "way", "doubt", "problem", "idea", "more"].contains(tokens[tokenOfWord[wi + cue.count]].lower) { continue }
                     let before = wi > 0 ? tokens[tokenOfWord[wi - 1]].lower : ""
                     let after = wi + cue.count < tokenOfWord.count ? tokens[tokenOfWord[wi + cue.count]].lower : ""
                     if ["what", "which", "who", "how", "whatever", "all", "if"].contains(before)
@@ -768,10 +771,18 @@ enum CleanupGuard {
             // raw copy within one kept word of its gap, so objects cannot trade clauses ("likes cats ... likes dogs").
             // Only coordination reorders: the word sits next to "and"/"or" on either side, so a verb or modal
             // never moves ("should I accept" -> "I should accept", "I sent my manager" -> "my manager sent me").
+            // ...and one conjunct is a pronoun ("me and John" -> "John and I"), so actions never trade order
+            // ("open and close" -> "close and open").
             func coordinated(_ i: Int) -> Bool {
                 let joins: Set<String> = ["and", "or"]
-                return joins.contains(a[i]) || (i > 0 && joins.contains(a[i - 1])) || (i + 1 < a.count && joins.contains(a[i + 1]))
-                    || (j > 0 && joins.contains(b[j - 1])) || (j + 1 < b.count && joins.contains(b[j + 1]))
+                func pronoun(_ w: String) -> Bool { persons.contains { $0.contains(w) } }
+                func pairs(_ ws: [String], _ k: Int) -> Bool {
+                    (joins.contains(ws[k]) && ((k > 0 && pronoun(ws[k - 1])) || (k + 1 < ws.count && pronoun(ws[k + 1]))))
+                        || (k > 1 && joins.contains(ws[k - 1]) && pronoun(ws[k - 2]))
+                        || (k + 2 < ws.count && joins.contains(ws[k + 1]) && pronoun(ws[k + 2]))
+                        || (pronoun(ws[k]) && ((k > 0 && joins.contains(ws[k - 1])) || (k + 1 < ws.count && joins.contains(ws[k + 1]))))
+                }
+                return pairs(a, i) || pairs(b, j)
             }
             if options.professional, let i = nearGap(j).first(where: { !consumedRaw.contains($0) && a[$0] == w.lower && coordinated($0) }) {
                 consumedRaw.insert(i); continue
@@ -822,7 +833,9 @@ enum CleanupGuard {
             func pair(_ x: Int) -> Bool {
                 guard x >= 0, x + 2 < a.count, polishFillerPairs.contains([a[x], a[x + 1]]) else { return false }
                 // Professional: also at a sentence start or after another filler ("yeah you know me and John").
-                if options.professional && (rawWords[x].sentenceStart || (x > 0 && polishFillers.contains(a[x - 1]))
+                // Never before a meaningful complement ("I mean business", "you know the answer").
+                let meaningful: Set<String> = ["the", "a", "an", "what", "that", "it", "how", "where", "why", "who", "business", "to", "this", "him", "her", "them", "his", "everything", "nothing", "exactly"]
+                if options.professional && !meaningful.contains(a[x + 2]) && (rawWords[x].sentenceStart || (x > 0 && polishFillers.contains(a[x - 1]))
                     || ["and", "but", "so"].contains(a[x + 2])) { return true }
                 // Without punctuation, only a following personal subject clearly starts a new thought.
                 return ["i", "we", "you", "he", "she", "they", "it's", "we're", "you're", "they're"].contains(a[x + 2])
@@ -916,7 +929,7 @@ enum CleanupGuard {
             // Removed words: fillers (with that option), droppable grammar words, a pronoun replaced in the
             // same person ("me" -> "I"), or a content word replaced by a similar new word ("table" -> "tables").
             // A dissimilar replacement is refused: a lowercase name ("sam") or an antonym looks the same.
-            var replacements = inserted.filter { !grammarWords.contains($0) }, dropped = 0
+            var replacements = polishInserted.filter { !grammarWords.contains(b[$0]) }, dropped = 0
             for i in unexplained {
                 if rawWords[i].isName { return .fail(.nameDropped) }
                 if filler(i) { if options.fillers { continue } else { return .fail(.unexplainedDeletion) } }
@@ -934,7 +947,13 @@ enum CleanupGuard {
                     return .fail(.unexplainedDeletion)
                 }
                 // The same word elsewhere is a move, not a replacement, and moves are limited above.
-                guard let r = replacements.firstIndex(where: { $0 != a[i] && polishSwap(a[i], $0) && !polarityFlip(a[i], $0) }) else { return .fail(.unexplainedDeletion) }
+                // A replacement is an inflection of the same word in the same place ("table" -> "tables"),
+                // not a similar-looking different word ("liked" -> "loved", "increase" -> "decrease").
+                func inflection(_ x: String, _ y: String) -> Bool {
+                    let p = zip(x, y).prefix { $0 == $1 }.count
+                    return x != y && p >= 3 && p >= min(x.count, y.count) - 2 && !polarityFlip(x, y)
+                }
+                guard let r = replacements.firstIndex(where: { gap($0).contains(i) && inflection(a[i], b[$0]) }) else { return .fail(.unexplainedDeletion) }
                 replacements.remove(at: r)
             }
             return dropped > max(4, a.count / 4) ? .fail(.unexplainedDeletion) : .pass

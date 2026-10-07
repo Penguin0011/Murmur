@@ -407,6 +407,15 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("we should increase the budget", "We should decrease the budget.", "opposite prefix"),
             ("please include the appendix", "Please exclude the appendix.", "include to exclude"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Seventh review: "no one", meaningful fillers, action order, similar verbs.
+        expect(CleanupGuard.applyCommaFreeCorrections("I blamed Bob but wait no one blamed Bob") == "I blamed Bob but wait no one blamed Bob", "no one is not a cue")
+        for (raw, out, label) in [
+            ("I blamed Bob but wait no one blamed Bob", "One blamed Bob.", "no one dropped"),
+            ("I mean business", "Business.", "meaningful I mean"),
+            ("You know the answer", "The answer.", "meaningful you know"),
+            ("Open and close the door", "Close and open the door.", "swapped actions"),
+            ("Alice liked cats and Bob loved dogs", "Alice loved cats and Bob liked dogs.", "swapped similar verbs"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),
