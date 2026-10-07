@@ -12,6 +12,8 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
     case openrouter
     case cerebras
     case customAPI
+    case customTranscription
+    case customCleanup
     case localServer
 
     var displayName: String {
@@ -21,6 +23,8 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
         case .openrouter: return "OpenRouter"
         case .cerebras: return "Cerebras"
         case .customAPI: return "Custom Provider"
+        case .customTranscription: return "Custom transcription"
+        case .customCleanup: return "Custom cleanup"
         case .localServer: return "Local model server"
         }
     }

@@ -37,7 +37,7 @@ struct CleanupOptions: Codable, Equatable, Hashable, Sendable {
 
 // MARK: - Failure reasons (content-free)
 
-/// Why cleanup output was held for recovery. Never carries transcript text.
+/// Why cleanup output was rejected (and a fallback used). Never carries transcript text.
 enum CleanupFailureReason: String, Codable, Equatable, Sendable, CaseIterable {
     case cleanerFailed
     case emptyOutput
@@ -423,7 +423,11 @@ enum CleanupGuard {
 
         let rawLower = raw.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
         let outLower = cleaned.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
-        for phrase in answerPhrases where outLower.contains(phrase) && !rawLower.contains(phrase) {
+        // Compared without punctuation on the raw side: added punctuation alone ("let's make sure" ->
+        // "Let's make sure.") is not an answer. Inserted words are still caught below.
+        func bare(_ s: String) -> String { String(s.map { $0.isWhitespace ? " " : $0 }).filter { $0.isLetter || $0.isNumber || $0 == "'" || $0 == " " } }
+        let rawBare = bare(rawLower)
+        for phrase in answerPhrases where outLower.contains(phrase) && !rawBare.contains(bare(phrase)) {
             return .fail(.answerPattern)
         }
         for marker in ["**", "##", "```", "\n- ", "\n* ", "\u{2022}"] where cleaned.contains(marker) && !raw.contains(marker) {
@@ -496,6 +500,13 @@ enum CleanupGuard {
                     if a[j] == a[i] { repeats.insert(i); repeats.insert(j); break }
                     if !CleanupText.hesitations.contains(a[j]) { break }
                     j += 1
+                }
+            }
+            // Restarted phrases, often split by a chunk cut ("the final reason that. The final reason
+            // that shaped"): only the first copy of an immediately repeated 2–6 word run may go.
+            for n in 2...6 {
+                for i in a.indices where i + 2 * n <= a.count && a[i..<(i + n)] == a[(i + n)..<(i + 2 * n)] {
+                    repeats.formUnion(i..<(i + n))
                 }
             }
         }
@@ -728,6 +739,48 @@ enum CleanupPipeline {
         return judge(raw: raw, cleaned: cleaned, options: options, allowedTerms: allowedTerms)
     }
 
+    /// The raw words with `cleaned`'s sentence punctuation: the fallback when the cleaned words fail
+    /// the guard. No word is added, dropped or respelled. A word the cleanup kept takes the . , ? :
+    /// after it there, and its casing when mid-sentence there (names, "I"); a word it dropped keeps
+    /// its own. Sentence starts are recapitalized. A dictionary term the cleanup wrote in place of one
+    /// word spelled at least half like it ("akash" -> "Aakash") is kept, as the guard allows.
+    /// Nil when the raw text has quotes or line breaks.
+    static func punctuated(raw: String, cleaned: String, terms: [String] = []) -> String? {
+        guard !raw.contains(where: { "\"\u{201C}\u{201D}\n".contains($0) }) else { return nil }
+        let r = CleanupText.tokenize(raw), o = CleanupText.tokenize(cleaned)
+        let rw = r.indices.filter { r[$0].kind == .word }, ow = o.indices.filter { o[$0].kind == .word }
+        let (mr, mo) = CleanupGuard.align(rw.map { r[$0].lower }, ow.map { o[$0].lower })
+        var pair = Dictionary(uniqueKeysWithValues: zip(mr.sorted(), mo.sorted()))
+        let termWords = Set(terms.flatMap { CleanupGuard.words($0).map(\.lower) })
+        var used = mo, respelled = Set<Int>()
+        for k in rw.indices where pair[k] == nil && !termWords.isEmpty {
+            // Unpaired output words between this word's paired neighbors.
+            let low = (0..<k).reversed().lazy.compactMap { pair[$0] }.first.map { $0 + 1 } ?? 0
+            let high = ((k + 1)..<rw.count).lazy.compactMap { pair[$0] }.first ?? ow.count
+            if let j = (low..<max(low, high)).first(where: { !used.contains($0) && termWords.contains(o[ow[$0]].lower)
+                && CleanupText.similarity(r[rw[k]].lower, o[ow[$0]].lower) >= 0.5 }) {
+                pair[k] = j; used.insert(j); respelled.insert(k)
+            }
+        }
+        let marks: Set<String> = [".", ",", "?", ":"], rawMarks = marks.union(["!", ";"])
+        var out = "", start = true
+        for (k, ti) in rw.enumerated() {
+            var word = r[ti].text, after: [String]
+            if let j = pair[k] {
+                let oi = ow[j], end = j + 1 < ow.count ? ow[j + 1] : o.count
+                if respelled.contains(k) || (!start && !CleanupText.isSentenceStart(o, oi)) { word = o[oi].text }
+                after = o[(oi + 1)..<end].filter { $0.kind == .punct && marks.contains($0.text) }.map(\.text)
+            } else {
+                let end = k + 1 < rw.count ? rw[k + 1] : r.count
+                after = r[(ti + 1)..<end].filter { $0.kind == .punct && rawMarks.contains($0.text) }.map(\.text)
+            }
+            if start || word.lowercased() == "i" || word.lowercased().hasPrefix("i'") { word = CleanupText.capitalized(word) }
+            out += (out.isEmpty ? "" : " ") + word + after.joined()
+            start = after.last.map { [".", "?", "!"].contains($0) } ?? false
+        }
+        return out
+    }
+
     static func judge(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String],
                       soundsLike: (String, String) -> Bool = { _, _ in false }) -> CleanupOutcome {
         let output = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -934,19 +987,21 @@ struct RuleCleaner: Cleaner {
 
     // "Actually" and "scratch that" are left out: the first often starts a real sentence, the
     // second already accepts a preceding period.
-    static let splitCue = try! NSRegularExpression(pattern: #"(?<=[\p{L}\p{N}])\. (No wait|Wait,? no|I mean|I meant|Or rather|Sorry|No)[.,] +(\p{L}+|\p{N}+)"#)
+    static let splitCue = try! NSRegularExpression(pattern: #"(?<=[\p{L}\p{N}])\. (?:(Oh|Ah),? )?(No wait|Wait,? no|I mean|I meant|Or rather|Sorry|No)[.,] +(\p{L}+|\p{N}+)"#, options: .caseInsensitive)
 
     static func mergeSplitCues(_ text: String) -> String {
         let ns = text as NSString
         var out = text
         for m in splitCue.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
-            let cue = ns.substring(with: m.range(at: 1)).lowercased().replacingOccurrences(of: ",", with: "")
-            var word = ns.substring(with: m.range(at: 2))
+            // A leading interjection stays as a word ("sentence. Oh, no, I mean" -> "sentence, oh, no, I mean").
+            let lead = m.range(at: 1).location == NSNotFound ? "" : ns.substring(with: m.range(at: 1)).lowercased() + ", "
+            let cue = ns.substring(with: m.range(at: 2)).lowercased().replacingOccurrences(of: ",", with: "")
+            var word = ns.substring(with: m.range(at: 3))
             // Only words known to be lowercase mid-sentence; names, weekdays and months keep their capital.
             let lower = word.lowercased()
             if relativeTimes.contains(lower) || colors.contains(lower) || anchors.contains(lower)
                 || CleanupText.ordinals[lower] != nil || CleanupText.numberValue(lower) != nil { word = lower }
-            out = (out as NSString).replacingCharacters(in: m.range, with: ", \(cue), \(word)")
+            out = (out as NSString).replacingCharacters(in: m.range, with: ", \(lead)\(cue), \(word)")
         }
         return out
     }

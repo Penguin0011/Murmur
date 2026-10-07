@@ -1,3 +1,33 @@
+# Cleanup never holds a dictation — October 6, 2026
+
+Cleanup no longer holds dictations for review (user decision: behave like Wispr Flow). When the guard rejects the cleaned words, the transcript's own words are inserted with the model's punctuation; a provider error or a transfer that fails the guard uses local rules, then the dictionary-applied transcript. Guard fixes: punctuation added after a dictated "sure", repeated 2–6 word restarts, and "Oh, no, I mean" after a sentence break. Rationale and replay evidence are in `PRD.md` (decision, October 6, 2026) and the PR. [Certain]
+
+This branch also carries `feat(settings): simplify route and help disclosures` (the previously installed `f17c1c9`) and `main`'s quiet start at login. Checks passed: cleanup (0/237 false rejects, 2349/2349 adversarial rejections, 2685/2685 punctuation transfers keep the transcript's words), processing 126, routes 119, providers 632, dictionary 177, history, launch, native controller. [Certain] Live replay of the 15 held dictations against the configured Cerebras `gpt-oss-120b`: 30/30 runs inserted, none held. [Certain]
+
+Built with `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk app/build.sh`: the October 6 Command Line Tools update's macOS 27 SDK lacks the SwiftUI `@State` macro plugin. [Certain] Deep/strict signature verification passed. Replaced `/Users/aakash/Applications/Murmur.app`; installed executable SHA-256 `ca30f49702a0fa1f78a27ad9bc52798ef57eb5247c66346385fbf29c7faa1898` matches the build (ModelBench `9b05c97934cce9dc1699006346c15d7c7afc5915d5d6fa8d2eba9744107fa29d`). [Certain] The previous bundle (`7b555c06…`) is backed up at `/Users/aakash/Applications/Murmur-backups/20261006-182758/Murmur.app`; it was quit normally while idle and exited with its helper before replacement. [Certain] The relaunched app kept the same designated requirement; tccd allowed Microphone, Accessibility and Input Monitoring; the warm helper started; all 393 History filenames are unchanged. [Certain] The Settings window was not inspected visually (the app launches quietly), and no live dictation was made after installation. [Certain]
+
+Review fixes (`3f166de`: Open at login defaulted once, Settings on a manual launch, updated Cleanup help) were then built and installed: executable SHA-256 `a95c740a8d914026d81d84040660a48befcea7e0cda3c36552d08ff56001bb90`, deep/strict signature verification passed, same designated requirement. [Certain] The previous bundle (`ca30f497…`) is backed up at `/Users/aakash/Applications/Murmur-backups/20261006-190551/Murmur.app`; Murmur had already exited normally before replacement. [Certain] The manual relaunch opened the Settings window; tccd allowed Microphone, Accessibility and Input Monitoring; the warm helper started; all 393 History filenames are unchanged. [Certain] A login-item launch has not been observed, so quiet start at login is unverified. [Certain]
+
+# Compact settings help — October 6, 2026
+
+Settings descriptions for toggle rows and model summaries now collapse behind question-mark buttons by default. Hover exposes the help text and clicking opens an accessible popover; the persistent **Show detailed info** toggle expands the descriptions inline across Settings. [Certain]
+
+The updated app passed `app/build.sh` and deep/strict signature verification. [Certain] The installed executable SHA-256 `7b555c0699eec9e845acc63cdb311a6cad5fe393b1c5c7a40138dd94199e44da` matches the build; the replaced bundle is backed up at `/Users/aakash/Applications/Murmur-backups/20261006-021614/Murmur.app`. [Certain] Native UI inspection confirmed compact question-mark controls, the expanded descriptions, and the click popover; the user's compact preference was restored. [Certain]
+
+# Cloud disclosure popup removal — October 6, 2026
+
+Removed cloud transcription and cleanup consent popups from recording and Settings, along with their acknowledgement flow and stale preference. Each selected off-Mac route keeps its data disclosure inline in Settings, including the destination host and data sent. The API key's separate endpoint binding remains: changing a custom server still requires saving its key for that endpoint before Murmur will send it. [Certain]
+
+`app/build.sh`, deep/strict signature verification, the 119 route checks, and the native controller checks passed. [Certain] Replaced `/Users/aakash/Applications/Murmur.app`; installed executable SHA-256 `d9c2766f93ba3b403c9dab8d6a80bfd1b6ad70c3a083e8fccf1b4e3e0532ca37` matches the build. [Certain] The previous app bundle is backed up at `/Users/aakash/Applications/Murmur-backups/20261006-021018/Murmur.app`. [Certain] The updated app launched Ready with permissions and History retained; its Transcription and Cleanup Settings showed inline disclosures and no cloud-consent popup. [Certain] No live provider request was sent. [Certain]
+
+# Independent custom transcription and cleanup providers — October 6, 2026
+
+Custom transcription and cleanup now have separate base URLs, model IDs, Keychain accounts, and normalized destination bindings. Existing shared custom settings migrate once; any prior key is split between the new Keychain accounts, with destination approval copied only when the old binding matches the route's normalized address. [Certain]
+
+`app/build.sh` passed and the installed `/Users/aakash/Applications/Murmur.app` matches the worktree build at SHA-256 `2c2b3a9d5ca1b08a7b14a52d916b89fc10cca49f85455fed3014b3ed288a9fdf`; deep/strict code-signature verification passed. [Certain] The old installed bundle is recoverable at `/Users/aakash/Applications/Murmur-backups/20261006-014956/Murmur.app`, and the old app/helper exited before replacement. [Certain] The new app launched Ready with all 359 History entries still present and Settings visibly showed separate Custom transcription and Custom cleanup key rows. [Certain]
+
+Route checks passed (125); native controller checks passed. [Certain] No live transcription or cleanup request was sent. [Certain]
+
 # Insertion verification checkpoint — October 5, 2026
 
 The insertion behavior review and isolated History UI fixture work are on `aakash-insertion-behavior`; the source fixture change is commit `a954d1f`. [Certain] The verification matrix, evidence links, outcomes, and remaining live-coverage limits are recorded in `VISUAL_VERIFICATION.md`. [Certain]

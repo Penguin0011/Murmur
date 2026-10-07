@@ -178,13 +178,17 @@ import ApplicationServices
         precondition(controller.saveKey(.gemini, "test-key-123") && controller.savedKeys.contains(.gemini) && controller.keyMessages[.gemini] == KeyText.saved)
         controller.removeKey(.gemini)
         precondition(!controller.savedKeys.contains(.gemini))
-        controller.customAPIBaseURL = "https://first.example/v1"
-        precondition(controller.saveKey(.customAPI, "synthetic-api-key") && !controller.customAPIKeyNeedsConfirmation)
-        controller.customAPIBaseURL = "https://second.example/v1"
-        precondition(controller.customAPIKeyNeedsConfirmation, "changed destination shows a key confirmation warning")
-        controller.validateKey(.customAPI)
-        precondition(controller.keyMessages[.customAPI] == CredentialError.destinationMismatch.description, "validation refuses an unconfirmed destination without HTTP")
-        controller.removeKey(.customAPI)
+        controller.customTranscriptionAPIBaseURL = "https://first.example/v1"
+        precondition(controller.saveKey(.customTranscription, "synthetic-transcription-key") && !controller.customAPIKeyNeedsConfirmation(.customTranscription))
+        controller.customTranscriptionAPIBaseURL = "https://second.example/v1"
+        precondition(controller.customAPIKeyNeedsConfirmation(.customTranscription), "changed transcription destination needs its own confirmation")
+        controller.validateKey(.customTranscription)
+        precondition(controller.keyMessages[.customTranscription] == CredentialError.destinationMismatch.description, "transcription validation refuses an unconfirmed destination without HTTP")
+        controller.customAPIBaseURL = "https://cleanup.example/v1"
+        precondition(controller.saveKey(.customCleanup, "synthetic-cleanup-key") && !controller.customAPIKeyNeedsConfirmation(.customCleanup))
+        controller.removeKey(.customTranscription)
+        precondition(controller.savedKeys.contains(.customCleanup) && !controller.savedKeys.contains(.customTranscription), "removing transcription key keeps cleanup key")
+        controller.removeKey(.customCleanup)
         // The learning lexicon uses the real English spell checker.
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
         controller.lastDictationText = "held synthetic text"; controller.setupTestTranscript = "setup synthetic text"

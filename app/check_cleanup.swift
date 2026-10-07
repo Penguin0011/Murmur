@@ -168,6 +168,23 @@ struct EchoAsyncCleaner: AsyncCleaner {
         }
         print("Adversarial outputs rejected by guard: \(adversarial.count - accepted.count)/\(adversarial.count) (wrongly accepted: \(accepted.count))")
 
+        // Punctuation transfer (the fallback for rejected cleanups): always exactly the transcript's
+        // words, and always passes a punctuation-only guard, whatever the cleaner returned.
+        let punctuationOnly = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
+        var transferred = 0, transferBroken: [String] = []
+        for (raw, out) in corpus.map({ ($0.input, $0.expected) }) + adversarial.map({ ($0.raw, $0.output) }) {
+            guard let t = CleanupPipeline.punctuated(raw: raw, cleaned: out) else { continue }
+            transferred += 1
+            let same = CleanupGuard.words(t).map(\.lower) == CleanupGuard.words(raw).map(\.lower)
+            let verdict = CleanupGuard.check(raw: raw, cleaned: t, options: punctuationOnly)
+            if !same || verdict != .pass { transferBroken.append("\(verdict) same-words=\(same): \(raw.debugDescription) -> \(t.debugDescription)") }
+        }
+        print("Punctuation transfers keeping the transcript's words and passing the guard: \(transferred - transferBroken.count)/\(transferred)")
+        if !transferBroken.isEmpty {
+            transferBroken.prefix(10).forEach { print("  " + $0) }
+            failures.append("\(transferBroken.count) punctuation transfers changed words or failed the guard")
+        }
+
         // Plausible, acceptable LLM cleanups that differ from the labels. Not gating: the guard is
         // deliberately strict, and every rejection here means "held for recovery", not bad text.
         let all = CleanupOptions.standard
@@ -238,6 +255,23 @@ struct EchoAsyncCleaner: AsyncCleaner {
             expect(CleanupPipeline.process(raw: split, options: .standard, cleaner: RuleCleaner()) == .cleaned(want), "split cue: \(split)")
         }
         expect(CleanupPipeline.process(raw: "Um.", options: .standard, cleaner: RuleCleaner()) == .cleaned(""), "filler-only transcript cleans to nothing")
+        // Punctuation added after a dictated "sure" is not an answer phrase.
+        expect(CleanupGuard.check(raw: "let's make sure", cleaned: "Let's make sure.", options: .standard) == .pass, "period after dictated sure passes")
+        expect(CleanupGuard.check(raw: "i'm sorry but i can't make it", cleaned: "I'm sorry, but I can't make it.", options: .standard) == .pass, "comma inside dictated answer phrase passes")
+        // Punctuation transfer: the model's punctuation on the transcript's words.
+        expect(CleanupPipeline.punctuated(raw: "every like give or take twenty seconds okay", cleaned: "Every give or take twenty seconds. Okay?") == "Every like give or take twenty seconds. Okay?", "transfer keeps a dropped filler")
+        expect(CleanupPipeline.punctuated(raw: "Last model I mean last agent left", cleaned: "Last agent left.") == "Last model I mean last agent left.", "transfer recapitalizes after a dropped reparandum")
+        expect(CleanupPipeline.punctuated(raw: "the government simply. Exaggerated the threat", cleaned: "The government simply exaggerated the threat.") == "The government simply exaggerated the threat.", "transfer fixes a chunk-cut period")
+        expect(CleanupPipeline.punctuated(raw: "she said \"hi\" to me", cleaned: "She said hi to me.") == nil, "transfer skips quotes")
+        expect(CleanupPipeline.punctuated(raw: "hey akash listen i want it", cleaned: "Hey Aakash, I want it.", terms: ["aakash"]) == "Hey Aakash, listen I want it.", "transfer keeps a dictionary respelling")
+        expect(CleanupPipeline.punctuated(raw: "akash listen", cleaned: "Aakash listen.", terms: ["aakash"]) == "Aakash listen.", "transfer keeps a respelling at a sentence start")
+        // An explicit cue after a sentence break, led by an interjection, is still a correction.
+        expect(CleanupGuard.check(raw: "This is a somewhat complicated sentence. Oh, no, I mean a somewhat simple sentence.", cleaned: "This is a somewhat simple sentence.", options: .standard) == .pass, "interjection-led split cue")
+        expect(CleanupGuard.check(raw: "This is a somewhat complicated sentence. Oh, no, I mean a somewhat simple sentence.", cleaned: "This is a somewhat complicated sentence. Oh, no, I mean a somewhat simple sentence.", options: .standard) == .pass, "uncorrected split cue still passes")
+        // A restarted phrase, often split by a chunk cut, may lose its first copy only.
+        expect(CleanupGuard.check(raw: "The final reason that. The final reason that shaped the style was pride.", cleaned: "The final reason that shaped the style was pride.", options: .standard) == .pass, "repeated phrase collapses")
+        expect(CleanupGuard.check(raw: "The final reason that. The final reason that shaped the style was pride.", cleaned: "Shaped the style was pride.", options: .standard) != .pass, "both copies of a repeated phrase cannot go")
+        expect(CleanupGuard.check(raw: "We shipped the first build and the second build on time.", cleaned: "We shipped the second build on time.", options: .standard) != .pass, "a non-repeated phrase cannot go")
         expect(CleanupPipeline.process(raw: "Hello.", options: .standard, cleaner: EmptyCleaner()) == .heldForRecovery(raw: "Hello.", reason: .emptyOutput), "a cleaner emptying real words still holds")
         for keep in ["I'm late. Sorry, traffic was bad.", "We shipped it. No problems so far.", "Call me tomorrow. Actually, tonight."] {
             expect(CleanupPipeline.process(raw: keep, options: .standard, cleaner: RuleCleaner()) == .cleaned(keep), "split cue left alone: \(keep)")
@@ -284,6 +318,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
             .init(label: "answers arithmetic", raw: "What's two plus two?", output: "Two plus two is four.", options: all),
             .init(label: "answers arithmetic tersely", raw: "What's two plus two?", output: "4", options: all),
             .init(label: "answers with sure", raw: "Can you summarize this email for me?", output: "Sure! Please paste the email and I'll summarize it.", options: all),
+            .init(label: "prefixes sure to dictated sure", raw: "make sure the build passes", output: "Sure, make sure the build passes.", options: all),
             .init(label: "answers weather", raw: "Is it going to rain tomorrow?", output: "I don't have access to weather data.", options: all),
             .init(label: "answers why sky", raw: "Why is the sky blue?", output: "Because of Rayleigh scattering of sunlight.", options: all),
             .init(label: "answers time", raw: "Uh, what time is it in Tokyo right now?", output: "It is currently 3 PM in Tokyo.", options: all),

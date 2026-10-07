@@ -302,21 +302,23 @@ final class PreStart: @unchecked Sendable {
     @Published var availableRelease: ReleaseInfo?
     @Published var checkingForUpdates = false
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0" }
-    // Processing routes (R4) apply as soon as they change, after any disclosure is confirmed.
+    // Processing routes (R4) apply as soon as they change.
     // API keys (R5) save immediately to the Keychain; only their presence is published.
     @Published var transcriptionRoute: TranscriptionRoute
     @Published var cloudTranscriber: CloudTranscriber
     @Published var cleanupChoice: CleanupChoice
     @Published var customAPIBaseURL: String
+    @Published var customTranscriptionAPIBaseURL: String
     @Published var customAPIModel: String
     @Published var customTranscriptionModel: String
+    @Published var geminiTranscriptionModel: String
     @Published var savedKeys: Set<ProviderID> = []
     @Published var keyMessages: [ProviderID: String] = [:]
-    var routeSettings: RouteSettings { RouteSettings(transcription: transcriptionRoute, cloudTranscriber: cloudTranscriber, cleanup: cleanupChoice, customAPIBaseURL: customAPIBaseURL, customAPIModel: customAPIModel, customTranscriptionModel: customTranscriptionModel) }
+    var routeSettings: RouteSettings { RouteSettings(transcription: transcriptionRoute, cloudTranscriber: cloudTranscriber, cleanup: cleanupChoice, customAPIBaseURL: customAPIBaseURL, customTranscriptionAPIBaseURL: customTranscriptionAPIBaseURL, customAPIModel: customAPIModel, customTranscriptionModel: customTranscriptionModel, geminiTranscriptionModel: geminiTranscriptionModel) }
     var appliedTranscriptionIsLocal: Bool { appliedRoutes.transcription == .local }
     var appliedCleanupIsLocal: Bool { appliedRoutes.cleanup == .localRules }
     /// What a stage would send off this Mac with the settings as edited, or nil when nothing leaves.
-    /// Reads no key (SwiftUI calls it on every render); the Apply alert uses the saved keys.
+    /// Reads no key (SwiftUI calls it on every render); shows the configured route's disclosure.
     func routeDisclosure(_ stage: ProcessingStage) -> String? { DisclosureText.summary(RoutePlan.make(routeSettings, cleanupSendsText: true) { _ in nil }, stage: stage) }
     var canCancelRequest: Bool { cloudRequest.isActive }
     var isBusy: Bool { phase == "Listening" || phase == "Processing" || (sessionAvailable && session.state != .idle) }
@@ -436,7 +438,7 @@ final class PreStart: @unchecked Sendable {
         updateChecksEnabled = processingSettings.updateChecksEnabled
         let routes = RouteSettings.load(from: defaults)
         transcriptionRoute = routes.transcription; cloudTranscriber = routes.cloudTranscriber; cleanupChoice = routes.cleanup
-        customAPIBaseURL = routes.customAPIBaseURL; customAPIModel = routes.customAPIModel; customTranscriptionModel = routes.customTranscriptionModel; appliedRoutes = routes
+        customAPIBaseURL = routes.customAPIBaseURL; customTranscriptionAPIBaseURL = routes.customTranscriptionAPIBaseURL; customAPIModel = routes.customAPIModel; customTranscriptionModel = routes.customTranscriptionModel; geminiTranscriptionModel = routes.geminiTranscriptionModel; appliedRoutes = routes
         self.preview = preview
         let isolatedStorage = isolatedStorage ?? preview
         do {
@@ -474,7 +476,10 @@ final class PreStart: @unchecked Sendable {
         warm.onDictionaryStatus = { [weak self] failed in DispatchQueue.main.async { self?.dictionarySupportFailed = failed } }
         if !preview {
             do { try RouteSettings.migrateCustomAPI(in: defaults, credentials: credentials) }
-            catch { keyMessages[.customAPI] = KeyText.storeFailed }
+            catch {
+                keyMessages[.customTranscription] = KeyText.storeFailed
+                keyMessages[.customCleanup] = KeyText.storeFailed
+            }
         }
         refreshKeys()
         // Choose Folder, Use Default and a finished download all change the folder, even with
@@ -596,17 +601,8 @@ final class PreStart: @unchecked Sendable {
             alert.addButton(withTitle: "Turn Off History"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { historyMode = appliedHistoryMode; return }
         }
-        // R4: confirm what leaves this Mac before the first use of a route, provider or endpoint.
         let routes = routeSettings
-        let plan = routePlan(routes, cleanupSendsText: cleanupFillers || cleanupCorrections || cleanupLists || cleanupPunctuation)
-        let pending = DisclosureAcknowledgement.pending(plan, acknowledged: DisclosureAcknowledgement.acknowledged(.standard))
-        if !pending.isEmpty {
-            let text = DisclosureText.alert(pending)
-            let alert = NSAlert(); alert.messageText = text.title; alert.informativeText = text.body
-            alert.addButton(withTitle: "Send and Apply"); alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { revertRoutes(); return }
-        }
-        appliedRoutes = routes; routes.save(to: .standard); DisclosureAcknowledgement.record(plan, in: .standard)
+        appliedRoutes = routes; routes.save(to: .standard)
         appliedRetention = retention
         appliedHistoryMode = historyMode; records?.persistsTranscripts = historyMode.persistsTranscripts
         let defaults = UserDefaults.standard
@@ -638,15 +634,20 @@ final class PreStart: @unchecked Sendable {
     }
     private func revertRoutes() {
         transcriptionRoute = appliedRoutes.transcription; cloudTranscriber = appliedRoutes.cloudTranscriber; cleanupChoice = appliedRoutes.cleanup
-        customAPIBaseURL = appliedRoutes.customAPIBaseURL; customAPIModel = appliedRoutes.customAPIModel; customTranscriptionModel = appliedRoutes.customTranscriptionModel
+        customAPIBaseURL = appliedRoutes.customAPIBaseURL; customTranscriptionAPIBaseURL = appliedRoutes.customTranscriptionAPIBaseURL; customAPIModel = appliedRoutes.customAPIModel; customTranscriptionModel = appliedRoutes.customTranscriptionModel
+        geminiTranscriptionModel = appliedRoutes.geminiTranscriptionModel
     }
     private func routePlan(_ routes: RouteSettings, cleanupSendsText: Bool) -> RoutePlan {
         var refusal: String?
         let plan = RoutePlan.make(routes, cleanupSendsText: cleanupSendsText) { provider in
             do {
-                return try provider == .customAPI
-                    ? CustomAPIKeyBinding.read(at: routes.customAPIBaseURL, defaults: .standard, credentials: self.credentials)
-                    : self.credentials.read(provider)
+                switch provider {
+                case .customTranscription:
+                    return try CustomAPIKeyBinding.read(at: routes.customTranscriptionAPIBaseURL, defaults: .standard, credentials: self.credentials, provider: provider)
+                case .customCleanup:
+                    return try CustomAPIKeyBinding.read(at: routes.customAPIBaseURL, defaults: .standard, credentials: self.credentials, provider: provider)
+                default: return try self.credentials.read(provider)
+                }
             } catch {
                 refusal = (error as? CredentialError)?.description ?? KeyText.unreadable
                 return nil
@@ -719,10 +720,9 @@ final class PreStart: @unchecked Sendable {
         if action == .start {
             guard !IsSecureEventInputEnabled() else { session.resetShortcut?(); setPhase("Error", "Dictation is unavailable while Secure Input is active."); done(); return }
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
-            // An unconfigured or unconfirmed cloud route refuses; it never falls back to local.
+            // An unconfigured cloud route refuses; it never falls back to local.
             let plan = routePlan(appliedRoutes, cleanupSendsText: processing?.settings.options.anyEnabled ?? false)
-            let unconfirmed = !DisclosureAcknowledgement.pending(plan, acknowledged: DisclosureAcknowledgement.acknowledged(.standard)).isEmpty
-            if let refusal = plan.refusal ?? (unconfirmed ? DisclosureText.startRefusal : nil) {
+            if let refusal = plan.refusal {
                 session.resetShortcut?(); setPhase("Error", refusal); done(); return
             }
             if plan.usesLocalModel, let refusal = ModelGate.startRefusal(modelAvailable: modelFilesAvailable(), runtimeAvailable: Bundle.main.url(forAuxiliaryExecutable: "ModelBench") != nil, downloadingActiveModel: modelDownloadInFlight && !usesCustomModelFolder) {
@@ -994,6 +994,10 @@ final class PreStart: @unchecked Sendable {
             catch { setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History; its status could not be saved.") }
             destination = nil; historySaved(); done(); return
         }
+        // Content-free: why the full cleanup was not used (the punctuation transfer or local rules was).
+        if let why = processing?.lastFallback {
+            timingLog.notice("cleanup-fallback reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError.map { Mirror(reflecting: $0).children.first?.label ?? "\($0)" } ?? "none", privacy: .public)")
+        }
         // Only filler words were heard: keep the raw transcript, insert nothing, show no error.
         if processed.isEmpty {
             entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "saved-not-inserted")
@@ -1037,6 +1041,10 @@ final class PreStart: @unchecked Sendable {
                 try store.save(entry)
                 watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
                 showInsertionResult(insertion)
+                // A provider failure is not silent: a bad key or quota would otherwise degrade every dictation.
+                if insertion.status != .failed, let error = processing?.lastProviderError {
+                    setPhase("Ready", "Inserted with local cleanup. \(error.userMessage)")
+                }
             } catch {
                 setPhase("Error", attempted
                     ? "\(saved) Delivery status could not be saved. Check the destination before pasting again."
@@ -1516,15 +1524,23 @@ final class PreStart: @unchecked Sendable {
 
     /// Publishes which providers have a key. The key itself never leaves the Keychain store.
     func refreshKeys() { savedKeys = Set(KeyText.providers.filter { credentials.exists($0) }) }
-    var customAPIKeyNeedsConfirmation: Bool {
-        guard savedKeys.contains(.customAPI), let destination = try? CustomAPIKeyBinding.endpoint(customAPIBaseURL) else { return false }
-        return UserDefaults.standard.string(forKey: CustomAPIKeyBinding.preference) != destination
+    func customAPIKeyNeedsConfirmation(_ provider: ProviderID) -> Bool {
+        let address = provider == .customTranscription ? customTranscriptionAPIBaseURL : customAPIBaseURL
+        guard savedKeys.contains(provider), let destination = try? CustomAPIKeyBinding.endpoint(address) else { return false }
+        return UserDefaults.standard.string(forKey: CustomAPIKeyBinding.preference(provider)) != destination
+    }
+    private func customAPIAddress(_ provider: ProviderID) -> String? {
+        switch provider {
+        case .customTranscription: return customTranscriptionAPIBaseURL
+        case .customCleanup: return customAPIBaseURL
+        default: return nil
+        }
     }
     @discardableResult
     func saveKey(_ provider: ProviderID, _ raw: String) -> Bool {
         guard let key = APIKey(raw) else { keyMessages[provider] = KeyText.invalid; return false }
         do {
-            if provider == .customAPI { try CustomAPIKeyBinding.save(key, at: customAPIBaseURL, defaults: .standard, credentials: credentials) }
+            if let address = customAPIAddress(provider) { try CustomAPIKeyBinding.save(key, at: address, defaults: .standard, credentials: credentials, provider: provider) }
             else { try credentials.save(key, for: provider) }
             keyMessages[provider] = KeyText.saved
         }
@@ -1534,7 +1550,7 @@ final class PreStart: @unchecked Sendable {
     func removeKey(_ provider: ProviderID) {
         do {
             try credentials.delete(provider)
-            if provider == .customAPI { UserDefaults.standard.removeObject(forKey: CustomAPIKeyBinding.preference) }
+            if customAPIAddress(provider) != nil { UserDefaults.standard.removeObject(forKey: CustomAPIKeyBinding.preference(provider)) }
             keyMessages[provider] = KeyText.removed
         } catch { keyMessages[provider] = KeyText.removeFailed }
         refreshKeys()
@@ -1542,12 +1558,12 @@ final class PreStart: @unchecked Sendable {
     func validateKey(_ provider: ProviderID) {
         let key: APIKey?
         do {
-            key = try provider == .customAPI
-                ? CustomAPIKeyBinding.read(at: customAPIBaseURL, defaults: .standard, credentials: credentials)
-                : credentials.read(provider)
+            if let address = customAPIAddress(provider) {
+                key = try CustomAPIKeyBinding.read(at: address, defaults: .standard, credentials: credentials, provider: provider)
+            } else { key = try credentials.read(provider) }
         } catch { keyMessages[provider] = (error as? CredentialError)?.description ?? KeyText.unreadable; return }
         keyMessages[provider] = KeyText.checking
-        let endpoint = customAPIBaseURL
+        let endpoint = customAPIAddress(provider) ?? customAPIBaseURL
         Task { @MainActor [weak self] in
             let message = await KeyCheck.run(provider, key: key, apiBaseURL: endpoint)
             self?.keyMessages[provider] = message
