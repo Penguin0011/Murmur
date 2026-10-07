@@ -470,6 +470,8 @@ enum CleanupGuard {
                     }
                     // Without a restated content word it is not a correction ("I did not say that I meant
                     // it"), except "I mean the ..." clarifying, where only the cue goes.
+                    // A leading join stays ("go so we are not ... I meant he is not" keeps "so").
+                    while limit > 0, ["so", "and", "but", "then"].contains(tokens[tokenOfWord[wi - limit]].lower) { limit -= 1 }
                     if cue == ["i", "mean"] { limit = 0 } else if !restated {
                         for k in 0..<cue.count { window.remove(wi + k) }
                         continue
@@ -845,8 +847,10 @@ enum CleanupGuard {
                 dropped += 1
                 // Informal forms the rewrite spells out ("gotta" -> "have to").
                 if droppableGrammarWords.contains(a[i]) || ["gotta", "wanna", "kinda", "sorta"].contains(a[i]) || pronounOne(i) { continue }
+                // A sentence-opening interjection ("hey do you know" -> "Do you know").
+                if rawWords[i].sentenceStart, ["hey", "okay", "ok", "well", "oh", "alright"].contains(a[i]) { continue }
                 // A join dropped where the rewrite ends a sentence ("by Thursday, and I" -> "by Thursday. I").
-                if ["and", "so", "but"].contains(a[i]), let k = pairedRaw.lastIndex(where: { $0 < i }), outWords[pairedOut[k]].endAfter { continue }
+                if ["and", "so", "but", "because"].contains(a[i]), let k = pairedRaw.lastIndex(where: { $0 < i }), outWords[pairedOut[k]].endAfter { continue }
                 if let person = persons.first(where: { $0.contains(a[i]) }) {
                     if outWords.indices.contains(where: { !matchedOut.contains($0) && person.contains(outWords[$0].lower) }) { continue }
                     return .fail(.unexplainedDeletion)

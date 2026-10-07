@@ -364,7 +364,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
                                   options: professional) == .pass, "professional accepts a misheard cue")
         // Comma-free corrections are applied before the model sees the text, only where restated.
         for (raw, out) in [
-            ("but he don't want to go so we are not going to do that wait no i meant he is not going to do that", "but he don't want to go he is not going to do that"),
+            ("but he don't want to go so we are not going to do that wait no i meant he is not going to do that", "but he don't want to go so he is not going to do that"),
             ("we could ship the update on Friday actually no I meant on Monday because", "we could ship the update on Monday because"),
             ("send me the report by 5 I mean the quarterly one", "send me the report by 5 the quarterly one"),
             ("I did not say that I meant it", "I did not say that I meant it"),
@@ -372,6 +372,13 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Meet Tuesday, sorry, Thursday.", "Meet Tuesday, sorry, Thursday."),
         ] { expect(CleanupGuard.applyCommaFreeCorrections(raw) == out, "comma-free correction: \(raw)") }
         expect(CleanupGuard.check(raw: "I did not say that I meant it", cleaned: "I did not say it.", options: professional) != .pass, "professional keeps an unrestated I meant")
+        // Good rewrites the live model produced that the guard first refused.
+        for (raw, out) in [
+            ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),
+            ("basically the client don't like the new logo so we gotta redo it by Thursday you know and I don't think we should charge them for it", "The client doesn't like the new logo, so we have to redo it by Thursday. I don't think we should charge them for it."),
+            ("can you send me the report by 5 I mean the quarterly one not the monthly one", "Can you send me the quarterly report by 5, not the monthly one?"),
+            (broken, "John and I were going to buy 42 apples, but he doesn't want to go; he is not going to do that. Instead, we need to buy:\n1. Milk\n2. Eggs\n3. Bread"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) == .pass, "professional accepts live output: \(out.prefix(30))") }
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
         expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")
