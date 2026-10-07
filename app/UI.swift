@@ -509,8 +509,8 @@ struct SettingsView: View {
                     .help(controller.cloudTranscriber.displayName)
                 if controller.cloudTranscriber == .gemini {
                     let modelHint = controller.geminiTranscriptionModel.trimmingCharacters(in: .whitespacesAndNewlines) == GeminiTranscribeProvider.defaultModel
-                        ? "Recommended: Gemini 3.5 Transcribe. Dedicated speech recognition; Google's Interactions API stores audio and transcript."
-                        : "Other Gemini model IDs use general audio understanding to transcribe. They may follow spoken instructions, omit words, or invent text for silence."
+                        ? "Recommended: Gemini 3.5 Transcribe, dedicated speech recognition."
+                        : "Other Gemini models may follow spoken instructions, skip words, or invent text."
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 4) {
                             Text("Gemini transcription model").font(.system(size: 14, weight: .semibold))
@@ -531,7 +531,7 @@ struct SettingsView: View {
                         field("whisper-1", text: $controller.customTranscriptionModel)
                             .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
                         keyRow(.customTranscription)
-                        help("This provider needs OpenAI-compatible POST /v1/audio/transcriptions. Its address and API key are separate from cleanup.")
+                        help("Needs an OpenAI-compatible /v1/audio/transcriptions endpoint. Separate from cleanup.")
                     }.padding(.top, 16)
                 }
             }

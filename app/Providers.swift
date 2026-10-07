@@ -58,7 +58,8 @@ struct DataDisclosure: Equatable, Sendable {
             main = "\(provider.displayName) \(stage.rawValue) runs on this Mac (\(destinationHost)); nothing leaves this Mac. \(retentionNote)"
         } else {
             func list(_ items: [String]) -> String { items.count < 2 ? items.joined() : items.dropLast().joined(separator: ", ") + " and " + items.last! }
-            main = "Sends \(list(leavesDevice)) to \(destinationHost). \(list(staysOnDevice).prefix(1).uppercased() + list(staysOnDevice).dropFirst()) stay on this Mac. \(retentionNote)"
+            let stays = list(staysOnDevice)
+            main = "Sends \(list(leavesDevice)) to \(destinationHost). \(stays.prefix(1).uppercased() + stays.dropFirst()) \(staysOnDevice.count == 1 ? "stays" : "stay") on this Mac. \(retentionNote)"
         }
         return warning.map { main + " " + $0 } ?? main
     }
@@ -703,9 +704,9 @@ struct OpenAICompatibleTranscriptionProvider: TranscriptionProvider {
                                   retentionNote: "Audio and spelling hints go only to the server on this Mac; its logging settings apply.")
         case .leavesDevice(let host, let encrypted):
             return DataDisclosure(provider: id, stage: .transcription, destinationHost: host,
-                                  leavesDevice: ["the recorded audio", "your dictionary's spellings as spelling hints"],
-                                  staysOnDevice: ["history", "other apps' text"],
-                                  retentionNote: "Retention depends on whoever runs the configured server.",
+                                  leavesDevice: ["the audio", "dictionary spelling hints"],
+                                  staysOnDevice: ["history"],
+                                  retentionNote: "Retention is up to whoever runs that server.",
                                   warning: encrypted ? nil : "Audio and spelling hints are sent over unencrypted http. Your API key is not sent; use https to send it.")
         }
     }
@@ -1268,16 +1269,16 @@ struct GeminiTranscribeProvider: TranscriptionProvider {
 
     var disclosure: DataDisclosure {
         let host = baseURL.host ?? "generativelanguage.googleapis.com"
-        let freeTier = "Free tier: Google may also use the audio and transcript to improve its products, and human reviewers may read them; do not use a free-tier key for sensitive dictation."
+        let freeTier = "Free tier: Google may use them to improve its products and human reviewers may read them; avoid it for sensitive dictation."
         let retention = store
-            ? "Google stores the audio, your dictionary's spellings and the transcript (Interactions API, store on): for \(Self.paidTierRetentionDays) days on a paid-tier key or \(Self.freeTierRetentionDays) day on a free-tier key, then deletes them automatically. Stored interactions can be deleted earlier. " + freeTier
-            : "Store is off, so Google does not keep the interaction. Paid tier: Google logs prompts for a limited time for abuse detection only. " + freeTier
+            ? "Google keeps them and the transcript for \(Self.paidTierRetentionDays) days on a paid key or \(Self.freeTierRetentionDays) day on a free key; it can be deleted earlier. " + freeTier
+            : "Store is off, so Google does not keep them; paid keys are logged briefly for abuse detection. " + freeTier
         return DataDisclosure(provider: id, stage: .transcription, destinationHost: host,
-                              leavesDevice: [store ? "the recorded audio (sent to and stored by Google)" : "the recorded audio (it leaves this Mac to Google)",
-                                             store ? "your dictionary's spellings as custom vocabulary (sent to and stored by Google)" : "your dictionary's spellings as custom vocabulary"],
-                              staysOnDevice: ["history", "the rest of the dictionary", "other apps' text"],
+                              leavesDevice: [store ? "the audio (stored by Google)" : "the audio (to Google)",
+                                             store ? "your dictionary's spellings (stored by Google)" : "your dictionary's spellings"],
+                              staysOnDevice: ["history", "the rest of the dictionary"],
                               retentionNote: retention,
-                              warning: "Gemini 3.5 Transcribe uses Google's Beta Interactions API, whose formats may change.")
+                              warning: "Uses Google's Beta Interactions API.")
     }
 
     // MARK: Request building (pure)
