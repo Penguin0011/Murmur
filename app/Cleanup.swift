@@ -508,6 +508,14 @@ enum CleanupGuard {
                     if let e = content.first(where: { x in repair.contains { restates(word(x), word($0)) } }),
                        let r = repair.first(where: { p in content.contains { restates(word($0), word(p)) } }) {
                         limit = wi - max(wi - limit, e - (r - repair.lowerBound))
+                        // If the restated word starts a clause after the cue ("Alice should go") but not before it
+                        // ("I told Alice"), the kept prefix cannot join the repair: leave the sentence alone.
+                        let auxes = modals.union(["is", "are", "was", "were", "am", "has", "have", "had", "do", "does", "did"])
+                        let before = ((e + 1)..<wi).first { !interregnum(word($0)) }
+                        if r + 1 < tokenOfWord.count, auxes.contains(word(r + 1)), before.map({ !auxes.contains(word($0)) }) ?? true {
+                            for k in 0..<cue.count { window.remove(wi + k) }
+                            continue
+                        }
                     }
                     // Without a restated content word it is not a correction ("I did not say that I meant
                     // it"), except "I mean the ..." clarifying, where only the cue goes.
@@ -920,7 +928,7 @@ enum CleanupGuard {
         // never plan/plant.
         func inflection(_ short: String, _ long: String) -> Bool {
             guard short.count >= 2, long.count > short.count, !polarityFlip(short, long) else { return false }
-            let endings = ["s", "es", "ed", "d", "ing", "er", "est", "ly"]
+            let endings = ["s", "es", "ed", "d", "ing", "er", "est"] // Not -ly: "hard" and "hardly" differ.
             let stems = [short, String(short.dropLast()), String(short.dropLast()) + "i", short + String(short.last!)]
             return stems.contains { stem in endings.contains { stem + $0 == long } }
         }
@@ -994,6 +1002,12 @@ enum CleanupGuard {
             }
             // Every new content word or modal replaces a dropped word; a pronoun contraction ("he's") is the
             // only free one. "I approve" never becomes "I should approve", nor "send" "send and delete".
+            // An inserted auxiliary, adverb or join takes the place of a dropped grammar word ("was" -> "were",
+            // "is going to" -> "be"): "Alice approved" never becomes "Alice has approved", nor "likes" "also likes".
+            let weighty: Set<String> = modals.union(["has", "have", "had", "been", "be", "will", "also", "just", "really", "very", "too", "more", "most", "and", "but", "or", "so", "if", "then", "than", "only", "even", "still", "already"])
+            for j in polishInserted where weighty.contains(b[j]) {
+                if !gap(j).contains(where: { unexplained.contains($0) && grammarWords.union(modals).union(["gotta", "wanna", "kinda", "sorta"]).contains(a[$0]) }) { return .fail(.insertedWords) }
+            }
             // A bare pronoun is new only as a same-person swap in its place ("me" -> "I"), never an added
             // object ("Alice approves it today").
             for j in polishInserted where !b[j].contains("'") {

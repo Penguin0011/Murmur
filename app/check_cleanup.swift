@@ -450,6 +450,14 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Alice approves today", "Alice approves it today.", "inserted it"),
             ("This is for Bob", "This is Bob.", "dropped preposition"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Thirteenth review: inserted grammar words, -ly, clause splices.
+        expect(CleanupGuard.applyCommaFreeCorrections("I told Alice actually I meant Alice should go") == "I told Alice actually I meant Alice should go", "no splice of an object onto a new clause")
+        for (raw, out, label) in [
+            ("Alice approved the plan", "Alice has approved the plan.", "inserted auxiliary"),
+            ("Alice likes Bob", "Alice also likes Bob.", "inserted adverb"),
+            ("He is working hard today", "He is working hardly today.", "hard to hardly"),
+            ("I told Alice actually I meant Alice should go", "I told Alice should go.", "spliced clause"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),
