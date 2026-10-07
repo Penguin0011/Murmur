@@ -79,9 +79,10 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
     static func settingsChecks(_ defaults: UserDefaults) throws {
         let fresh = ProcessingSettings.load(from: defaults)
         check(fresh == ProcessingSettings(), "missing keys load approved defaults")
+        check(!fresh.options.polish, "strict cleanup by default")
         check(fresh.options == .standard && fresh.route == .local && fresh.learningEnabled && fresh.historyMode == .on && fresh.updateChecksEnabled, "defaults: all comforts on, local, learning on")
         var next = ProcessingSettings()
-        next.options = CleanupOptions(fillers: false, corrections: true, lists: false)
+        next.options = CleanupOptions(fillers: false, corrections: true, lists: false, polish: true)
         next.route = .cloud; next.learningEnabled = false; next.learningRequiresReadableField = true; next.historyMode = .off; next.updateChecksEnabled = false
         next.save(to: defaults)
         check(ProcessingSettings.load(from: defaults) == next, "settings round-trip")

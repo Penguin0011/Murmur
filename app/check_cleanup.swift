@@ -168,6 +168,15 @@ struct EchoAsyncCleaner: AsyncCleaner {
         }
         print("Adversarial outputs rejected by guard: \(adversarial.count - accepted.count)/\(adversarial.count) (wrongly accepted: \(accepted.count))")
 
+        // Polish keeps rejecting answers, injected text and fact changes; it may accept small drift.
+        var polishAccepted: [String] = []
+        for a in adversarial where a.options.anyEnabled {
+            var o = a.options; o.polish = true
+            if case .pass = CleanupGuard.check(raw: a.raw, cleaned: a.output, options: o) { polishAccepted.append(a.label) }
+        }
+        print("Adversarial outputs rejected in polish: \(adversarial.filter { $0.options.anyEnabled }.count - polishAccepted.count)/\(adversarial.filter { $0.options.anyEnabled }.count); accepted: \(polishAccepted)")
+        if !polishAccepted.isEmpty { failures.append("\(polishAccepted.count) adversarial outputs accepted in polish") }
+
         // Punctuation transfer (the fallback for rejected cleanups): always exactly the transcript's
         // words, and always passes a punctuation-only guard, whatever the cleaner returned.
         let punctuationOnly = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
@@ -280,6 +289,38 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "so it doesn spread so we can eat it", cleaned: "So it spread, so we can't eat it.", options: .standard) != .pass, "truncated negation cannot move")
         expect(CleanupGuard.check(raw: "we couldn go", cleaned: "We couldn't go.", options: .standard) == .pass, "truncated contraction keeps its auxiliary")
         expect(CleanupGuard.check(raw: "we couldn go", cleaned: "We shouldn't go.", options: .standard) != .pass, "completion cannot change the auxiliary")
+        // Polish accepts filler removal without commas, false starts and small grammar fixes from
+        // real dictations, where strict holds them; it still refuses fact and meaning changes.
+        let polish = CleanupOptions(fillers: true, corrections: true, lists: true, punctuation: true, polish: true)
+        for (raw, out, label) in [
+            ("so what's happening right now is every like give or take twenty seconds of audio is chunked", "So what's happening right now is every give or take twenty seconds of audio is chunked.", "unpunctuated filler like"),
+            ("it's awesome yeah it really is and it's so good yeah that's just great", "It's awesome, it really is, and it's so good. That's just great.", "yeah removed"),
+            ("I wouldn't have thought to focus on that focus on the media's role on my own", "I wouldn't have thought to focus on the media's role on my own.", "restated false start"),
+            ("so that the user sees their transcription must faster than before", "So that the user sees their transcription much faster than before.", "misheard word"),
+            ("the more you get out of the open the more scarier it is for everyone", "The more you get out of the open, the scarier it is for everyone.", "dropped grammar word"),
+            ("me and him goes to the store every single morning", "Me and him go to the store every single morning.", "verb agreement"),
+            ("we need go to the office before the meeting starts", "We need to go to the office before the meeting starts.", "missing to"),
+        ] {
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: polish) == .pass, "polish accepts: \(label)")
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: .standard) != .pass, "strict refuses: \(label)")
+        }
+        for (raw, out, label) in [
+            ("we could leave at noon if the rain stops by then", "We should leave at noon if the rain stops by then.", "modal swap"),
+            ("he said the report was done before lunch today", "She said the report was done before lunch today.", "person swap"),
+            ("we should accept the revised offer from the team today", "We should decline the revised offer from the team today.", "antonym"),
+            ("the migration was almost finished before the outage", "The migration was finished before the outage.", "dropped qualifier"),
+            ("make sure the build passes before you merge it", "Sure, make sure the build passes before you merge it.", "answer prefix"),
+            ("please send the quarterly report to the whole team", "Please send the quarterly report to the whole team. I hope this helps you all.", "appended sentence"),
+            ("every like give or take twenty seconds of audio", "Every give or take twenty seconds of audio.", "filler removal needs the fillers option"),
+        ] {
+            var o = polish
+            if label.hasPrefix("filler removal") { o.fillers = false }
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "polish refuses: \(label)")
+        }
+        // Polish asks for these edits; strict's prompt is unchanged.
+        let polishPrompt = CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system
+        expect(polishPrompt.contains("false starts") && polishPrompt.contains("grammar slips") && !polishPrompt.contains("respell words"), "polish prompt")
+        expect(!CleanupPrompt.build(transcript: "x", options: .standard, nonce: "n").system.contains("false starts"), "strict prompt unchanged")
         // Punctuation transfer: the model's punctuation on the transcript's words.
         expect(CleanupPipeline.punctuated(raw: "every like give or take twenty seconds okay", cleaned: "Every give or take twenty seconds. Okay?") == "Every like give or take twenty seconds. Okay?", "transfer keeps a dropped filler")
         expect(CleanupPipeline.punctuated(raw: "Last model I mean last agent left", cleaned: "Last agent left.") == "Last model I mean last agent left.", "transfer recapitalizes after a dropped reparandum")
