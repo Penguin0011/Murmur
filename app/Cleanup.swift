@@ -481,8 +481,16 @@ enum CleanupGuard {
                     let repair = (wi + cue.count)..<min(tokenOfWord.count, wi + cue.count + 4)
                     // Interregnum words, including "know" misheard for "no" ("wait I know I meant"), do not count.
                     func interregnum(_ w: String) -> Bool { ["wait", "no", "know", "oh", "ah", "sorry", "actually"].contains(w) || CleanupText.hesitations.contains(w) }
+                    // Restated means the same word, an inflection of it, or the same kind of word
+                    // ("Friday" -> "Monday"); never a merely similar spelling ("mad" / "said").
+                    func restates(_ x: String, _ y: String) -> Bool {
+                        let kinds = [RuleCleaner.weekdays, RuleCleaner.months.union(["may"]), RuleCleaner.relativeTimes, RuleCleaner.colors]
+                        return x == y || zip(x, y).prefix { $0 == $1 }.count >= 4
+                            || kinds.contains { $0.contains(x) && $0.contains(y) }
+                            || (CleanupText.numberValue(x) != nil && CleanupText.numberValue(y) != nil)
+                    }
                     func recurs(_ w: String) -> Bool {
-                        grammarWords.contains(w) || repair.contains { CleanupText.similarity(w, tokens[tokenOfWord[$0]].lower) >= 0.5 }
+                        grammarWords.contains(w) || repair.contains { restates(w, tokens[tokenOfWord[$0]].lower) }
                     }
                     limit = 0
                     var reach = 8, restated = false
@@ -497,8 +505,8 @@ enum CleanupGuard {
                     // keeps "I was".
                     func word(_ x: Int) -> String { tokens[tokenOfWord[x]].lower }
                     let content = ((wi - limit)..<wi).filter { !grammarWords.contains(word($0)) && !interregnum(word($0)) }
-                    if let e = content.first(where: { x in repair.contains { CleanupText.similarity(word(x), word($0)) >= 0.5 } }),
-                       let r = repair.first(where: { p in content.contains { CleanupText.similarity(word($0), word(p)) >= 0.5 } }) {
+                    if let e = content.first(where: { x in repair.contains { restates(word(x), word($0)) } }),
+                       let r = repair.first(where: { p in content.contains { restates(word($0), word(p)) } }) {
                         limit = wi - max(wi - limit, e - (r - repair.lowerBound))
                     }
                     // Without a restated content word it is not a correction ("I did not say that I meant
@@ -694,6 +702,8 @@ enum CleanupGuard {
             // a lone date ordinal ("May first") beside a spoken list.
             if let n = CleanupText.ordinals[w] {
                 if !options.professional { return true }
+                // A date's day ("May first", "June second") is never a list marker.
+                if i > 0, RuleCleaner.months.union(["may"]).contains(a[i - 1]) { return false }
                 let others = a.compactMap { CleanupText.ordinals[$0] }
                 return others.contains(n + 1) || others.contains(n - 1)
             }
@@ -951,6 +961,8 @@ enum CleanupGuard {
                 let tenses: [Set<String>] = [["was", "were", "had", "did"], ["is", "are", "am", "has", "have", "do", "does"], ["will", "shall"]]
                 if let tense = tenses.firstIndex(where: { $0.contains(a[i]) }),
                    polishInserted.contains(where: { j in gap(j).contains(i) && tenses.firstIndex { $0.contains(b[j]) }.map { $0 != tense } == true }) { return .fail(.unexplainedDeletion) }
+                // Particles carry meaning ("turn it up", "take it off"); they are never dropped.
+                if ["up", "off", "out", "more", "most", "down", "over", "back", "away", "too", "very"].contains(a[i]) { return .fail(.unexplainedDeletion) }
                 // Informal forms the rewrite spells out ("gotta" -> "have to").
                 if droppableGrammarWords.contains(a[i]) || ["gotta", "wanna", "kinda", "sorta"].contains(a[i]) || pronounOne(i) { continue }
                 // A sentence-opening interjection ("hey do you know" -> "Do you know").

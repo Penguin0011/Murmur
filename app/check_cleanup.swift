@@ -431,6 +431,14 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Alice works for Bob", "Alice works with Bob.", "relationship swap"),
             ("Meet May first and item one milk item two eggs", "Meet May:\n1. Milk\n2. Eggs", "date ordinal dropped"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Tenth review: exact recurrence, date ordinals, particles.
+        expect(CleanupGuard.applyCommaFreeCorrections("I was mad actually I meant what I said") == "I was mad actually I meant what I said", "similar spelling is not a restatement")
+        for (raw, out, label) in [
+            ("I was mad actually I meant what I said", "What I said.", "dropped assertion"),
+            ("Meet May first and June second", "Meet:\n1. May\n2. June", "date ordinals as a list"),
+            ("Turn it up", "Turn it.", "dropped up"),
+            ("Take it off", "Take it.", "dropped off"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),
