@@ -571,6 +571,15 @@ struct SettingsView: View {
 
     private var cleanup: some View {
         VStack(alignment: .leading, spacing: 0) {
+            eyebrow("Cleanup style").padding(.top, 20)
+            segmented([(false, "Strict"), (true, "Polish")], controller.cleanupChoice == .localRules ? .constant(false) : $controller.cleanupPolish, size: 14).padding(.top, 8)
+                .disabled(controller.cleanupChoice == .localRules)
+            help(controller.cleanupChoice == .localRules
+                 ? "On this Mac uses Strict rules. Choose a model cleanup route to use Polish."
+                 : controller.cleanupPolish
+                 ? "Polish also removes fillers such as “yeah” and “you know” without commas, drops false starts, and fixes small grammar slips and misheard words. It can occasionally change a word's meaning; names, numbers and “not” are still never changed."
+                 : "Strict makes only the edits below and never changes your wording otherwise. If cleanup goes further, Murmur inserts your own words with its punctuation.")
+                .padding(.top, 8)
             rule.padding(.top, 20)
             toggleRow("Remove filler words", "Takes out “um”, “uh” and similar.", isOn: $controller.cleanupFillers)
             toggleRow("Apply spoken corrections", "“Friday, no wait, Monday” becomes “Monday”.", isOn: $controller.cleanupCorrections)
@@ -1189,6 +1198,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupCorrections) { controller.settingsChanged() }
             .onChange(of: controller.cleanupLists) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPunctuation) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupPolish) { controller.settingsChanged() }
             .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
             .onChange(of: controller.learningRequiresReadableField) { controller.settingsChanged() }
             .onChange(of: controller.transcriptionRoute) { controller.settingsChanged() }

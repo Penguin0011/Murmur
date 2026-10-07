@@ -265,6 +265,8 @@ final class PreStart: @unchecked Sendable {
     @Published var cleanupCorrections: Bool
     @Published var cleanupLists: Bool
     @Published var cleanupPunctuation: Bool
+    /// Polish instead of strict cleanup (`CleanupOptions.polish`).
+    @Published var cleanupPolish: Bool
     @Published var learningEnabled: Bool
     @Published var learningRequiresReadableField: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
@@ -431,6 +433,7 @@ final class PreStart: @unchecked Sendable {
         cleanupCorrections = processingSettings.options.corrections
         cleanupLists = processingSettings.options.lists
         cleanupPunctuation = processingSettings.options.punctuation
+        cleanupPolish = processingSettings.options.polish
         learningEnabled = processingSettings.learningEnabled
         learningRequiresReadableField = processingSettings.learningRequiresReadableField
         historyMode = processingSettings.historyMode
@@ -617,7 +620,7 @@ final class PreStart: @unchecked Sendable {
                 stopWatching()
             }
             var next = processing.settings
-            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation)
+            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation, polish: cleanupPolish)
             next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
             next.learningRequiresReadableField = learningRequiresReadableField
             next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled

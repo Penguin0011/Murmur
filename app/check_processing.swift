@@ -79,9 +79,10 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
     static func settingsChecks(_ defaults: UserDefaults) throws {
         let fresh = ProcessingSettings.load(from: defaults)
         check(fresh == ProcessingSettings(), "missing keys load approved defaults")
+        check(!fresh.options.polish, "strict cleanup by default")
         check(fresh.options == .standard && fresh.route == .local && fresh.learningEnabled && fresh.historyMode == .on && fresh.updateChecksEnabled, "defaults: all comforts on, local, learning on")
         var next = ProcessingSettings()
-        next.options = CleanupOptions(fillers: false, corrections: true, lists: false)
+        next.options = CleanupOptions(fillers: false, corrections: true, lists: false, polish: true)
         next.route = .cloud; next.learningEnabled = false; next.learningRequiresReadableField = true; next.historyMode = .off; next.updateChecksEnabled = false
         next.save(to: defaults)
         check(ProcessingSettings.load(from: defaults) == next, "settings round-trip")
@@ -263,6 +264,9 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         p.localCleaner = RuleCleaner()
         await expect(p, "Um, call acme.", .insert("Call Akme."), "async local route")
         check(idle.messages.isEmpty, "local route never calls the provider")
+        settings.options.polish = true
+        try p.update(settings)
+        await expect(p, "it's awesome yeah it really is", .insert("It's awesome yeah it really is"), "local Polish uses strict rules")
     }
 
     /// Punctuation: local capitals only; the guard allows an added "?" only with the option on; old saved options decode with it off.
