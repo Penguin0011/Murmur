@@ -70,6 +70,18 @@ func sessionCheck() throws {
     RunLoop.main.run(until: Date().addingTimeInterval(0.2))
     assert(stopped == 2 && processed == [captures[0], captures[1]] && b2bListener.queued.isEmpty)
     finishProcessing.removeFirst()(); assert(b2b.state == .idle && b2bListener.machine.state == .idle)
+    // An early capture counts toward the recording limit from its own start, not from adoption.
+    var limitDone: [() -> Void] = []
+    let limited = CaptureSession(store: store, start: { _ in }, stop: { true }, process: { _, done in limitDone.append(done) })
+    limited.releaseTail = 0
+    let t0 = Date()
+    limited.now = { t0 }
+    limited.receive(.start) {}; limited.receive(.finish) {}
+    assert(limited.state == .processing && limited.startEarly())
+    limited.now = { t0.addingTimeInterval(CaptureSession.recordingLimit - 10) }
+    limitDone.removeFirst()(); limited.receive(.start) {}
+    assert(limited.state == .listening && abs((limited.timer?.fireDate.timeIntervalSinceNow ?? 0) - 10) < 1, "early capture keeps only the remaining time")
+    limited.shutdown()
     // Escape while #2 is queued deletes only #2; #1 still completes and nothing replays.
     b2bListener.receive(type: .flagsChanged, event: fnEvent(true, 20)); b2bListener.receive(type: .flagsChanged, event: fnEvent(false, 21))
     RunLoop.main.run(until: Date().addingTimeInterval(0.2))
@@ -107,7 +119,7 @@ func sessionCheck() throws {
     var cappedQueued = 0
     cappedListener.onQueuedPress = { cappedQueued += 1; return capped2.startEarly() }
     cappedListener.receive(type: .flagsChanged, event: fnEvent(true, 40)); cappedListener.receive(type: .flagsChanged, event: fnEvent(false, 40.1))
-    cappedListener.emit(cappedListener.machine.finish())      // the 120 s cap, not the user
+    cappedListener.emit(cappedListener.machine.finish())      // the recording limit, not the user
     cappedListener.receive(type: .flagsChanged, event: fnEvent(true, 45)); cappedListener.receive(type: .flagsChanged, event: fnEvent(false, 45.1))
     assert(cappedQueued == 0 && capped2.early == nil && cappedListener.queued.isEmpty && cappedListener.machine.state == .processing)
     try? FileManager.default.removeItem(at: capped2.audio!)

@@ -10,6 +10,9 @@ final class CaptureSession {
     let stopCapture: () -> Bool
     let process: (URL, @escaping () -> Void) -> Void
     var timer: Timer?
+    /// A dictation finishes and is processed after five minutes, so one left on by accident stops
+    /// (user decision, October 6, 2026).
+    static let recordingLimit: TimeInterval = 300
     var finishRecording: (() -> Void)?
     var resetShortcut: (() -> Void)?
     /// Capture keeps running this long after release so the last word, still in the input
@@ -18,6 +21,9 @@ final class CaptureSession {
     private var pendingTail: (() -> Void)?
     /// Capture started by a press during processing; the next .start adopts it.
     private(set) var early: URL?
+    private var earlyStarted: Date?
+    /// The clock for the recording limit; checks substitute a fixed one.
+    var now: () -> Date = Date.init
     var resumeCapture: (() -> Void)?
     /// Returns a capture started before the main thread handled the press, for .start to adopt.
     var takePrestarted: (() -> URL?)?
@@ -31,18 +37,21 @@ final class CaptureSession {
         case .start:
             guard state == .idle else { return }
             if let url = early ?? takePrestarted?() {
-                // ponytail: the 120 s cap restarts at adoption, not at the early press.
-                early = nil; audio = url; state = .listening
-                timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in self?.finishRecording?() }
-                resumeCapture?(); print("capture=listening adopted limit=120s")
+                // A capture started while the last dictation processed counts from its own start,
+                // so it never records past the limit. A tap-thread prestart is milliseconds early.
+                let elapsed = early == nil ? 0 : earlyStarted.map { now().timeIntervalSince($0) } ?? 0
+                let remaining = max(0, Self.recordingLimit - elapsed)
+                early = nil; earlyStarted = nil; audio = url; state = .listening
+                timer = Timer.scheduledTimer(withTimeInterval: remaining, repeats: false) { [weak self] _ in self?.finishRecording?() }
+                resumeCapture?(); print("capture=listening adopted limit=\(Int(remaining))s")
                 return
             }
             do {
                 let url = try store.create(); audio = url
                 try startCapture(url)
                 state = .listening
-                timer = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in self?.finishRecording?() }
-                print("capture=listening limit=120s")
+                timer = Timer.scheduledTimer(withTimeInterval: Self.recordingLimit, repeats: false) { [weak self] _ in self?.finishRecording?() }
+                print("capture=listening limit=\(Int(Self.recordingLimit))s")
             } catch {
                 discard(); resetShortcut?(); completed()
                 fputs("capture=start-failed; audio deleted\n", stderr)
@@ -77,12 +86,12 @@ final class CaptureSession {
         guard state == .processing, early == nil else { return false }
         runTail()
         guard let url = try? store.create() else { return false }
-        do { try startCapture(url); early = url; print("capture=listening early"); return true }
+        do { try startCapture(url); early = url; earlyStarted = now(); print("capture=listening early"); return true }
         catch { try? store.delete(url); return false }
     }
     func cancelEarly() {
         guard let url = early else { return }
-        early = nil; _ = stopCapture(); try? store.delete(url); print("capture=early-canceled audio=deleted")
+        early = nil; earlyStarted = nil; _ = stopCapture(); try? store.delete(url); print("capture=early-canceled audio=deleted")
     }
     func discard() {
         timer?.invalidate(); timer = nil

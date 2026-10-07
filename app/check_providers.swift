@@ -684,7 +684,7 @@ extension ProviderChecks {
         guard let request = try? OpenAICompatibleCleanupProvider.makeRequest(messages: messages, endpoint: ollama.chatCompletionsURL, model: ollama.model, apiKey: nil) else { check(false, "local request builds"); return }
         check(request.httpMethod == "POST" && request.value(forHTTPHeaderField: "Authorization") == nil, "no Authorization header without a key")
         let body = json(request.httpBody)
-        check(body["model"] as? String == "llama3.2:latest" && body["stream"] as? Bool == false && (body["temperature"] as? Double) == 0 && body["max_tokens"] as? Int == 4096, "local body: model, non-streaming, temperature 0, max_tokens")
+        check(body["model"] as? String == "llama3.2:latest" && body["stream"] as? Bool == false && (body["temperature"] as? Double) == 0 && body["max_tokens"] as? Int == 8192, "local body: model, non-streaming, temperature 0, max_tokens")
         check((body["messages"] as? [[String: Any]])?.map { "\($0["role"]!)" } == ["system", "user"] && body["provider"] == nil, "system+user, no OpenRouter routing")
         let keyed = try? OpenAICompatibleCleanupProvider.makeRequest(messages: messages, endpoint: ollama.chatCompletionsURL, model: "m", apiKey: key)
         check(keyed?.value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "optional key sent as bearer")
