@@ -364,15 +364,16 @@ enum CloudTranscription {
         }
         if Task.isCancelled { return .cancelled }
         do {
-            let text: String
+            let rawText: String
             var suspected = false
             if let llm = provider as? LLMTranscriber {
                 let result = try await llm.transcribeChecked(prepared.payload)
-                text = result.text; suspected = result.answerSuspected
+                rawText = result.text; suspected = result.answerSuspected
             } else {
-                text = try await provider.transcribe(prepared.payload)
+                rawText = try await provider.transcribe(prepared.payload)
             }
             if Task.isCancelled { return .cancelled }
+            let text = stripHintEcho(rawText, vocabulary: vocabulary)
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .noSpeech(skipped: false) }
             return suspected ? .heldAnswerSuspected(text) : .transcript(text)
         } catch let error as ProviderError {
@@ -382,6 +383,29 @@ enum CloudTranscription {
             if Task.isCancelled { return .cancelled }
             return .failed(message: unknownFailure, keepAudio: true)
         }
+    }
+
+    /// Whisper-style models echo their prompt (the dictionary spellings) when they hear nothing or
+    /// trail off into silence. A transcript made only of hint terms is no speech; a trailing run of
+    /// hint terms is dropped when it is two or more terms or its own sentence ("... three. Aakash.").
+    /// A single term ending a sentence ("Thanks, Aakash.") is kept.
+    static func stripHintEcho(_ text: String, vocabulary: [String]) -> String {
+        let terms = Set(vocabulary.map { TermText.tokens($0).map(\.folded) }.filter { !$0.isEmpty })
+        guard !terms.isEmpty else { return text }
+        let chars = Array(text), tokens = TermText.tokens(chars)
+        let lengths = Set(terms.map(\.count)).sorted(by: >)
+        var cut = tokens.count, matched = 0
+        while let n = lengths.first(where: { $0 <= cut && terms.contains(tokens[(cut - $0)..<cut].map(\.folded)) }) {
+            cut -= n; matched += 1
+        }
+        guard matched > 0 else { return text }
+        if cut == 0 { return "" }
+        let start = tokens[cut].start
+        let before = chars[..<start].reversed().first { !$0.isWhitespace }
+        guard matched >= 2 || before.map({ ".!?".contains($0) }) == true else { return text }
+        var kept = String(chars[..<start])
+        while let last = kept.last, last.isWhitespace || last == "," || last == ";" { kept.removeLast() }
+        return kept
     }
 
     /// Text for the Error phase.
