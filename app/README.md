@@ -32,6 +32,8 @@ swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observa
 /tmp/dictation-controller-check
 ```
 
+**Verified on macOS, October 6, 2026** (Command Line Tools, macOS 26 SDK): every check passes: launch; history; cleanup (0/237 guard false rejects, 2349/2349 adversarial outputs rejected, 2685/2685 punctuation transfers keep the transcript's words); processing 126; dictionary 177; providers 632 assertions; updates 91 assertions; model download 158; app services; routes 119; boost filter 18; native controller. Counts in dated records below are as of their dates. [Certain]
+
 ## Processing: dictionary, cleanup and recovery
 
 `Processing.swift` is Foundation-only and is compiled into the app. `ProcessingCoordinator` runs after transcription, on the main thread:

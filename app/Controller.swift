@@ -1389,8 +1389,8 @@ final class PreStart: @unchecked Sendable {
         if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: modelDownloadInFlight) { modelMessage = refusal; return }
         modelDownloadInFlight = true; modelMessage = ""
         modelStatus = .downloading(ModelDownloadProgress(bytesDone: 0, totalBytes: downloader.downloadSize))
-        downloader.start { result in
-            DispatchQueue.main.async { [weak self] in
+        downloader.start { [weak self] result in
+            DispatchQueue.main.async {
                 guard let self else { return }
                 self.modelDownloadInFlight = false
                 self.modelStatus = downloader.status()
@@ -1427,8 +1427,8 @@ final class PreStart: @unchecked Sendable {
         if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: dictionaryDownloadInFlight) { dictionaryModelMessage = refusal; return }
         dictionaryDownloadInFlight = true; dictionaryModelMessage = ""; dictionarySupportFailed = false
         dictionaryModelStatus = .downloading(ModelDownloadProgress(bytesDone: 0, totalBytes: dictionaryDownloader.downloadSize))
-        dictionaryDownloader.start { result in
-            DispatchQueue.main.async { [weak self] in
+        dictionaryDownloader.start { [weak self] result in
+            DispatchQueue.main.async {
                 guard let self else { return }
                 self.dictionaryDownloadInFlight = false
                 self.dictionaryModelStatus = dictionaryDownloader.status()
