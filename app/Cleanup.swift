@@ -749,7 +749,14 @@ enum CleanupGuard {
             }
             // Professional may reorder locally ("me and John was" -> "John and I were"): a moved word consumes its
             // raw copy within one kept word of its gap, so objects cannot trade clauses ("likes cats ... likes dogs").
-            if options.professional, let i = nearGap(j).first(where: { !consumedRaw.contains($0) && a[$0] == w.lower }) {
+            // Only coordination reorders: the word sits next to "and"/"or" on either side, so a verb or modal
+            // never moves ("should I accept" -> "I should accept", "I sent my manager" -> "my manager sent me").
+            func coordinated(_ i: Int) -> Bool {
+                let joins: Set<String> = ["and", "or"]
+                return joins.contains(a[i]) || (i > 0 && joins.contains(a[i - 1])) || (i + 1 < a.count && joins.contains(a[i + 1]))
+                    || (j > 0 && joins.contains(b[j - 1])) || (j + 1 < b.count && joins.contains(b[j + 1]))
+            }
+            if options.professional, let i = nearGap(j).first(where: { !consumedRaw.contains($0) && a[$0] == w.lower && coordinated($0) }) {
                 consumedRaw.insert(i); continue
             }
             if options.polish { polishInserted.append(j); continue }
@@ -907,7 +914,8 @@ enum CleanupGuard {
                     if outWords.indices.contains(where: { !matchedOut.contains($0) && person.contains(outWords[$0].lower) }) { continue }
                     return .fail(.unexplainedDeletion)
                 }
-                guard let r = replacements.firstIndex(where: { polishSwap(a[i], $0) }) else { return .fail(.unexplainedDeletion) }
+                // The same word elsewhere is a move, not a replacement, and moves are limited above.
+                guard let r = replacements.firstIndex(where: { $0 != a[i] && polishSwap(a[i], $0) }) else { return .fail(.unexplainedDeletion) }
                 replacements.remove(at: r)
             }
             return dropped > max(4, a.count / 4) ? .fail(.unexplainedDeletion) : .pass

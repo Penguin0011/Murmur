@@ -395,11 +395,14 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.applyCommaFreeCorrections(serious) == serious, "declarative actually I meant kept")
         expect(CleanupGuard.check(raw: serious, cleaned: "Every word when I said I was serious.", options: professional) != .pass, "professional refuses a dropped assertion")
         expect(CleanupGuard.check(raw: "Alice likes cats and Bob likes dogs", cleaned: "Alice likes dogs and Bob likes cats.", options: professional) != .pass, "professional refuses swapped objects")
+        // Fifth review: only coordination reorders.
+        expect(CleanupGuard.check(raw: "should I accept the offer", cleaned: "I should accept the offer.", options: professional) != .pass, "professional refuses a question turned into a statement")
+        expect(CleanupGuard.check(raw: "Yesterday I sent my manager the report", cleaned: "Yesterday my manager sent me the report.", options: professional) != .pass, "professional refuses reversed roles")
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),
             ("basically the client don't like the new logo so we gotta redo it by Thursday you know and I don't think we should charge them for it", "The client doesn't like the new logo, so we have to redo it by Thursday. I don't think we should charge them for it."),
-            ("can you send me the report by 5 I mean the quarterly one not the monthly one", "Can you send me the quarterly report by 5, not the monthly one?"),
+            ("can you send me the report by 5 I mean the quarterly one not the monthly one", "Can you send me the report by 5, the quarterly one, not the monthly one?"),
             (broken, "John and I were going to buy 42 apples, but he doesn't want to go; he is not going to do that. Instead, we need to buy:\n1. Milk\n2. Eggs\n3. Bread"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) == .pass, "professional accepts live output: \(out.prefix(30))") }
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
