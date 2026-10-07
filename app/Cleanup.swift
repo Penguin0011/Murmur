@@ -397,14 +397,15 @@ enum CleanupGuard {
     }
 
     /// Cues professional accepts without a comma: unambiguous, unlike "sorry", "no" or "I mean".
-    static let looseCorrectionCues: [[String]] = [["no", "wait"], ["wait", "no"], ["i", "meant"], ["or", "rather"], ["scratch", "that"]]
+    /// "I mean" only before a determiner ("by 5 I mean the quarterly one"), never "I mean business".
+    static let looseCorrectionCues: [[String]] = [["no", "wait"], ["wait", "no"], ["i", "meant"], ["or", "rather"], ["scratch", "that"], ["i", "mean"]]
 
     /// Raw word indices that a spoken correction could legitimately delete: the cue itself plus up
     /// to eight preceding words in the same sentence (whole sentence for "scratch that"). With
     /// `loose`, a `looseCorrectionCues` cue needs no comma, but then covers only the preceding words
     /// whose content words all recur in the next eight words ("we are not going, wait no I meant he
     /// is not going"), so it never frees an unrelated name, number or negation.
-    static func correctionWindow(_ raw: String, loose: Bool = false) -> Set<Int> {
+    static func correctionWindow(_ raw: String, loose: Bool = false, commaFreeOnly: Bool = false) -> Set<Int> {
         let tokens = CleanupText.tokenize(raw.replacingOccurrences(of: "\u{2019}", with: "'"))
         var wordIndexOfToken: [Int: Int] = [:]
         var tokenOfWord: [Int] = []
@@ -421,6 +422,10 @@ enum CleanupGuard {
                 let scratch = cue == ["scratch", "that"]
                 let commaFree = !(tokens[p].isComma || tokens[p].isDash || (scratch && tokens[p].isTerminal))
                 guard !commaFree || (loose && looseCorrectionCues.contains(cue) && tokens[p].kind == .word) else { continue }
+                if commaFreeOnly && !commaFree { continue }
+                if commaFree && cue == ["i", "mean"] {
+                    guard wi + 2 < tokenOfWord.count, ["the", "a", "an", "this", "that"].contains(tokens[tokenOfWord[wi + 2]].lower) else { continue }
+                }
                 // A repair must follow the cue before the sentence ends.
                 let lastCueToken = tokenOfWord[wi + cue.count - 1]
                 var j = lastCueToken + 1
@@ -457,11 +462,17 @@ enum CleanupGuard {
                         grammarWords.contains(w) || repair.contains { CleanupText.similarity(w, tokens[tokenOfWord[$0]].lower) >= 0.5 }
                     }
                     limit = 0
-                    var reach = 8
+                    var reach = 8, restated = false
                     while limit < reach, wi - 1 - limit >= 0 {
                         let w = tokens[tokenOfWord[wi - 1 - limit]].lower
-                        if interregnum(w) { reach += 1 } else if !recurs(w) { break }
+                        if interregnum(w) { reach += 1 } else if !recurs(w) { break } else if !grammarWords.contains(w) { restated = true }
                         limit += 1
+                    }
+                    // Without a restated content word it is not a correction ("I did not say that I meant
+                    // it"), except "I mean the ..." clarifying, where only the cue goes.
+                    if cue == ["i", "mean"] { limit = 0 } else if !restated {
+                        for k in 0..<cue.count { window.remove(wi + k) }
+                        continue
                     }
                 }
                 var k = wi - 1
@@ -477,6 +488,20 @@ enum CleanupGuard {
             }
         }
         return window
+    }
+
+    /// Professional applies comma-free corrections before the model sees the text: the model alone
+    /// often kept both versions or deleted an earlier clause. Removes only what `check` would allow.
+    static func applyCommaFreeCorrections(_ text: String) -> String {
+        let window = correctionWindow(text, loose: true, commaFreeOnly: true)
+        guard !window.isEmpty else { return text }
+        var t = CleanupText.tokenize(text.replacingOccurrences(of: "\u{2019}", with: "'")), word = -1
+        t.removeAll { tok in
+            guard tok.kind == .word else { return false }
+            word += 1
+            return window.contains(word)
+        }
+        return CleanupText.render(CleanupText.normalize(t))
     }
 
     /// LCS alignment over lowercased words; returns matched raw and cleaned indices.
@@ -526,6 +551,7 @@ enum CleanupGuard {
         // No new symbols or emphasis: only list/sentence punctuation may increase.
         var mayIncrease: Set<Character> = [".", ",", ":", "'", "\u{2019}", "-", "\n", " "]
         if options.punctuation { mayIncrease.insert("?") }
+        if options.professional { mayIncrease.insert(";") }
         var rawChars: [Character: Int] = [:], outChars: [Character: Int] = [:]
         for c in raw where !c.isLetter && !c.isNumber { rawChars[c, default: 0] += 1 }
         for c in cleaned where !c.isLetter && !c.isNumber { outChars[c, default: 0] += 1 }
@@ -641,12 +667,17 @@ enum CleanupGuard {
             return false
         }
 
+        // Professional: "one" as a pronoun ("the quarterly one not the monthly one") may go.
+        func pronounOne(_ i: Int) -> Bool {
+            options.professional && a[i] == "one" && i > 0 && !["item", "number", "step"].contains(a[i - 1])
+                && (i + 1 == a.count || grammarWords.contains(a[i + 1]) || CleanupText.isNegation(a[i + 1]))
+        }
         // Numbers: nothing new; drops only inside a correction or as a list marker.
         var rawNumbers: [String: Int] = [:], outNumbers: [String: Int] = [:], allowedNumberDrops: [String: Int] = [:]
         for (i, w) in rawWords.enumerated() {
             guard let v = CleanupText.numberValue(w.lower) else { continue }
             rawNumbers[v, default: 0] += 1
-            if dropAllowed(i) || (isMarkerWord(i) && markerValues.contains(v) && !matchedRaw.contains(i)) { allowedNumberDrops[v, default: 0] += 1 }
+            if pronounOne(i) || dropAllowed(i) || (isMarkerWord(i) && markerValues.contains(v) && !matchedRaw.contains(i)) { allowedNumberDrops[v, default: 0] += 1 }
         }
         for w in outWords { if let v = CleanupText.numberValue(w.lower) { outNumbers[v, default: 0] += 1 } }
         for (v, c) in outNumbers where c > rawNumbers[v, default: 0] { return .fail(.numberAdded) }
@@ -733,7 +764,8 @@ enum CleanupGuard {
             func pair(_ x: Int) -> Bool {
                 guard x >= 0, x + 2 < a.count, polishFillerPairs.contains([a[x], a[x + 1]]) else { return false }
                 // Professional: also at a sentence start or after another filler ("yeah you know me and John").
-                if options.professional && (rawWords[x].sentenceStart || (x > 0 && polishFillers.contains(a[x - 1]))) { return true }
+                if options.professional && (rawWords[x].sentenceStart || (x > 0 && polishFillers.contains(a[x - 1]))
+                    || ["and", "but", "so"].contains(a[x + 2])) { return true }
                 // Without punctuation, only a following personal subject clearly starts a new thought.
                 return ["i", "we", "you", "he", "she", "they", "it's", "we're", "you're", "they're"].contains(a[x + 2])
             }
@@ -811,7 +843,10 @@ enum CleanupGuard {
                 if rawWords[i].isName { return .fail(.nameDropped) }
                 if filler(i) { if options.fillers { continue } else { return .fail(.unexplainedDeletion) } }
                 dropped += 1
-                if droppableGrammarWords.contains(a[i]) { continue }
+                // Informal forms the rewrite spells out ("gotta" -> "have to").
+                if droppableGrammarWords.contains(a[i]) || ["gotta", "wanna", "kinda", "sorta"].contains(a[i]) || pronounOne(i) { continue }
+                // A join dropped where the rewrite ends a sentence ("by Thursday, and I" -> "by Thursday. I").
+                if ["and", "so", "but"].contains(a[i]), let k = pairedRaw.lastIndex(where: { $0 < i }), outWords[pairedOut[k]].endAfter { continue }
                 if let person = persons.first(where: { $0.contains(a[i]) }) {
                     if outWords.indices.contains(where: { !matchedOut.contains($0) && person.contains(outWords[$0].lower) }) { continue }
                     return .fail(.unexplainedDeletion)
@@ -840,6 +875,7 @@ enum CleanupPrompt {
     /// transcript, since cloud providers receive them.
     static func build(transcript: String, options: CleanupOptions, dictionaryTerms: [String] = [], nonce: String = UUID().uuidString) -> CleanupMessages {
         let tag = "transcript-\(nonce.filter { $0.isLetter || $0.isNumber })"
+        let transcript = options.professional && options.corrections ? CleanupGuard.applyCommaFreeCorrections(transcript) : transcript
         var ops: [String] = []
         if options.fillers && options.professional {
             ops.append("- Remove filler words, verbal tics and hedges that add nothing (um, uh, like, you know, I mean, yeah, so, basically), with or without commas around them. Keep them where they carry meaning (\"I like it\", \"you know the answer\").")
@@ -849,7 +885,7 @@ enum CleanupPrompt {
             ops.append("- Remove hesitation fillers (um, uh, er) and filler uses of \"like\" or \"you know\" set off by commas. Keep \"like\", \"so\", and \"well\" whenever they carry meaning (\"I like it\", \"looks like rain\", \"so that\").")
         }
         if options.corrections && options.professional {
-            ops.append("- Apply spoken self-corrections, with or without a cue (\"wait no I meant\", \"actually\"): delete the cue and only the phrase just before it that the correction restates, and keep only the corrected version. Never keep both versions, and keep everything said before the restated phrase: \"I'll send it Monday so we can meet Tuesday wait no I meant we can meet Thursday\" becomes \"I'll send it Monday, so we can meet Thursday.\" Remove false starts and abandoned phrases.")
+            ops.append("- Apply spoken self-corrections, with or without a cue (\"wait no I meant\", \"actually\"): delete the cue and the shortest stretch right before it that the repair restates (usually one phrase or clause, said again with mostly the same words). Keep everything earlier, even if it shares a word with the repair, and never keep both versions. Check before deleting: every deleted word's meaning must come back in the repair; a clause the repair does not say again (a different verb or fact) stays. \"he can't come so we won't go wait no I meant he won't go\" becomes \"He can't come, so he won't go.\" \"we could ship it on Friday actually no on Monday\" becomes \"We could ship it on Monday.\" Remove false starts and abandoned phrases.")
         } else if options.corrections && options.polish {
             ops.append("- Apply spoken self-corrections, and remove false starts: words the speaker abandons and then restates (\"we need to, we have to go\" becomes \"we have to go\"). Keep the speaker's final wording.")
         } else if options.corrections {
