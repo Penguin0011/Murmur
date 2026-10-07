@@ -398,6 +398,15 @@ struct EchoAsyncCleaner: AsyncCleaner {
         // Fifth review: only coordination reorders.
         expect(CleanupGuard.check(raw: "should I accept the offer", cleaned: "I should accept the offer.", options: professional) != .pass, "professional refuses a question turned into a statement")
         expect(CleanupGuard.check(raw: "Yesterday I sent my manager the report", cleaned: "Yesterday my manager sent me the report.", options: professional) != .pass, "professional refuses reversed roles")
+        // Sixth review: shortest restated stretch, question auxiliaries, opposite prefixes.
+        expect(CleanupGuard.applyCommaFreeCorrections("I was wrong actually I meant wrong in a moral sense") == "I was wrong in a moral sense", "repair keeps the subject")
+        for (raw, out, label) in [
+            ("I was wrong actually I meant wrong in a moral sense", "Wrong in a moral sense.", "dropped subject"),
+            ("do you accept the offer", "You accept the offer.", "dropped question auxiliary"),
+            ("did Alice approve the budget", "Alice approved the budget.", "dropped did"),
+            ("we should increase the budget", "We should decrease the budget.", "opposite prefix"),
+            ("please include the appendix", "Please exclude the appendix.", "include to exclude"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),

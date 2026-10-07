@@ -333,6 +333,14 @@ enum CleanupGuard {
         ["he", "him", "his", "he's"], ["she", "her", "hers", "she's"], ["it", "its", "it's"],
         ["we", "us", "our", "ours", "we're", "we've"], ["they", "them", "their", "theirs", "they're", "they've"],
     ]
+    /// Words that differ only by an opposite prefix ("increase"/"decrease", "include"/"exclude", "like"/"dislike").
+    static func polarityFlip(_ x: String, _ y: String) -> Bool {
+        let common = zip(x.reversed(), y.reversed()).prefix { $0 == $1 }.count
+        guard common >= 3 else { return false }
+        let px = String(x.dropLast(common)), py = String(y.dropLast(common))
+        let prefixes: Set<String> = ["", "in", "de", "ex", "un", "dis", "non", "im", "il", "ir", "mis", "anti", "up", "down", "over", "under", "pre", "post"]
+        return px != py && prefixes.contains(px) && prefixes.contains(py)
+    }
     /// A polish replacement: a respelling or misheard word, never a different modal or person.
     static func polishSwap(_ heard: String, _ written: String) -> Bool {
         if modals.contains(heard) && modals.contains(written) { return false }
@@ -480,6 +488,15 @@ enum CleanupGuard {
                         if interregnum(w) { reach += 1 } else if !recurs(w) { break }
                         else if !grammarWords.contains(w) && !["what", "which", "who", "how", "when", "where", "why"].contains(w) { restated = true }
                         limit += 1
+                    }
+                    // Remove only as many words before the restated word as the repair puts before it:
+                    // "we are not ... I meant he is not" takes "we are"; "I was wrong actually I meant wrong"
+                    // keeps "I was".
+                    func word(_ x: Int) -> String { tokens[tokenOfWord[x]].lower }
+                    let content = ((wi - limit)..<wi).filter { !grammarWords.contains(word($0)) && !interregnum(word($0)) }
+                    if let e = content.first(where: { x in repair.contains { CleanupText.similarity(word(x), word($0)) >= 0.5 } }),
+                       let r = repair.first(where: { p in content.contains { CleanupText.similarity(word($0), word(p)) >= 0.5 } }) {
+                        limit = wi - max(wi - limit, e - (r - repair.lowerBound))
                     }
                     // Without a restated content word it is not a correction ("I did not say that I meant
                     // it"), except "I mean the ..." clarifying, where only the cue goes.
@@ -904,6 +921,8 @@ enum CleanupGuard {
                 if rawWords[i].isName { return .fail(.nameDropped) }
                 if filler(i) { if options.fillers { continue } else { return .fail(.unexplainedDeletion) } }
                 dropped += 1
+                // A question's leading auxiliary stays ("do you accept" never becomes "You accept").
+                if rawWords[i].sentenceStart, ["do", "does", "did", "is", "are", "was", "were", "can", "could", "should", "would", "will", "shall", "may", "might", "must", "have", "has", "had"].contains(a[i]) { return .fail(.unexplainedDeletion) }
                 // Informal forms the rewrite spells out ("gotta" -> "have to").
                 if droppableGrammarWords.contains(a[i]) || ["gotta", "wanna", "kinda", "sorta"].contains(a[i]) || pronounOne(i) { continue }
                 // A sentence-opening interjection ("hey do you know" -> "Do you know").
@@ -915,7 +934,7 @@ enum CleanupGuard {
                     return .fail(.unexplainedDeletion)
                 }
                 // The same word elsewhere is a move, not a replacement, and moves are limited above.
-                guard let r = replacements.firstIndex(where: { $0 != a[i] && polishSwap(a[i], $0) }) else { return .fail(.unexplainedDeletion) }
+                guard let r = replacements.firstIndex(where: { $0 != a[i] && polishSwap(a[i], $0) && !polarityFlip(a[i], $0) }) else { return .fail(.unexplainedDeletion) }
                 replacements.remove(at: r)
             }
             return dropped > max(4, a.count / 4) ? .fail(.unexplainedDeletion) : .pass
