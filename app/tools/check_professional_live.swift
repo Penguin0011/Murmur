@@ -3,11 +3,13 @@
 // printed), then judges each output with the real guard and phrase expectations. Costs API calls and
 // waits out rate limits. Transcripts here are synthetic; nothing is logged from real dictations.
 //
-//   SDKROOT="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk" swiftc -swift-version 5 app/Cleanup.swift app/Providers.swift \
+//   SDKROOT="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk" swiftc -swift-version 5 -parse-as-library app/Cleanup.swift app/Providers.swift \
 //     app/Credentials.swift app/Routes.swift app/Processing.swift app/Dictionary.swift app/Learning.swift app/Retention.swift \
 //     spike/Observation.swift app/tools/check_professional_live.swift -o /tmp/pl && /tmp/pl [runs per case, default 3]
 import Foundation
 struct Case { var raw: String; var must: [String]; var mustNot: [String] }
+@main enum ProfessionalLiveCheck {
+static func main() async throws {
 let test = "yeah you know me and john was going to buy like 42 apples but he don't want to go so we are not going to do that wait no i meant he is not going to do that so instead we need to buy item one milk item two eggs and yeah item three bread"
 let cases: [Case] = [
   Case(raw: test, must: ["John and I", "42", "doesn't want to go", "1. Milk", "2. Eggs", "3. Bread"], mustNot: ["we are not", "item", "Item", "yeah", "Yeah", "you know", "wait", "meant", "me and"]),
@@ -47,3 +49,5 @@ for (n, c) in cases.enumerated() {
   }
 }
 print("guard pass \(pass)/\(total), fully good \(good)/\(total)")
+}
+}
