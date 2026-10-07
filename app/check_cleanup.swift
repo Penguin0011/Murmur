@@ -344,8 +344,15 @@ struct EchoAsyncCleaner: AsyncCleaner {
         ] { expect(CleanupGuard.check(raw: broken, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         expect(CleanupGuard.check(raw: "I did not say that I meant it", cleaned: "I did say that I meant it.", options: professional) != .pass, "professional keeps a negation before a comma-free cue")
         expect(CleanupGuard.check(raw: "send 12 boxes wait no I meant send them friday", cleaned: "Send them Friday.", options: professional) != .pass, "comma-free cue does not free an unrestated number")
-        let contracted = rewritten.replacingOccurrences(of: "he is not", with: "he's not")
-        expect(CleanupGuard.check(raw: broken, cleaned: contracted, options: professional) == .pass, "professional accepts a contraction")
+        let sentence = "John and I were going to buy 42 apples, but he doesn't want to go, so he is not going to do that."
+        for (out, label) in [
+            (rewritten.replacingOccurrences(of: "he is not", with: "he's not"), "contraction"),
+            (rewritten.replacingOccurrences(of: "he is not", with: "he isn't"), "negative contraction"),
+            (rewritten.replacingOccurrences(of: "he is not going to do that", with: "he won't be doing that"), "reworded repair"),
+            (rewritten.replacingOccurrences(of: "were going to buy", with: "planned to buy"), "reworded verb"),
+            (rewritten.replacingOccurrences(of: " Instead", with: "\n\nInstead"), "paragraph before the list"),
+            (sentence + " Instead, we need to buy milk, eggs, and bread.", "inline list"),
+        ] { expect(CleanupGuard.check(raw: broken, cleaned: out, options: professional) == .pass, "professional accepts: \(label)") }
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
         expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")

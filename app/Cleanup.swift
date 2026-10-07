@@ -577,7 +577,13 @@ enum CleanupGuard {
         if Double(deletions + insertions) > maxEdit * Double(a.count) + 1 { return .fail(.editDistance) }
 
         let window = options.corrections ? correctionWindow(raw, loose: options.professional) : []
-        let markerValues = options.lists ? listMarkerValues(cleaned) : []
+        var markerValues = options.lists ? listMarkerValues(cleaned) : []
+        // Professional may write spoken markers ("item one milk item two eggs") as an inline list:
+        // they count as markers when the raw counts 1, 2, ... with them.
+        if options.professional && options.lists {
+            let spoken = a.indices.dropLast().filter { ["number", "step", "item"].contains(a[$0]) }.compactMap { CleanupText.cardinals[a[$0 + 1]] }
+            if spoken.count >= 2, spoken == Array(1...spoken.count) { markerValues.formUnion(spoken.map(String.init)) }
+        }
         // Stutters and restarts ("I I", "don't, uh, don't") that filler removal may collapse.
         var repeats = Set<Int>()
         if options.fillers {
@@ -792,10 +798,11 @@ enum CleanupGuard {
             }
             // Removed words: fillers (with that option), droppable grammar words, a pronoun replaced in the
             // same person ("me" -> "I"), or a content word replaced by a new content word.
-            var contentDropped = 0
+            var contentDropped = 0, dropped = 0
             for i in unexplained {
                 if rawWords[i].isName { return .fail(.nameDropped) }
                 if filler(i) { if options.fillers { continue } else { return .fail(.unexplainedDeletion) } }
+                dropped += 1
                 if droppableGrammarWords.contains(a[i]) { continue }
                 if let person = persons.first(where: { $0.contains(a[i]) }) {
                     if outWords.indices.contains(where: { !matchedOut.contains($0) && person.contains(outWords[$0].lower) }) { continue }
@@ -804,7 +811,7 @@ enum CleanupGuard {
                 contentDropped += 1
             }
             if contentDropped > inserted.filter({ !grammarWords.contains($0) }).count { return .fail(.unexplainedDeletion) }
-            return unexplained.count > max(4, a.count / 4) ? .fail(.unexplainedDeletion) : .pass
+            return dropped > max(4, a.count / 4) ? .fail(.unexplainedDeletion) : .pass
         }
         if options.polish { return polishCheck(unexplained: unexplained, inserted: polishInserted) }
         return unexplained.isEmpty ? .pass : .fail(.unexplainedDeletion)
