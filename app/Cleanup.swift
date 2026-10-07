@@ -702,6 +702,9 @@ enum CleanupGuard {
             // a lone date ordinal ("May first") beside a spoken list.
             if let n = CleanupText.ordinals[w] {
                 if !options.professional { return true }
+                // Only in an announced list ("my list", "the steps", a colon): "first floor ... second floor" is prose.
+                let announced = a.contains { RuleCleaner.strongListCues.contains($0) } || raw.contains(":")
+                if !announced { return false }
                 // A date's day ("May first", "June second") is never a list marker.
                 if i > 0, RuleCleaner.months.union(["may"]).contains(a[i - 1]) { return false }
                 let others = a.compactMap { CleanupText.ordinals[$0] }
@@ -983,6 +986,11 @@ enum CleanupGuard {
                 guard let r = replacements.firstIndex(where: { gap($0).contains(i) && inflection(a[i], b[$0]) }) else { return .fail(.unexplainedDeletion) }
                 replacements.remove(at: r)
             }
+            // Every new content word or modal replaces a dropped word; a pronoun contraction ("he's") is the
+            // only free one. "I approve" never becomes "I should approve", nor "send" "send and delete".
+            // An extended form of a dropped word in the same place also counts ("do" -> "doing").
+            if replacements.contains(where: { j in !persons.contains { $0.contains(b[j]) }
+                && !gap(j).contains { unexplained.contains($0) && a[$0].count >= 2 && b[j].hasPrefix(a[$0]) } }) { return .fail(.insertedWords) }
             return dropped > max(4, a.count / 4) ? .fail(.unexplainedDeletion) : .pass
         }
         if options.polish { return polishCheck(unexplained: unexplained, inserted: polishInserted) }

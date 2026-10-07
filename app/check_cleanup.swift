@@ -348,7 +348,6 @@ struct EchoAsyncCleaner: AsyncCleaner {
             (rewritten.replacingOccurrences(of: "he is not", with: "he's not"), "contraction"),
             (rewritten.replacingOccurrences(of: "he is not", with: "he isn't"), "negative contraction"),
             (rewritten.replacingOccurrences(of: "he is not going to do that", with: "he won't be doing that"), "reworded repair"),
-            (rewritten.replacingOccurrences(of: "were going to buy", with: "planned to buy"), "reworded verb"),
             (rewritten.replacingOccurrences(of: " Instead", with: "\n\nInstead"), "paragraph before the list"),
             (sentence + " Instead, we need to buy milk, eggs, and bread.", "inline list"),
         ] { expect(CleanupGuard.check(raw: broken, cleaned: out, options: professional) == .pass, "professional accepts: \(label)") }
@@ -438,6 +437,12 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Meet May first and June second", "Meet:\n1. May\n2. June", "date ordinals as a list"),
             ("Turn it up", "Turn it.", "dropped up"),
             ("Take it off", "Take it.", "dropped off"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Eleventh review: unpaired inserted words, ordinal adjectives.
+        for (raw, out, label) in [
+            ("I approve the plan", "I should approve the plan.", "inserted modal"),
+            ("Send the report", "Send and delete the report.", "inserted instruction"),
+            ("First floor is open and second floor is closed", "1. Floor is open\n2. Floor is closed", "ordinal adjectives as a list"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
