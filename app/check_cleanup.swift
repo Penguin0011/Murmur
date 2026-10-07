@@ -398,7 +398,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "should I accept the offer", cleaned: "I should accept the offer.", options: professional) != .pass, "professional refuses a question turned into a statement")
         expect(CleanupGuard.check(raw: "Yesterday I sent my manager the report", cleaned: "Yesterday my manager sent me the report.", options: professional) != .pass, "professional refuses reversed roles")
         // Sixth review: shortest restated stretch, question auxiliaries, opposite prefixes.
-        expect(CleanupGuard.applyCommaFreeCorrections("I was wrong actually I meant wrong in a moral sense") == "I was wrong in a moral sense", "repair keeps the subject")
+        expect(CleanupGuard.applyCommaFreeCorrections("I was wrong actually I meant wrong in a moral sense") == "I was wrong actually I meant wrong in a moral sense", "mid-clause repair is left for the model")
         for (raw, out, label) in [
             ("I was wrong actually I meant wrong in a moral sense", "Wrong in a moral sense.", "dropped subject"),
             ("do you accept the offer", "You accept the offer.", "dropped question auxiliary"),
@@ -457,6 +457,14 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Alice likes Bob", "Alice also likes Bob.", "inserted adverb"),
             ("He is working hard today", "He is working hardly today.", "hard to hardly"),
             ("I told Alice actually I meant Alice should go", "I told Alice should go.", "spliced clause"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Fourteenth review: same-kind grammar swaps, clause splices with lexical verbs, local list cues.
+        expect(CleanupGuard.applyCommaFreeCorrections("I told Alice actually I meant Alice left early") == "I told Alice actually I meant Alice left early", "no splice onto a lexical-verb clause")
+        for (raw, out, label) in [
+            ("Alice has approved Bob", "Alice also approved Bob.", "aspect to adverb"),
+            ("Alice really likes Bob", "Alice also likes Bob.", "emphasis to adverb"),
+            ("I told Alice actually I meant Alice left early", "I told Alice left early.", "spliced lexical clause"),
+            ("First floor is open and second floor is closed. My list is milk and eggs", "1. Floor is open\n2. Floor is closed. My list is milk and eggs.", "distant list cue"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [

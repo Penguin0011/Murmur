@@ -508,19 +508,26 @@ enum CleanupGuard {
                     if let e = content.first(where: { x in repair.contains { restates(word(x), word($0)) } }),
                        let r = repair.first(where: { p in content.contains { restates(word($0), word(p)) } }) {
                         limit = wi - max(wi - limit, e - (r - repair.lowerBound))
-                        // If the restated word starts a clause after the cue ("Alice should go") but not before it
-                        // ("I told Alice"), the kept prefix cannot join the repair: leave the sentence alone.
-                        let auxes = modals.union(["is", "are", "was", "were", "am", "has", "have", "had", "do", "does", "did"])
-                        let before = ((e + 1)..<wi).first { !interregnum(word($0)) }
-                        if r + 1 < tokenOfWord.count, auxes.contains(word(r + 1)), before.map({ !auxes.contains(word($0)) }) ?? true {
-                            for k in 0..<cue.count { window.remove(wi + k) }
-                            continue
-                        }
                     }
                     // Without a restated content word it is not a correction ("I did not say that I meant
                     // it"), except "I mean the ..." clarifying, where only the cue goes.
                     // A leading join stays ("go so we are not ... I meant he is not" keeps "so").
                     while limit > 0, ["so", "and", "but", "then"].contains(tokens[tokenOfWord[wi - limit]].lower) { limit -= 1 }
+                    // Only two repairs are safe to apply here: a whole clause after a join or a sentence start
+                    // ("go so we are not ... I meant he is not"), or a phrase restarted with the same preposition
+                    // or determiner ("on Friday ... I meant on Monday"). Anything else ("I told Alice actually I
+                    // meant Alice left") is left for the model, so a kept prefix is never spliced onto a new clause.
+                    if limit > 0 && cue != ["i", "mean"] {
+                        let start = wi - limit
+                        let clause = start == 0 || ["so", "and", "but", "then"].contains(word(start - 1))
+                            || tokens[tokenOfWord[start - 1]..<tokenOfWord[start]].contains { $0.isTerminal }
+                        let phrase = word(start) == word(wi + cue.count)
+                            && ["on", "at", "in", "to", "for", "with", "by", "from", "the", "a", "an", "my", "your", "our", "their", "this", "that"].contains(word(start))
+                        if !clause && !phrase {
+                            for k in 0..<cue.count { window.remove(wi + k) }
+                            continue
+                        }
+                    }
                     if cue == ["i", "mean"] { limit = 0 } else if !restated {
                         for k in 0..<cue.count { window.remove(wi + k) }
                         continue
@@ -711,7 +718,12 @@ enum CleanupGuard {
             if let n = CleanupText.ordinals[w] {
                 if !options.professional { return true }
                 // Only in an announced list ("my list", "the steps", a colon): "first floor ... second floor" is prose.
-                let announced = a.contains { RuleCleaner.strongListCues.contains($0) } || raw.contains(":")
+                // The cue sits in the ordinal's own sentence, or in the sentence just before it, ended by a colon.
+                var start = i
+                while start > 0, !rawWords[start].sentenceStart { start -= 1 }
+                var lead = start
+                if start > 0, !rawWords[start - 1].endAfter { lead = start - 1; while lead > 0, !rawWords[lead].sentenceStart { lead -= 1 } }
+                let announced = (lead..<i).contains { RuleCleaner.strongListCues.contains(a[$0]) } || lead < start
                 if !announced { return false }
                 // A date's day ("May first", "June second") is never a list marker.
                 if i > 0, RuleCleaner.months.union(["may"]).contains(a[i - 1]) { return false }
@@ -1004,9 +1016,16 @@ enum CleanupGuard {
             // only free one. "I approve" never becomes "I should approve", nor "send" "send and delete".
             // An inserted auxiliary, adverb or join takes the place of a dropped grammar word ("was" -> "were",
             // "is going to" -> "be"): "Alice approved" never becomes "Alice has approved", nor "likes" "also likes".
-            let weighty: Set<String> = modals.union(["has", "have", "had", "been", "be", "will", "also", "just", "really", "very", "too", "more", "most", "and", "but", "or", "so", "if", "then", "than", "only", "even", "still", "already"])
-            for j in polishInserted where weighty.contains(b[j]) {
-                if !gap(j).contains(where: { unexplained.contains($0) && grammarWords.union(modals).union(["gotta", "wanna", "kinda", "sorta"]).contains(a[$0]) }) { return .fail(.insertedWords) }
+            // ...of the same kind: an auxiliary or modal for an auxiliary, modal or informal form, a join for a join;
+            // an adverb is never added ("has approved" -> "also approved", "really likes" -> "also likes").
+            let auxiliaries: Set<String> = modals.union(["has", "have", "had", "been", "be", "is", "are", "was", "were", "am", "do", "does", "did", "going", "gonna", "gotta", "wanna"])
+            let joins: Set<String> = ["and", "but", "or", "so", "if", "then", "than"]
+            let adverbs: Set<String> = ["also", "just", "really", "very", "too", "more", "most", "only", "even", "still", "already"]
+            for j in polishInserted {
+                let w = b[j]
+                if adverbs.contains(w) { return .fail(.insertedWords) }
+                let kind = auxiliaries.contains(w) ? auxiliaries : joins.contains(w) ? joins : nil
+                if let kind, !gap(j).contains(where: { unexplained.contains($0) && kind.contains(a[$0]) }) { return .fail(.insertedWords) }
             }
             // A bare pronoun is new only as a same-person swap in its place ("me" -> "I"), never an added
             // object ("Alice approves it today").
