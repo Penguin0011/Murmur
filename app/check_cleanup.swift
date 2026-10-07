@@ -181,9 +181,8 @@ struct EchoAsyncCleaner: AsyncCleaner {
             var o = a.options; o.polish = true; o.professional = true
             if case .pass = CleanupGuard.check(raw: a.raw, cleaned: a.output, options: o) { professionalAccepted.append(a.label) }
         }
-        // Professional rewords by design, so a one-word antonym swap is the one known gap (the settings say so).
         print("Adversarial outputs accepted in professional: \(professionalAccepted.count); \(professionalAccepted)")
-        if professionalAccepted != ["long utterance antonym swap"] { failures.append("adversarial outputs accepted in professional: \(professionalAccepted)") }
+        if !professionalAccepted.isEmpty { failures.append("adversarial outputs accepted in professional: \(professionalAccepted)") }
 
         // Punctuation transfer (the fallback for rejected cleanups): always exactly the transcript's
         // words, and always passes a punctuation-only guard, whatever the cleaner returned.
@@ -386,6 +385,11 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "What I meant was what we discussed", cleaned: "Was what we discussed.", options: professional) != .pass, "professional refuses a dropped declarative I meant")
         expect(CleanupGuard.check(raw: "Book table 5 for Alice", cleaned: "Book 5 tables for Alice.", options: professional) != .pass, "professional refuses a number changing role")
         expect(CleanupGuard.check(raw: "Book table 5 for Alice", cleaned: "Book table 5 for Alice.", options: professional) == .pass, "professional keeps a number in place")
+        // Third review: nested "I meant", pronoun roles, lowercase names.
+        expect(CleanupGuard.applyCommaFreeCorrections("I told him I meant he told me") == "I told him I meant he told me", "nested I meant kept")
+        expect(CleanupGuard.check(raw: "I told him I meant he told me", cleaned: "He told me.", options: professional) != .pass, "professional refuses a dropped outer clause")
+        expect(CleanupGuard.check(raw: "Yesterday I told him about it", cleaned: "Yesterday he told me about it.", options: professional) != .pass, "professional refuses swapped pronoun roles")
+        expect(CleanupGuard.check(raw: "tell sam the update", cleaned: "Tell the client the update.", options: professional) != .pass, "professional refuses replacing a lowercase name")
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),

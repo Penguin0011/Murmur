@@ -432,6 +432,9 @@ enum CleanupGuard {
                     let after = wi + cue.count < tokenOfWord.count ? tokens[tokenOfWord[wi + cue.count]].lower : ""
                     if ["what", "which", "who", "how", "whatever", "all", "if"].contains(before)
                         || ["was", "is", "to", "it", "that", "by", "for", "well", "business"].contains(after) { continue }
+                    // A bare "I meant" repairs only right after a cue word ("wait no I meant", "actually I meant"),
+                    // never in a nested clause ("I told him I meant he told me").
+                    if cue == ["i", "meant"] && !["wait", "no", "know", "oh", "sorry", "actually", "um", "uh"].contains(before) { continue }
                 }
                 // A repair must follow the cue before the sentence ends.
                 let lastCueToken = tokenOfWord[wi + cue.count - 1]
@@ -871,9 +874,17 @@ enum CleanupGuard {
                 guard let k = rest.firstIndex(of: n) else { return .fail(.nameDropped) }
                 rest = rest[(k + 1)...]
             }
+            // Pronoun persons keep their order ("I told him" never becomes "he told me"); "it" may come and go.
+            func personSequence(_ ws: [String]) -> [Int] { ws.compactMap { w in persons.firstIndex { $0.contains(w) } }.filter { $0 != 4 } }
+            var restPersons = personSequence(rawWords.indices.filter { !dropAllowed($0) && !filler($0) }.map { a[$0] })[...]
+            for person in personSequence(b) {
+                guard let k = restPersons.firstIndex(of: person) else { return .fail(.unexplainedDeletion) }
+                restPersons = restPersons[(k + 1)...]
+            }
             // Removed words: fillers (with that option), droppable grammar words, a pronoun replaced in the
-            // same person ("me" -> "I"), or a content word replaced by a new content word.
-            var contentDropped = 0, dropped = 0
+            // same person ("me" -> "I"), or a content word replaced by a similar new word ("table" -> "tables").
+            // A dissimilar replacement is refused: a lowercase name ("sam") or an antonym looks the same.
+            var replacements = inserted.filter { !grammarWords.contains($0) }, dropped = 0
             for i in unexplained {
                 if rawWords[i].isName { return .fail(.nameDropped) }
                 if filler(i) { if options.fillers { continue } else { return .fail(.unexplainedDeletion) } }
@@ -888,9 +899,9 @@ enum CleanupGuard {
                     if outWords.indices.contains(where: { !matchedOut.contains($0) && person.contains(outWords[$0].lower) }) { continue }
                     return .fail(.unexplainedDeletion)
                 }
-                contentDropped += 1
+                guard let r = replacements.firstIndex(where: { polishSwap(a[i], $0) }) else { return .fail(.unexplainedDeletion) }
+                replacements.remove(at: r)
             }
-            if contentDropped > inserted.filter({ !grammarWords.contains($0) }).count { return .fail(.unexplainedDeletion) }
             return dropped > max(4, a.count / 4) ? .fail(.unexplainedDeletion) : .pass
         }
         if options.polish { return polishCheck(unexplained: unexplained, inserted: polishInserted) }
