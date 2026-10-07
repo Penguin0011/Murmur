@@ -2,6 +2,10 @@
 # Builds and runs only the isolated synthetic UI fixture.
 set -eu
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
+# The Command Line Tools' macOS 27 SDK needs a SwiftUI macro plugin they do not ship; use their
+# macOS 26 SDK when it is installed. Set SDKROOT to choose another SDK.
+sdk26="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk"
+if [[ -z "${SDKROOT:-}" && -d "$sdk26" ]]; then export SDKROOT="$sdk26"; fi
 fixture_path="$project_root/runtime/UIQA.app"
 mkdir -p "$fixture_path/Contents/MacOS"
 swiftc -swift-version 5 -target arm64-apple-macos26.0 \

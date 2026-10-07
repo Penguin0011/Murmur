@@ -1,6 +1,10 @@
 #!/bin/zsh
 set -eu
 project_root="$(cd "$(dirname "$0")/.." && pwd)"
+# The Command Line Tools' macOS 27 SDK needs a SwiftUI macro plugin they do not ship; use their
+# macOS 26 SDK when it is installed. Set SDKROOT to choose another SDK.
+sdk26="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk"
+if [[ -z "${SDKROOT:-}" && -d "$sdk26" ]]; then export SDKROOT="$sdk26"; fi
 app_path="$project_root/runtime/Murmur.app"
 runner_path="$project_root/module-one/models/Runner/.build/release/ModelBench"
 identity="${MURMUR_SIGN_IDENTITY:-clouddev Development}"
