@@ -760,7 +760,9 @@ enum CleanupGuard {
             // Professional: a number or negation never moves; a new one replaces one in its own gap
             // ("don't" -> "doesn't"), so "paid 10 ... paid 20" cannot swap and "not" cannot change clause.
             if options.professional, let v = CleanupText.numberValue(w.lower) {
-                guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.numberValue(a[$0]) == v }) else { return .fail(.numberAdded) }
+                // Same value and same form: "one" never becomes "first".
+                let ordinal = CleanupText.ordinals[w.lower] != nil
+                guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.numberValue(a[$0]) == v && (CleanupText.ordinals[a[$0]] != nil) == ordinal }) else { return .fail(.numberAdded) }
                 consumedRaw.insert(i); continue
             }
             if options.professional, CleanupText.isNegation(w.lower) {
@@ -936,6 +938,10 @@ enum CleanupGuard {
                 dropped += 1
                 // A question's leading auxiliary stays ("do you accept" never becomes "You accept").
                 if rawWords[i].sentenceStart, ["do", "does", "did", "is", "are", "was", "were", "can", "could", "should", "would", "will", "shall", "may", "might", "must", "have", "has", "had"].contains(a[i]) { return .fail(.unexplainedDeletion) }
+                // A tense word may change only within its tense ("was" -> "were", never "was" -> "is").
+                let tenses: [Set<String>] = [["was", "were", "had", "did"], ["is", "are", "am", "has", "have", "do", "does"], ["will", "shall"]]
+                if let tense = tenses.firstIndex(where: { $0.contains(a[i]) }),
+                   polishInserted.contains(where: { j in gap(j).contains(i) && tenses.firstIndex { $0.contains(b[j]) }.map { $0 != tense } == true }) { return .fail(.unexplainedDeletion) }
                 // Informal forms the rewrite spells out ("gotta" -> "have to").
                 if droppableGrammarWords.contains(a[i]) || ["gotta", "wanna", "kinda", "sorta"].contains(a[i]) || pronounOne(i) { continue }
                 // A sentence-opening interjection ("hey do you know" -> "Do you know").

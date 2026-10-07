@@ -416,6 +416,12 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Open and close the door", "Close and open the door.", "swapped actions"),
             ("Alice liked cats and Bob loved dogs", "Alice loved cats and Bob liked dogs.", "swapped similar verbs"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Eighth review: number form and tense.
+        for (raw, out, label) in [
+            ("Send one payment", "Send first payment.", "cardinal to ordinal"),
+            ("We finished first", "We finished one.", "ordinal to cardinal"),
+            ("Alice was guilty", "Alice is guilty.", "past to present"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),
