@@ -995,18 +995,19 @@ final class PreStart: @unchecked Sendable {
             destination = nil; historySaved(); done(); return
         }
         // Content-free: why the full cleanup was not used (the punctuation transfer or local rules was).
+        let fallback = processing?.lastFallback?.rawValue
         if let why = processing?.lastFallback {
-            timingLog.notice("cleanup-fallback reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError.map { Mirror(reflecting: $0).children.first?.label ?? "\($0)" } ?? "none", privacy: .public)")
+            timingLog.notice("cleanup-fallback entry=\(savedEntry.id, privacy: .public) reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError.map { Mirror(reflecting: $0).children.first?.label ?? "\($0)" } ?? "none", privacy: .public)")
         }
         // Only filler words were heard: keep the raw transcript, insert nothing, show no error.
         if processed.isEmpty {
-            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "saved-not-inserted")
+            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "saved-not-inserted", cleanupFallback: fallback)
             try? store.save(entry)
             setPhase("Ready", "Only filler words were heard, so nothing was inserted.")
             destination = nil; historySaved(); done(); return
         }
-        if processed != text {
-            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus)
+        if processed != text || fallback != nil {
+            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus, cleanupFallback: fallback)
             do { try store.save(entry) } catch { setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); destination = nil; historySaved(); done(); return }
         }
         // First-run test dictation: Murmur never types into itself, so show the result on the setup screen.
@@ -1022,7 +1023,7 @@ final class PreStart: @unchecked Sendable {
             let target = (try? captureFocus()).flatMap { $0.pid == getpid() ? nil : $0 }
             // Persist uncertainty before the one permitted delivery attempt.
             let insertionText = textWithLeadingSpace(processed, value: target?.value, selection: target?.selection, enabled: leadingSpaceThisSession)
-            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending")
+            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending", cleanupFallback: fallback)
             var attempted = false
             do {
                 try store.save(entry)

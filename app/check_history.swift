@@ -12,6 +12,13 @@ import Darwin
         try store.save(entry)
         let loaded = try store.entries()
         precondition(loaded.count == 1 && loaded[0].rawText == entry.rawText)
+        // The cleanup fallback reason round-trips; files written before it existed still load.
+        let fellBack = HistoryEntry(id: UUID().uuidString, recordedAt: now, rawText: "a", finalText: "A.", insertionStatus: "unverified", cleanupFallback: "unexplainedDeletion")
+        let roundTrip = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(fellBack))
+        precondition(roundTrip.cleanupFallback == "unexplainedDeletion", "fallback reason round-trips")
+        let older = #"{"id":"\#(UUID().uuidString)","recordedAt":0,"rawText":"a","finalText":"a","insertionStatus":"unverified"}"#
+        let olderEntry = try JSONDecoder().decode(HistoryEntry.self, from: Data(older.utf8))
+        precondition(olderEntry.cleanupFallback == nil, "older history decodes without a fallback reason")
         let path = root.appendingPathComponent(entry.id + ".json")
         let abandoned = root.appendingPathComponent(".pending-" + UUID().uuidString)
         try JSONEncoder().encode(entry).write(to: abandoned)
