@@ -572,7 +572,7 @@ struct SettingsView: View {
     private var cleanup: some View {
         VStack(alignment: .leading, spacing: 0) {
             eyebrow("Cleanup style").padding(.top, 20)
-            segmented([(false, "Strict"), (true, "Polish")], $controller.cleanupPolish, size: 14).padding(.top, 8)
+            segmented([(false, "Strict"), (true, "Polish")], controller.cleanupChoice == .localRules ? .constant(false) : $controller.cleanupPolish, size: 14).padding(.top, 8)
                 .disabled(controller.cleanupChoice == .localRules)
             help(controller.cleanupChoice == .localRules
                  ? "On this Mac uses Strict rules. Choose a model cleanup route to use Polish."
