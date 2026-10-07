@@ -82,7 +82,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(!fresh.options.polish, "strict cleanup by default")
         check(fresh.options == .standard && fresh.route == .local && fresh.learningEnabled && fresh.historyMode == .on && fresh.updateChecksEnabled, "defaults: all comforts on, local, learning on")
         var next = ProcessingSettings()
-        next.options = CleanupOptions(fillers: false, corrections: true, lists: false, polish: true)
+        next.options = CleanupOptions(fillers: false, corrections: true, lists: false, professional: true)
         next.route = .cloud; next.learningEnabled = false; next.learningRequiresReadableField = true; next.historyMode = .off; next.updateChecksEnabled = false
         next.save(to: defaults)
         check(ProcessingSettings.load(from: defaults) == next, "settings round-trip")
@@ -267,6 +267,9 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         settings.options.polish = true
         try p.update(settings)
         await expect(p, "it's awesome yeah it really is", .insert("It's awesome yeah it really is"), "local Polish uses strict rules")
+        settings.options.professional = true
+        try p.update(settings)
+        await expect(p, "it's awesome yeah it really is", .insert("It's awesome yeah it really is"), "local Professional uses strict rules")
     }
 
     /// Punctuation: local capitals only; the guard allows an added "?" only with the option on; old saved options decode with it off.

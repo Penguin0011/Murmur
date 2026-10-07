@@ -176,6 +176,14 @@ struct EchoAsyncCleaner: AsyncCleaner {
         }
         print("Adversarial outputs rejected in polish: \(adversarial.filter { $0.options.anyEnabled }.count - polishAccepted.count)/\(adversarial.filter { $0.options.anyEnabled }.count); accepted: \(polishAccepted)")
         if !polishAccepted.isEmpty { failures.append("\(polishAccepted.count) adversarial outputs accepted in polish") }
+        var professionalAccepted: [String] = []
+        for a in adversarial where a.options.anyEnabled {
+            var o = a.options; o.polish = true; o.professional = true
+            if case .pass = CleanupGuard.check(raw: a.raw, cleaned: a.output, options: o) { professionalAccepted.append(a.label) }
+        }
+        // Professional rewords by design, so a one-word antonym swap is the one known gap (the settings say so).
+        print("Adversarial outputs accepted in professional: \(professionalAccepted.count); \(professionalAccepted)")
+        if professionalAccepted != ["long utterance antonym swap"] { failures.append("adversarial outputs accepted in professional: \(professionalAccepted)") }
 
         // Punctuation transfer (the fallback for rejected cleanups): always exactly the transcript's
         // words, and always passes a punctuation-only guard, whatever the cleaner returned.
@@ -321,6 +329,26 @@ struct EchoAsyncCleaner: AsyncCleaner {
             expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "polish refuses: \(label)")
         }
         expect(CleanupGuard.check(raw: "Call John and Akme today", cleaned: "Call on and Akme today.", options: polish, allowedTerms: ["Akme"]) != .pass, "polish never swaps a name")
+        // Professional rewrites a broken dictation; polish and strict refuse it.
+        let professional = CleanupOptions(fillers: true, corrections: true, lists: true, punctuation: true, professional: true)
+        let broken = "yeah you know me and John was going to buy like 42 apples but he don't want to go so we are not going to do that wait no I meant he is not going to do that so instead we need to buy item one milk item two eggs and yeah item three bread"
+        let rewritten = "John and I were going to buy 42 apples, but he doesn't want to go, so he is not going to do that. Instead, we need to buy:\n1. Milk\n2. Eggs\n3. Bread"
+        expect(CleanupGuard.check(raw: broken, cleaned: rewritten, options: professional) == .pass, "professional accepts the broken dictation")
+        expect(CleanupGuard.check(raw: broken, cleaned: rewritten, options: polish) != .pass, "polish refuses the rewrite")
+        for (out, label) in [
+            (rewritten.replacingOccurrences(of: "42", with: "40"), "changed number"),
+            (rewritten.replacingOccurrences(of: "John", with: "Jim"), "changed name"),
+            (rewritten.replacingOccurrences(of: "John and I were", with: "We were"), "dropped name"),
+            (rewritten.replacingOccurrences(of: "he is not going", with: "he is going"), "dropped repair negation"),
+            ("Sure! " + rewritten, "answer prefix"),
+        ] { expect(CleanupGuard.check(raw: broken, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        expect(CleanupGuard.check(raw: "I did not say that I meant it", cleaned: "I did say that I meant it.", options: professional) != .pass, "professional keeps a negation before a comma-free cue")
+        expect(CleanupGuard.check(raw: "send 12 boxes wait no I meant send them friday", cleaned: "Send them Friday.", options: professional) != .pass, "comma-free cue does not free an unrestated number")
+        let contracted = rewritten.replacingOccurrences(of: "he is not", with: "he's not")
+        expect(CleanupGuard.check(raw: broken, cleaned: contracted, options: professional) == .pass, "professional accepts a contraction")
+        let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
+        expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
+        expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")
         // Polish asks for these edits; strict's prompt is unchanged.
         let polishPrompt = CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system
         expect(polishPrompt.contains("false starts") && polishPrompt.contains("grammar slips") && !polishPrompt.contains("respell words"), "polish prompt")

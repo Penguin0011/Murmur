@@ -569,13 +569,21 @@ struct SettingsView: View {
         }
     }
 
+    /// Strict, Polish or Professional; Professional sets Polish too.
+    private var cleanupStyle: Binding<Int> {
+        Binding(get: { controller.cleanupProfessional ? 2 : controller.cleanupPolish ? 1 : 0 },
+                set: { controller.cleanupPolish = $0 >= 1; controller.cleanupProfessional = $0 == 2 })
+    }
+
     private var cleanup: some View {
         VStack(alignment: .leading, spacing: 0) {
             eyebrow("Cleanup style").padding(.top, 20)
-            segmented([(false, "Strict"), (true, "Polish")], controller.cleanupChoice == .localRules ? .constant(false) : $controller.cleanupPolish, size: 14).padding(.top, 8)
+            segmented([(0, "Strict"), (1, "Polish"), (2, "Professional")], controller.cleanupChoice == .localRules ? .constant(0) : cleanupStyle, size: 14).padding(.top, 8)
                 .disabled(controller.cleanupChoice == .localRules)
             help(controller.cleanupChoice == .localRules
-                 ? "On this Mac uses Strict rules. Choose a model cleanup route to use Polish."
+                 ? "On this Mac uses Strict rules. Choose a model cleanup route to use Polish or Professional."
+                 : controller.cleanupProfessional
+                 ? "Professional rewrites your dictation into clear, correct writing: it fixes grammar such as “me and John was”, drops false starts and corrections like “wait no I meant”, and formats spoken lists. It may reword your sentences and change their tone; names, numbers and “not” are still never changed."
                  : controller.cleanupPolish
                  ? "Polish also removes fillers such as “yeah” and “you know” without commas, drops false starts, and fixes small grammar slips and misheard words. It can occasionally change a word's meaning; names, numbers and “not” are still never changed."
                  : "Strict makes only the edits below and never changes your wording otherwise. If cleanup goes further, Murmur inserts your own words with its punctuation.")
@@ -1199,6 +1207,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupLists) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPunctuation) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPolish) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupProfessional) { controller.settingsChanged() }
             .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
             .onChange(of: controller.learningRequiresReadableField) { controller.settingsChanged() }
             .onChange(of: controller.transcriptionRoute) { controller.settingsChanged() }
