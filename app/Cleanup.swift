@@ -690,7 +690,13 @@ enum CleanupGuard {
         func isMarkerWord(_ i: Int) -> Bool {
             guard options.lists && hasListMarkers else { return false }
             let w = a[i]
-            if CleanupText.ordinals[w] != nil { return true }
+            // Professional: an ordinal is a marker only inside a counted sequence ("first ... second"), never
+            // a lone date ordinal ("May first") beside a spoken list.
+            if let n = CleanupText.ordinals[w] {
+                if !options.professional { return true }
+                let others = a.compactMap { CleanupText.ordinals[$0] }
+                return others.contains(n + 1) || others.contains(n - 1)
+            }
             // Professional also takes digits, as speech recognition often writes them ("item 1 milk").
             func cardinal(_ x: String) -> Bool { CleanupText.cardinals[x] != nil || (options.professional && Int(x) != nil) }
             if cardinal(w), i > 0, listMarkerWords.contains(a[i - 1]), a[i - 1] != "and", a[i - 1] != "then" { return true }
@@ -760,9 +766,9 @@ enum CleanupGuard {
             // Professional: a number or negation never moves; a new one replaces one in its own gap
             // ("don't" -> "doesn't"), so "paid 10 ... paid 20" cannot swap and "not" cannot change clause.
             if options.professional, let v = CleanupText.numberValue(w.lower) {
-                // Same value and same form: "one" never becomes "first".
-                let ordinal = CleanupText.ordinals[w.lower] != nil
-                guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.numberValue(a[$0]) == v && (CleanupText.ordinals[a[$0]] != nil) == ordinal }) else { return .fail(.numberAdded) }
+                // Same value and same form: "one" never becomes "first", nor "12pm" "12am" or "1" "1st".
+                func form(_ t: String) -> String { CleanupText.ordinals[t] != nil ? "ordinal" : t.first?.isNumber == true ? String(t.drop { $0.isNumber || $0 == "." || $0 == "," }) : "" }
+                guard let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.numberValue(a[$0]) == v && form(a[$0]) == form(w.lower) }) else { return .fail(.numberAdded) }
                 consumedRaw.insert(i); continue
             }
             if options.professional, CleanupText.isNegation(w.lower) {
@@ -938,6 +944,9 @@ enum CleanupGuard {
                 dropped += 1
                 // A question's leading auxiliary stays ("do you accept" never becomes "You accept").
                 if rawWords[i].sentenceStart, ["do", "does", "did", "is", "are", "was", "were", "can", "could", "should", "would", "will", "shall", "may", "might", "must", "have", "has", "had"].contains(a[i]) { return .fail(.unexplainedDeletion) }
+                // A preposition is never swapped for another ("to Paris" -> "from Paris", "for Bob" -> "with Bob").
+                let prepositions: Set<String> = ["to", "from", "for", "with", "in", "on", "at", "by", "of", "into", "off", "up", "out", "about", "than", "as"]
+                if prepositions.contains(a[i]), polishInserted.contains(where: { gap($0).contains(i) && prepositions.contains(b[$0]) && b[$0] != a[i] }) { return .fail(.unexplainedDeletion) }
                 // A tense word may change only within its tense ("was" -> "were", never "was" -> "is").
                 let tenses: [Set<String>] = [["was", "were", "had", "did"], ["is", "are", "am", "has", "have", "do", "does"], ["will", "shall"]]
                 if let tense = tenses.firstIndex(where: { $0.contains(a[i]) }),

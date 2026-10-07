@@ -422,6 +422,15 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("We finished first", "We finished one.", "ordinal to cardinal"),
             ("Alice was guilty", "Alice is guilty.", "past to present"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
+        // Ninth review: number suffixes, prepositions, scoped list ordinals.
+        for (raw, out, label) in [
+            ("Call at 12pm", "Call at 12am.", "time suffix"),
+            ("Dose 5mg", "Dose 5ml.", "unit suffix"),
+            ("Send 1 payment", "Send 1st payment.", "ordinal suffix"),
+            ("Alice went to Paris", "Alice went from Paris.", "preposition swap"),
+            ("Alice works for Bob", "Alice works with Bob.", "relationship swap"),
+            ("Meet May first and item one milk item two eggs", "Meet May:\n1. Milk\n2. Eggs", "date ordinal dropped"),
+        ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) != .pass, "professional refuses: \(label)") }
         // Good rewrites the live model produced that the guard first refused.
         for (raw, out) in [
             ("hey do you know if the build is done yet because uh I need to deploy it before lunch", "Do you know if the build is done yet because I need to deploy it before lunch?"),
