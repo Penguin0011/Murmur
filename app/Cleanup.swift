@@ -1001,9 +1001,9 @@ enum CleanupGuard {
                 // Informal forms the rewrite spells out ("gotta" -> "have to").
                 if droppableGrammarWords.contains(a[i]) || ["gotta", "wanna", "kinda", "sorta"].contains(a[i]) || pronounOne(i) { continue }
                 // A sentence-opening interjection ("hey do you know" -> "Do you know").
-                if rawWords[i].sentenceStart, ["hey", "okay", "ok", "well", "oh", "alright"].contains(a[i]) { continue }
+                if rawWords[i].sentenceStart, ["hey", "okay", "ok", "well", "oh", "alright", "anyway"].contains(a[i]) { continue }
                 // A join dropped where the rewrite ends a sentence ("by Thursday, and I" -> "by Thursday. I").
-                if ["and", "so", "but", "because"].contains(a[i]), let k = pairedRaw.lastIndex(where: { $0 < i }), outWords[pairedOut[k]].endAfter { continue }
+                if ["and", "so", "but", "because", "anyway"].contains(a[i]), let k = pairedRaw.lastIndex(where: { $0 < i }), outWords[pairedOut[k]].endAfter { continue }
                 if let person = persons.first(where: { $0.contains(a[i]) }) {
                     if outWords.indices.contains(where: { !matchedOut.contains($0) && person.contains(outWords[$0].lower) }) { continue }
                     return .fail(.unexplainedDeletion)
@@ -1033,7 +1033,7 @@ enum CleanupGuard {
             // object ("Alice approves it today").
             for j in polishInserted where !b[j].contains("'") {
                 guard let person = persons.first(where: { $0.contains(b[j]) }) else { continue }
-                if !gap(j).contains(where: { unexplained.contains($0) && person.contains(a[$0]) }) { return .fail(.insertedWords) }
+                if !nearGap(j).contains(where: { unexplained.contains($0) && person.contains(a[$0]) }) { return .fail(.insertedWords) }
             }
             // An inflection of a dropped word in the same place also counts ("do" -> "doing"); a contraction
             // ("he's") is the only free word, never a bare pronoun ("approves it today").
