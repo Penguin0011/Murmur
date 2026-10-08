@@ -4,10 +4,9 @@ import Security
 #endif
 
 /// Providers that can hold a user-supplied API key. The raw value is the Keychain account name.
-/// `customAPI` uses the OpenAI-compatible chat completions format; `cerebras` and `localServer`
-/// remain for migration from older settings.
+/// `customAPI` uses the OpenAI-compatible chat completions format. `openrouter`, `cerebras` and
+/// `localServer` remain only so older settings can migrate their keys; no client for them exists.
 enum ProviderID: String, CaseIterable, Codable, Sendable {
-    case fireworks
     case gemini
     case openrouter
     case cerebras
@@ -18,7 +17,6 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
 
     var displayName: String {
         switch self {
-        case .fireworks: return "Fireworks"
         case .gemini: return "Gemini"
         case .openrouter: return "OpenRouter"
         case .cerebras: return "Cerebras"

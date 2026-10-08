@@ -56,16 +56,13 @@ let geminiPerDay = #"{"error": {"code": 429, "message": "You exceeded your curre
 let geminiInteractionsQuota = #"{"error": {"code": "quota_exceeded", "message": "You have exceeded your daily quota."}}"#
 let geminiPrepay = #"{"error": {"code": "payment_required", "message": "Your Prepay credit balance is depleted."}}"#
 let geminiModelMissing = #"{"error": {"code": 404, "message": "models/gemini-9 is not found", "status": "NOT_FOUND"}}"#
-let openRouterChat = #"{"id": "gen-123", "provider": "Google", "model": "google/gemini-3.5-flash-lite", "object": "chat.completion", "created": 1791000000, "choices": [{"logprobs": null, "finish_reason": "stop", "native_finish_reason": "STOP", "index": 0, "message": {"role": "assistant", "content": "Shopping list:\n- apples\n- milk\n- bread", "refusal": null}}], "usage": {"prompt_tokens": 40, "completion_tokens": 12, "total_tokens": 52}}"#
-let openRouterNoCookie = #"{"error":{"message":"No cookie auth credentials found","code":401}}"#
-let openRouterCredits = #"{"error": {"code": 402, "message": "Insufficient credits. Add more using https://openrouter.ai/credits"}}"#
-let openRouterRate = #"{"error": {"code": 429, "message": "Rate limit exceeded"}}"#
-let openRouterMidStream = #"{"id": "gen-9", "error": {"code": 502, "message": "Provider returned error"}}"#
-let openRouterModeration = #"{"error": {"code": 403, "message": "Input was flagged", "metadata": {"reasons": ["harassment"], "flagged_input": "Synthetic private dictation about Project Nightingale", "provider_name": "OpenAI", "model_slug": "openai/gpt-x"}}}"#
-let openRouterNoProvider = #"{"error": {"code": 503, "message": "No endpoints found matching your data policy"}}"#
-let openRouterLength = #"{"choices": [{"finish_reason": "length", "message": {"role": "assistant", "content": "Shopping"}}]}"#
-let fireworksUnauthorized = #"{"error":{"message":"You must provide an API key. See https://docs.fireworks.ai/api-reference/introduction#authentication for more information.","param":null,"code":"UNAUTHORIZED","type":"error"},"request_id":"9065354e-1dde-4fff-a352-d73dcfe3f95f"}"#
-let fireworksAudioUnauthorized = #"{"error":{"object":"error","type":"unauthorized","message":"Unauthorized"}}"#
+let chatSuccess = #"{"id": "gen-123", "provider": "Google", "model": "google/gemini-3.5-flash-lite", "object": "chat.completion", "created": 1791000000, "choices": [{"logprobs": null, "finish_reason": "stop", "native_finish_reason": "STOP", "index": 0, "message": {"role": "assistant", "content": "Shopping list:\n- apples\n- milk\n- bread", "refusal": null}}], "usage": {"prompt_tokens": 40, "completion_tokens": 12, "total_tokens": 52}}"#
+let chatCredits = #"{"error": {"code": 402, "message": "Insufficient credits. Add more using https://openrouter.ai/credits"}}"#
+let unauthorizedBody = #"{"error":{"message":"Invalid API key.","code":"UNAUTHORIZED","type":"error"}}"#
+let chatRate = #"{"error": {"code": 429, "message": "Rate limit exceeded"}}"#
+let chatMidStream = #"{"id": "gen-9", "error": {"code": 502, "message": "Provider returned error"}}"#
+let chatUnavailable = #"{"error": {"code": 503, "message": "No endpoints found matching your data policy"}}"#
+let chatLength = #"{"choices": [{"finish_reason": "length", "message": {"role": "assistant", "content": "Shopping"}}]}"#
 
 /// Answers by model: the URL path names it.
 final class ModelTransport: HTTPTransport, @unchecked Sendable {
@@ -129,7 +126,7 @@ func checkKeychainStore() {
     check(found && (attributes[kSecAttrSynchronizable as String] as? Bool ?? false) == false, "keychain item never syncs to iCloud")
     query[kSecReturnAttributes as String] = nil
     check((try? store.delete(.gemini)) != nil && !store.exists(.gemini) && (try? store.delete(.gemini)) != nil, "keychain delete, and deleting a missing key succeeds")
-    check((try? store.save(key, for: .openrouter)) != nil && (try? store.deleteAll()) != nil && !store.exists(.openrouter), "keychain delete-all removes every key")
+    check((try? store.save(key, for: .customCleanup)) != nil && (try? store.deleteAll()) != nil && !store.exists(.customCleanup), "keychain delete-all removes every key")
     #endif
 }
 
@@ -139,7 +136,6 @@ func checkKeychainStore() {
         checkAPIKeyAndCredentials()
         checkMultipart()
         checkGeminiRequest()
-        checkOpenRouterRequest()
         checkParsing()
         checkClassification()
         checkNoSecretsInMessages()
@@ -175,7 +171,7 @@ func checkKeychainStore() {
         check(!"\(key)".contains(fakeSecret) && !String(reflecting: key).contains(fakeSecret), "APIKey description redacted")
         var dumped = ""; dump(key, to: &dumped)
         check(!dumped.contains(fakeSecret), "APIKey dump redacted")
-        let provider = OpenRouterCleanupProvider(apiKey: key)
+        let provider = GeminiCleanupProvider(apiKey: key)
         var providerDump = ""; dump(provider, to: &providerDump)
         check(!providerDump.contains(fakeSecret) && !String(describing: provider).contains(fakeSecret), "provider dump redacted")
 
@@ -183,14 +179,14 @@ func checkKeychainStore() {
         check((try? store.read(.gemini)) == .some(nil), "missing key reads nil")
         try? store.save(APIKey("first")!, for: .gemini)
         try? store.save(APIKey("second")!, for: .gemini)
-        try? store.save(APIKey("other")!, for: .openrouter)
+        try? store.save(APIKey("other")!, for: .customCleanup)
         check((try? store.read(.gemini))??.secret == "second", "save updates existing key")
         try? store.delete(.gemini)
         check((try? store.read(.gemini)) == .some(nil), "delete removes key")
         check((try? store.delete(.gemini)) != nil, "deleting missing key succeeds")
         try? store.deleteAll()
-        check((try? store.read(.openrouter)) == .some(nil), "deleteAll removes every key")
-        check(ProviderID.allCases.map(\.rawValue) == ["fireworks", "gemini", "openrouter", "cerebras", "customAPI", "customTranscription", "customCleanup", "localServer"], "Keychain account names are provider ids")
+        check((try? store.read(.customCleanup)) == .some(nil), "deleteAll removes every key")
+        check(ProviderID.allCases.map(\.rawValue) == ["gemini", "openrouter", "cerebras", "customAPI", "customTranscription", "customCleanup", "localServer"], "Keychain account names are provider ids")
         check(CredentialError.keychain(status: -25300).description == "Keychain operation failed (status -25300).", "credential error has status only")
     }
 
@@ -198,31 +194,25 @@ func checkKeychainStore() {
         let audioBytes = Data([0x52, 0x49, 0x46, 0x46, 0x00, 0xFF, 0x0D, 0x0A, 0x2D, 0x2D])
         let audio = AudioPayload(data: audioBytes, filename: "clip.wav", mimeType: "audio/wav", language: "en", vocabularyHint: "Akme, Penguin0011")
         let boundary = "TESTBOUNDARY"
-        let fw = FireworksTranscriptionProvider.makeRequest(audio: audio, apiKey: key, boundary: boundary)
-        check(fw.httpMethod == "POST", "Fireworks POST")
-        check(fw.url?.absoluteString == "https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions", "Fireworks endpoint")
-        check(fw.value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "Fireworks bearer auth")
+        let fw = OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "whisper-1", audio: audio, includePrompt: true, boundary: boundary)
+        check(fw.httpMethod == "POST", "transcription POST")
+        check(fw.url?.absoluteString == "https://stt.example.test/v1/audio/transcriptions", "transcription endpoint")
+        check(fw.value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "transcription bearer auth")
         check(fw.value(forHTTPHeaderField: "Content-Type") == "multipart/form-data; boundary=TESTBOUNDARY", "multipart content type")
         check(!(fw.url?.absoluteString.contains(fakeSecret) ?? true), "key not in URL")
         let body = fw.httpBody ?? Data()
         let parts = splitMultipart(body, boundary: boundary)
-        check(parts["model"] == Data("whisper-v3-turbo".utf8), "model field")
+        check(parts["model"] == Data("whisper-1".utf8), "model field")
         check(parts["response_format"] == Data("json".utf8), "response_format field")
         check(parts["language"] == Data("en".utf8), "language field")
-        check(parts["prompt"] == Data("Akme, Penguin0011".utf8), "Fireworks sends vocabulary hint as prompt")
+        check(parts["prompt"] == Data("Akme, Penguin0011".utf8), "transcription sends vocabulary hint as prompt")
         check(parts["file"] == audioBytes, "file bytes intact, including CRLF and dashes")
         check(String(decoding: body, as: UTF8.self).contains("Content-Disposition: form-data; name=\"file\"; filename=\"clip.wav\"\r\nContent-Type: audio/wav\r\n\r\n"), "file part headers")
         check(body.suffix(18) == Data("\r\n--TESTBOUNDARY--\r\n".utf8.suffix(18)), "closing boundary")
 
-        let or = OpenRouterTranscriptionProvider.makeRequest(audio: audio, apiKey: key, boundary: boundary)
-        check(or.url?.absoluteString == "https://openrouter.ai/api/v1/audio/transcriptions", "OpenRouter STT endpoint")
-        let orParts = splitMultipart(or.httpBody ?? Data(), boundary: boundary)
-        check(orParts["model"] == Data("openai/whisper-large-v3-turbo".utf8), "OpenRouter STT model")
-        check(orParts["prompt"] == nil, "OpenRouter STT never sends dictionary terms (prompt is ignored upstream)")
-        check(orParts["file"] == audioBytes, "OpenRouter file bytes")
 
         let hostile = AudioPayload(data: audioBytes, filename: "a\"\r\nX-Evil: 1.wav", mimeType: "audio/wav\r\nX: y", language: nil)
-        let hostileBody = String(decoding: FireworksTranscriptionProvider.makeRequest(audio: hostile, apiKey: key, boundary: boundary).httpBody!, as: UTF8.self)
+        let hostileBody = String(decoding: OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "whisper-1", audio: hostile, includePrompt: true, boundary: boundary).httpBody!, as: UTF8.self)
         check(!hostileBody.contains("\r\nX-Evil") && !hostileBody.contains("\r\nX: y"), "multipart header injection stripped")
         check(splitMultipart(Data(hostileBody.utf8), boundary: boundary)["language"] == nil, "nil language omitted")
     }
@@ -254,33 +244,12 @@ func checkKeychainStore() {
         check(validation.value(forHTTPHeaderField: "x-goog-api-key") == fakeSecret, "Gemini validation header auth")
     }
 
-    static func checkOpenRouterRequest() {
-        let messages = CleanupMessages(system: "S", user: "U")
-        guard let request = try? OpenRouterCleanupProvider.makeRequest(messages: messages, apiKey: key) else { check(false, "OpenRouter request builds"); return }
-        check(request.url?.absoluteString == "https://openrouter.ai/api/v1/chat/completions" && request.httpMethod == "POST", "OpenRouter chat endpoint")
-        check(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "OpenRouter bearer auth")
-        let body = json(request.httpBody)
-        check(body["model"] as? String == "google/gemini-3.5-flash-lite", "OpenRouter default model")
-        let roles = (body["messages"] as? [[String: Any]])?.map { "\($0["role"]!):\($0["content"]!)" }
-        check(roles == ["system:S", "user:U"], "system then user messages")
-        check(body["stream"] as? Bool == false && (body["temperature"] as? Double) == 0, "non-streaming, temperature 0")
-        check(body["provider"] == nil, "no routing restriction by default")
-        let zdr = json((try? OpenRouterCleanupProvider.makeRequest(messages: messages, apiKey: key, zeroDataRetention: true))?.httpBody)
-        check((zdr["provider"] as? [String: Any])?["zdr"] as? Bool == true, "zdr routing flag")
-        let validation = OpenRouterCleanupProvider.makeValidationRequest(apiKey: key)
-        check(validation.url?.absoluteString == "https://openrouter.ai/api/v1/key" && validation.httpMethod == "GET", "OpenRouter validation endpoint")
-        let fwValidation = FireworksTranscriptionProvider.makeValidationRequest(apiKey: key)
-        check(fwValidation.url?.absoluteString == "https://api.fireworks.ai/v1/accounts/fireworks/models?pageSize=1", "Fireworks validation endpoint")
-    }
-
     static func checkParsing() {
-        check((try? OpenRouterTranscriptionProvider.parse(result(200, sttSuccess))) == "Hello, this is a test of speech-to-text transcription.", "STT success parse")
-        check((try? FireworksTranscriptionProvider.parse(result(200, #"{"text": ""}"#))) == "", "empty transcript (silence) is valid")
-        expectError(.malformedResponse(.fireworks), "STT missing text") { try FireworksTranscriptionProvider.parse(result(200, #"{"segments": []}"#)) }
-        expectError(.malformedResponse(.openrouter), "STT non-JSON") { try OpenRouterTranscriptionProvider.parse(result(200, "<html>")) }
-        expectError(.authentication(.fireworks), "Fireworks observed 401") { try FireworksTranscriptionProvider.parse(result(401, fireworksUnauthorized)) }
-        expectError(.authentication(.fireworks), "Fireworks audio-host 401") { try FireworksTranscriptionProvider.parse(result(401, fireworksAudioUnauthorized)) }
-        expectError(.server(.fireworks, status: 503), "Fireworks 503 no healthy upstream") { try FireworksTranscriptionProvider.parse(result(503, "no healthy upstream")) }
+        check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, sttSuccess))) == "Hello, this is a test of speech-to-text transcription.", "STT success parse")
+        check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": ""}"#))) == "", "empty transcript (silence) is valid")
+        expectError(.malformedResponse(.customAPI), "STT non-JSON") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, "<html>")) }
+        expectError(.authentication(.customAPI), "observed 401") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(401, unauthorizedBody)) }
+        expectError(.server(.customAPI, status: 503), "503 no healthy upstream") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(503, "no healthy upstream")) }
 
         check((try? GeminiCleanupProvider.parse(result(200, geminiSuccess))) == "Please send the report.", "Gemini success parse")
         check((try? GeminiCleanupProvider.parse(result(200, geminiThought))) == "Meet Thursday at three.", "Gemini joins parts, skips thoughts")
@@ -289,10 +258,10 @@ func checkKeychainStore() {
         expectError(.contentBlocked(.gemini), "Gemini SAFETY finish") { try GeminiCleanupProvider.parse(result(200, geminiSafetyStop)) }
         expectError(.malformedResponse(.gemini), "Gemini empty object") { try GeminiCleanupProvider.parse(result(200, "{}")) }
 
-        check((try? OpenRouterCleanupProvider.parse(result(200, openRouterChat))) == "Shopping list:\n- apples\n- milk\n- bread", "OpenRouter success parse")
-        expectError(.server(.openrouter, status: 502), "OpenRouter error inside HTTP 200") { try OpenRouterCleanupProvider.parse(result(200, openRouterMidStream)) }
-        expectError(.malformedResponse(.openrouter), "OpenRouter truncated output") { try OpenRouterCleanupProvider.parse(result(200, openRouterLength)) }
-        expectError(.malformedResponse(.openrouter), "OpenRouter no choices") { try OpenRouterCleanupProvider.parse(result(200, #"{"choices": []}"#)) }
+        check((try? OpenAIChatFormat.parse(provider: .customAPI, result: result(200, chatSuccess))) == "Shopping list:\n- apples\n- milk\n- bread", "chat success parse")
+        expectError(.server(.customAPI, status: 502), "error inside HTTP 200") { try OpenAIChatFormat.parse(provider: .customAPI, result: result(200, chatMidStream)) }
+        expectError(.malformedResponse(.customAPI), "truncated output") { try OpenAIChatFormat.parse(provider: .customAPI, result: result(200, chatLength)) }
+        expectError(.malformedResponse(.customAPI), "no choices") { try OpenAIChatFormat.parse(provider: .customAPI, result: result(200, #"{"choices": []}"#)) }
     }
 
     static func checkClassification() {
@@ -309,18 +278,16 @@ func checkKeychainStore() {
         check(c(.gemini, 404, geminiModelMissing) == .rejected(.gemini, status: 404), "Gemini unknown model → rejected")
         check(c(.gemini, 400, #"{"error": {"code": 400, "message": "Invalid JSON payload", "status": "INVALID_ARGUMENT"}}"#) == .rejected(.gemini, status: 400), "Gemini plain 400 → rejected")
         check(c(.gemini, 504, "") == .timeout(.gemini), "504 → timeout")
-        check(c(.openrouter, 401, openRouterNoCookie) == .authentication(.openrouter), "OpenRouter 401")
-        check(c(.openrouter, 402, openRouterCredits) == .quota(.openrouter), "OpenRouter 402 → quota")
-        check(c(.openrouter, 429, openRouterRate, ["Retry-After": "60"]) == .rateLimited(.openrouter, retryAfter: 60), "Retry-After seconds")
-        check(c(.openrouter, 429, openRouterRate, ["retry-after": "Sat, 03 Oct 2026 04:00:30 GMT"]) == .rateLimited(.openrouter, retryAfter: 30), "Retry-After HTTP-date, case-insensitive header")
-        check(c(.openrouter, 429, openRouterRate) == .rateLimited(.openrouter, retryAfter: nil), "429 without Retry-After")
-        check(c(.openrouter, 403, openRouterModeration) == .contentBlocked(.openrouter), "OpenRouter moderation 403 → contentBlocked")
-        check(c(.openrouter, 503, openRouterNoProvider) == .server(.openrouter, status: 503), "OpenRouter 503")
-        check(c(.openrouter, 408, "") == .timeout(.openrouter), "408 → timeout")
-        check(c(.fireworks, 412, "{}") == .quota(.fireworks), "Fireworks 412 suspended → quota")
-        check(c(.fireworks, 413, "{}") == .payloadTooLarge(.fireworks, limitBytes: nil), "413 → payloadTooLarge")
-        check(c(.fireworks, 520, "") == .server(.fireworks, status: 520), "520 → server")
-        check(c(.openrouter, 200, "not json") == .server(.openrouter, status: nil), "unexplained 200 error → server")
+        check(c(.customAPI, 401, unauthorizedBody) == .authentication(.customAPI), "401")
+        check(c(.customAPI, 402, chatCredits) == .quota(.customAPI), "402 → quota")
+        check(c(.customAPI, 429, chatRate, ["Retry-After": "60"]) == .rateLimited(.customAPI, retryAfter: 60), "Retry-After seconds")
+        check(c(.customAPI, 429, chatRate, ["retry-after": "Sat, 03 Oct 2026 04:00:30 GMT"]) == .rateLimited(.customAPI, retryAfter: 30), "Retry-After HTTP-date, case-insensitive header")
+        check(c(.customAPI, 429, chatRate) == .rateLimited(.customAPI, retryAfter: nil), "429 without Retry-After")
+        check(c(.customAPI, 503, chatUnavailable) == .server(.customAPI, status: 503), "503")
+        check(c(.customAPI, 408, "") == .timeout(.customAPI), "408 → timeout")
+        check(c(.customAPI, 413, "{}") == .payloadTooLarge(.customAPI, limitBytes: nil), "413 → payloadTooLarge")
+        check(c(.customAPI, 520, "") == .server(.customAPI, status: 520), "520 → server")
+        check(c(.customAPI, 200, "not json") == .server(.customAPI, status: nil), "unexplained 200 error → server")
 
         check(ProviderErrorClassifier.classify(provider: .gemini, transportError: URLError(.notConnectedToInternet)) == .network(.gemini), "offline → network")
         check(ProviderErrorClassifier.classify(provider: .gemini, transportError: URLError(.cannotFindHost)) == .network(.gemini), "DNS → network")
@@ -334,8 +301,8 @@ func checkKeychainStore() {
         check(ProviderError.authentication(.gemini).disposition == .preserveNeedsChange && ProviderError.quota(.gemini).disposition == .preserveNeedsChange, "auth/quota keep session, need change")
         check(ProviderError.payloadTooLarge(.gemini, limitBytes: 1).disposition == .preserveNeedsChange, "payload keeps session, needs change")
         check(ProviderError.cancelled.disposition == .discard, "cancel discards")
-        check(ProviderError.rateLimited(.openrouter, retryAfter: 1.2).userMessage.contains("2 seconds"), "retry hint rounds up")
-        check(ProviderError.payloadTooLarge(.openrouter, limitBytes: 25_000_000).userMessage.contains("25 MB"), "payload message states limit")
+        check(ProviderError.rateLimited(.customAPI, retryAfter: 1.2).userMessage.contains("2 seconds"), "retry hint rounds up")
+        check(ProviderError.payloadTooLarge(.customAPI, limitBytes: 25_000_000).userMessage.contains("25 MB"), "payload message states limit")
     }
 
     static func checkNoSecretsInMessages() {
@@ -346,9 +313,8 @@ func checkKeychainStore() {
             for status in [200, 400, 401, 402, 403, 404, 408, 412, 413, 429, 500, 503, 504] {
                 errors.append(ProviderErrorClassifier.classify(provider: provider, result: result(status, echo, ["Retry-After": "5"])))
             }
-            errors.append(ProviderErrorClassifier.classify(provider: provider, result: result(403, openRouterModeration)))
         }
-        errors += [.cancelled, .invalidConfiguration(.gemini), .contentBlocked(.openrouter), .payloadTooLarge(.gemini, limitBytes: nil)]
+        errors += [.cancelled, .invalidConfiguration(.gemini), .contentBlocked(.gemini), .payloadTooLarge(.gemini, limitBytes: nil)]
         for error in errors {
             let texts = [error.userMessage, error.description, error.localizedDescription, String(reflecting: error)]
             check(!texts.contains { $0.contains(fakeSecret) || $0.contains("FAKEKEY") || $0.contains("Nightingale") }, "no key/transcript in \(error)")
@@ -362,36 +328,11 @@ func checkKeychainStore() {
         let gemini = GeminiCleanupProvider(apiKey: key).disclosure
         check(gemini.stage == .cleanup && gemini.leavesDevice.joined().contains("transcript") && gemini.leavesDevice.joined().contains("dictionary terms"), "cleanup disclosure lists transcript and dictionary terms")
         check(gemini.staysOnDevice.contains("audio") && gemini.retentionNote.contains("human reviewers"), "Gemini disclosure: audio stays, free-tier review warning")
-        let orSTT = OpenRouterTranscriptionProvider(apiKey: key).disclosure
-        check(orSTT.leavesDevice == ["the recorded audio"] && orSTT.destinationHost == "openrouter.ai", "OpenRouter STT sends audio only")
-        let fw = FireworksTranscriptionProvider(apiKey: key).disclosure
-        check(fw.leavesDevice.joined().contains("audio") && fw.leavesDevice.joined().contains("vocabulary"), "Fireworks STT discloses vocabulary hint")
-        var zdr = OpenRouterCleanupProvider(apiKey: key); zdr.zeroDataRetention = true
-        check(zdr.disclosure.retentionNote.contains("zero-data-retention"), "ZDR disclosure")
         check(!gemini.summary.contains(fakeSecret), "summary has no key")
     }
 
     static func checkTransportBehaviour() async {
         let audio = AudioPayload(data: Data(repeating: 1, count: 64))
-        // One request only on a retryable failure: no automatic retry.
-        let failing = MockTransport(.success(result(503, openRouterNoProvider)))
-        var stt = OpenRouterTranscriptionProvider(apiKey: key); stt.transport = failing
-        do { _ = try await stt.transcribe(audio); check(false, "503 should throw") }
-        catch { check(error as? ProviderError == .server(.openrouter, status: 503), "503 surfaces as server") }
-        check(failing.requests.count == 1, "exactly one request, no automatic retry")
-
-        let ok = MockTransport(.success(result(200, sttSuccess)))
-        stt.transport = ok
-        let transcribed = try? await stt.transcribe(audio)
-        check(transcribed == "Hello, this is a test of speech-to-text transcription.", "transcribe through transport")
-        check(ok.requests.first?.timeoutInterval == 75, "explicit request timeout applied")
-
-        // Oversized audio is rejected before any network request.
-        let unused = MockTransport(.success(result(200, sttSuccess)))
-        stt.transport = unused
-        do { _ = try await stt.transcribe(AudioPayload(data: Data(count: 25_000_001))); check(false, "oversize should throw") }
-        catch { check(error as? ProviderError == .payloadTooLarge(.openrouter, limitBytes: 25_000_000), "local payload limit") }
-        check(unused.requests.isEmpty, "no request for oversize audio")
 
         // Deadline.
         var slowGemini = GeminiCleanupProvider(apiKey: key)
@@ -403,8 +344,8 @@ func checkKeychainStore() {
         check(Date().timeIntervalSince(started) < 2, "deadline enforced promptly")
 
         // Cancellation through Task.
-        var cancellable = OpenRouterCleanupProvider(apiKey: key)
-        cancellable.transport = MockTransport(.success(result(200, openRouterChat)), delay: 5)
+        var cancellable = GeminiCleanupProvider(apiKey: key)
+        cancellable.transport = MockTransport(.success(result(200, chatSuccess)), delay: 5)
         let provider = cancellable
         let task = Task { try await provider.cleanup(CleanupMessages(system: "s", user: "u")) }
         try? await Task.sleep(nanoseconds: 100_000_000)
@@ -415,29 +356,22 @@ func checkKeychainStore() {
         check(Date().timeIntervalSince(cancelStart) < 2, "cancellation prompt")
 
         // Transport errors.
-        var offline = OpenRouterCleanupProvider(apiKey: key)
+        var offline = GeminiCleanupProvider(apiKey: key)
         offline.transport = MockTransport(.failure(URLError(.notConnectedToInternet)))
         do { _ = try await offline.cleanup(CleanupMessages(system: "s", user: "u")); check(false, "offline should throw") }
-        catch { check(error as? ProviderError == .network(.openrouter), "offline → network") }
+        catch { check(error as? ProviderError == .network(.gemini), "offline → network") }
 
         // Missing/invalid model fails locally.
-        var badModel = OpenRouterCleanupProvider(apiKey: key)
-        let neverCalled = MockTransport(.success(result(200, openRouterChat)))
+        var badModel = GeminiCleanupProvider(apiKey: key)
+        let neverCalled = MockTransport(.success(result(200, chatSuccess)))
         badModel.transport = neverCalled; badModel.model = ""
         do { _ = try await badModel.cleanup(CleanupMessages(system: "s", user: "u")); check(false, "empty model should throw") }
-        catch { check(error as? ProviderError == .invalidConfiguration(.openrouter) && neverCalled.requests.isEmpty, "empty model → invalidConfiguration, no request") }
+        catch { check(error as? ProviderError == .invalidConfiguration(.gemini) && neverCalled.requests.isEmpty, "empty model → invalidConfiguration, no request") }
 
         // validate(): one cheap authenticated GET; classifies failures.
-        let validOK = MockTransport(.success(result(200, #"{"data": {"label": "sk-or-v1-abc...xyz", "limit": null}}"#)))
-        var validator = OpenRouterCleanupProvider(apiKey: key); validator.transport = validOK
-        do { try await validator.validate(); check(validOK.requests.first?.httpMethod == "GET" && validOK.requests.first?.url?.path == "/api/v1/key", "validate GET /key") }
-        catch { check(false, "validate should pass: \(error)") }
         var badValidator = GeminiCleanupProvider(apiKey: key); badValidator.transport = MockTransport(.success(result(400, geminiBadKey)))
         do { try await badValidator.validate(); check(false, "bad key validate should throw") }
         catch { check(error as? ProviderError == .authentication(.gemini), "validate bad key → authentication") }
-        var fwValidator = FireworksTranscriptionProvider(apiKey: key); fwValidator.transport = MockTransport(.success(result(401, fireworksUnauthorized)))
-        do { try await fwValidator.validate(); check(false, "Fireworks validate should throw") }
-        catch { check(error as? ProviderError == .authentication(.fireworks), "Fireworks validate 401") }
     }
 
     /// Minimal multipart parser for checks: name → content bytes.
@@ -685,16 +619,13 @@ extension ProviderChecks {
         check(request.httpMethod == "POST" && request.value(forHTTPHeaderField: "Authorization") == nil, "no Authorization header without a key")
         let body = json(request.httpBody)
         check(body["model"] as? String == "llama3.2:latest" && body["stream"] as? Bool == false && (body["temperature"] as? Double) == 0 && body["max_tokens"] as? Int == 8192, "local body: model, non-streaming, temperature 0, max_tokens")
-        check((body["messages"] as? [[String: Any]])?.map { "\($0["role"]!)" } == ["system", "user"] && body["provider"] == nil, "system+user, no OpenRouter routing")
+        check((body["messages"] as? [[String: Any]])?.map { "\($0["role"]!)" } == ["system", "user"] && body["provider"] == nil, "system+user, no routing field")
         let keyed = try? OpenAICompatibleCleanupProvider.makeRequest(messages: messages, endpoint: ollama.chatCompletionsURL, model: "m", apiKey: key)
         check(keyed?.value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "optional key sent as bearer")
         expectError(.invalidConfiguration(.localServer), "empty local model") { try OpenAICompatibleCleanupProvider.makeRequest(messages: messages, endpoint: ollama.chatCompletionsURL, model: "", apiKey: nil) }
         expectError(.invalidConfiguration(.localServer), "local model with newline") { try OpenAICompatibleCleanupProvider.makeRequest(messages: messages, endpoint: ollama.chatCompletionsURL, model: "a\nb", apiKey: nil) }
         check((try? OpenAICompatibleCleanupProvider.makeRequest(messages: messages, endpoint: ollama.chatCompletionsURL, model: "lmstudio-community/qwen2.5-7b@q4_k_m", apiKey: nil)) != nil, "LM Studio-style model id accepted")
 
-        // OpenRouter still builds the same shape through the shared format.
-        let orBody = json((try? OpenRouterCleanupProvider.makeRequest(messages: messages, apiKey: key))?.httpBody)
-        check(Set(orBody.keys) == Set(body.keys), "OpenRouter and local share one request shape")
 
         check((try? OpenAICompatibleCleanupProvider.parse(result(200, localChatOK))) == "Please send the report.", "local chat parse")
         expectError(.malformedResponse(.localServer), "local truncated output") { try OpenAICompatibleCleanupProvider.parse(result(200, localChatLength)) }

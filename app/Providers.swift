@@ -346,8 +346,8 @@ enum ProviderErrorClassifier {
         return .network(provider)
     }
 
-    /// Classifies a non-success HTTP result, or a 200 that carries an error object (OpenRouter
-    /// reports errors raised mid-generation that way).
+    /// Classifies a non-success HTTP result, or a 200 that carries an error object (some gateways
+    /// report errors raised mid-generation that way).
     static func classify(provider: ProviderID, result: HTTPResult, now: Date = Date()) -> ProviderError {
         let info = ErrorBody(result.body)
         var status = result.status
@@ -362,13 +362,8 @@ enum ProviderErrorClassifier {
         case 401:
             return .authentication(provider)
         case 403:
-            if provider == .openrouter && (text.contains("moderation") || text.contains("guardrail") || text.contains("flagged")) {
-                return .contentBlocked(provider)
-            }
             return .authentication(provider)
         case 402:
-            return .quota(provider)
-        case 412 where provider == .fireworks:
             return .quota(provider)
         case 413:
             return .payloadTooLarge(provider, limitBytes: nil)
@@ -531,26 +526,22 @@ private func requireModel(_ model: String, provider: ProviderID) throws {
           !model.contains("..") else { throw ProviderError.invalidConfiguration(provider) }
 }
 
-/// OpenAI-style `POST …/chat/completions`, shared by OpenRouter and local servers.
+/// OpenAI-style `POST …/chat/completions`, shared by the custom cleanup endpoint and local servers.
 enum OpenAIChatFormat {
     private struct Message: Encodable { let role: String; let content: String }
-    private struct Routing: Encodable { let zdr: Bool }
     private struct Body: Encodable {
         let model: String
         let messages: [Message]
         let temperature: Double
         let stream: Bool
         let max_tokens: Int?
-        /// OpenRouter-only routing; omitted from the JSON when nil.
-        let provider: Routing?
     }
 
     /// `bearer` nil sends no Authorization header (local servers without a key).
-    static func makeRequest(endpoint: URL, bearer: APIKey?, model: String, messages: CleanupMessages, maxTokens: Int?, zeroDataRetention: Bool = false) throws -> URLRequest {
+    static func makeRequest(endpoint: URL, bearer: APIKey?, model: String, messages: CleanupMessages, maxTokens: Int?) throws -> URLRequest {
         let body = Body(model: model,
                         messages: [Message(role: "system", content: messages.system), Message(role: "user", content: messages.user)],
-                        temperature: 0, stream: false, max_tokens: maxTokens,
-                        provider: zeroDataRetention ? Routing(zdr: true) : nil)
+                        temperature: 0, stream: false, max_tokens: maxTokens)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         var request = URLRequest(url: endpoint)
@@ -562,7 +553,7 @@ enum OpenAIChatFormat {
         return request
     }
 
-    /// `choices[0].message.content`. Errors can arrive with HTTP 200 (OpenRouter), so the `error`
+    /// `choices[0].message.content`. Errors can arrive with HTTP 200 (some gateways), so the `error`
     /// object is checked first. A `length` finish (truncated) is an error.
     static func parse(provider: ProviderID, result: HTTPResult) throws -> String {
         guard (200..<300).contains(result.status) else { throw ProviderErrorClassifier.classify(provider: provider, result: result) }
@@ -577,106 +568,6 @@ enum OpenAIChatFormat {
         }
         guard let message = first["message"] as? [String: Any], let content = message["content"] as? String else { throw ProviderError.malformedResponse(provider) }
         return content
-    }
-}
-
-// MARK: - Fireworks speech to text
-
-/// DEPRECATED UPSTREAM: Fireworks deprecated audio inference on 2026-06-10 (see PROVIDERS.md).
-/// Kept because the PRD named it; do not offer it until a live check with a real key passes.
-struct FireworksTranscriptionProvider: TranscriptionProvider {
-    static let defaultEndpoint = URL(string: "https://audio-turbo.api.fireworks.ai/v1/audio/transcriptions")!
-    static let defaultModel = "whisper-v3-turbo"
-    static let validationURL = URL(string: "https://api.fireworks.ai/v1/accounts/fireworks/models?pageSize=1")!
-
-    let id = ProviderID.fireworks
-    let apiKey: APIKey
-    var endpoint: URL = FireworksTranscriptionProvider.defaultEndpoint
-    var model: String = FireworksTranscriptionProvider.defaultModel
-    var timeout: TimeInterval = 60
-    var maxUploadBytes: Int = 25_000_000
-    var transport: HTTPTransport = URLSessionTransport()
-
-    init(apiKey: APIKey) { self.apiKey = apiKey }
-
-    var disclosure: DataDisclosure {
-        DataDisclosure(provider: id, stage: .transcription, destinationHost: endpoint.host ?? "fireworks.ai",
-                       leavesDevice: ["the recorded audio", "your dictionary's spellings as a vocabulary hint"],
-                       staysOnDevice: ["history", "the rest of the dictionary", "other apps' text"],
-                       retentionNote: "Fireworks states it does not store prompt or generation data without opt-in; whether this covers audio is not documented.")
-    }
-
-    static func makeRequest(audio: AudioPayload, apiKey: APIKey, endpoint: URL = defaultEndpoint, model: String = defaultModel, boundary: String = Multipart.makeBoundary()) -> URLRequest {
-        OpenAITranscriptionFormat.makeRequest(endpoint: endpoint, apiKey: apiKey, model: model, audio: audio, includePrompt: true, boundary: boundary)
-    }
-
-    static func parse(_ result: HTTPResult) throws -> String { try OpenAITranscriptionFormat.parse(provider: .fireworks, result: result) }
-
-    static func makeValidationRequest(apiKey: APIKey) -> URLRequest {
-        var request = URLRequest(url: validationURL)
-        request.setValue("Bearer \(apiKey.secret)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        return request
-    }
-
-    func transcribe(_ audio: AudioPayload) async throws -> String {
-        try requireModel(model, provider: id)
-        guard audio.data.count <= maxUploadBytes else { throw ProviderError.payloadTooLarge(id, limitBytes: maxUploadBytes) }
-        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: timeout)
-            .execute(Self.makeRequest(audio: audio, apiKey: apiKey, endpoint: endpoint, model: model))
-        return try Self.parse(result)
-    }
-
-    /// Proves the key works on the general Fireworks API only, not that audio is available.
-    func validate() async throws {
-        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15).execute(Self.makeValidationRequest(apiKey: apiKey))
-        try validationResult(provider: id, result)
-    }
-}
-
-// MARK: - OpenRouter speech to text
-
-struct OpenRouterTranscriptionProvider: TranscriptionProvider {
-    static let defaultEndpoint = URL(string: "https://openrouter.ai/api/v1/audio/transcriptions")!
-    static let defaultModel = "openai/whisper-large-v3-turbo"
-    /// Documented multipart cap.
-    static let multipartLimitBytes = 25_000_000
-
-    let id = ProviderID.openrouter
-    let apiKey: APIKey
-    var endpoint: URL = OpenRouterTranscriptionProvider.defaultEndpoint
-    var model: String = OpenRouterTranscriptionProvider.defaultModel
-    /// Upstream providers time out after 60 s; allow some margin for upload.
-    var timeout: TimeInterval = 75
-    var transport: HTTPTransport = URLSessionTransport()
-
-    init(apiKey: APIKey) { self.apiKey = apiKey }
-
-    var disclosure: DataDisclosure {
-        DataDisclosure(provider: id, stage: .transcription, destinationHost: endpoint.host ?? "openrouter.ai",
-                       leavesDevice: ["the recorded audio"],
-                       staysOnDevice: ["history", "the dictionary", "other apps' text"],
-                       retentionNote: "OpenRouter does not store prompts unless you opt in; the upstream speech provider's own retention policy applies.")
-    }
-
-    /// `prompt` is ignored by this endpoint, so dictionary terms are never sent.
-    static func makeRequest(audio: AudioPayload, apiKey: APIKey, endpoint: URL = defaultEndpoint, model: String = defaultModel, boundary: String = Multipart.makeBoundary()) -> URLRequest {
-        OpenAITranscriptionFormat.makeRequest(endpoint: endpoint, apiKey: apiKey, model: model, audio: audio, includePrompt: false, boundary: boundary)
-    }
-
-    static func parse(_ result: HTTPResult) throws -> String { try OpenAITranscriptionFormat.parse(provider: .openrouter, result: result) }
-
-    func transcribe(_ audio: AudioPayload) async throws -> String {
-        try requireModel(model, provider: id)
-        guard audio.data.count <= Self.multipartLimitBytes else { throw ProviderError.payloadTooLarge(id, limitBytes: Self.multipartLimitBytes) }
-        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: timeout)
-            .execute(Self.makeRequest(audio: audio, apiKey: apiKey, endpoint: endpoint, model: model))
-        return try Self.parse(result)
-    }
-
-    func validate() async throws {
-        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15).execute(OpenRouterCleanupProvider.makeValidationRequest(apiKey: apiKey))
-        try validationResult(provider: id, result)
     }
 }
 
@@ -878,60 +769,6 @@ enum GeminiResponse {
         let texts = parts.filter { ($0["thought"] as? Bool) != true }.compactMap { $0["text"] as? String }
         guard !texts.isEmpty else { throw ProviderError.malformedResponse(.gemini) }
         return texts.joined()
-    }
-}
-
-// MARK: - OpenRouter cleanup
-
-struct OpenRouterCleanupProvider: CleanupProvider {
-    static let defaultEndpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
-    static let defaultModel = "google/gemini-3.5-flash-lite"
-    static let validationURL = URL(string: "https://openrouter.ai/api/v1/key")!
-
-    let id = ProviderID.openrouter
-    let apiKey: APIKey
-    var endpoint: URL = OpenRouterCleanupProvider.defaultEndpoint
-    var model: String = OpenRouterCleanupProvider.defaultModel
-    var timeout: TimeInterval = 30
-    var maxTokens: Int? = 8192
-    /// Sends `provider.zdr = true`, which restricts routing to Zero Data Retention endpoints.
-    /// A model with no such endpoint then fails (typically 503) instead of falling back.
-    var zeroDataRetention = false
-    var transport: HTTPTransport = URLSessionTransport()
-
-    init(apiKey: APIKey) { self.apiKey = apiKey }
-
-    var disclosure: DataDisclosure {
-        DataDisclosure(provider: id, stage: .cleanup, destinationHost: endpoint.host ?? "openrouter.ai",
-                       leavesDevice: ["the transcript text", "relevant dictionary terms"],
-                       staysOnDevice: ["audio", "history", "the rest of the dictionary"],
-                       retentionNote: zeroDataRetention
-                           ? "Routed only to zero-data-retention endpoints; OpenRouter does not store prompts unless you opt in."
-                           : "OpenRouter does not store prompts unless you opt in; the upstream model provider's retention policy applies.")
-    }
-
-    static func makeRequest(messages: CleanupMessages, apiKey: APIKey, model: String = defaultModel, endpoint: URL = defaultEndpoint, maxTokens: Int? = 8192, zeroDataRetention: Bool = false) throws -> URLRequest {
-        try requireModel(model, provider: .openrouter)
-        return try OpenAIChatFormat.makeRequest(endpoint: endpoint, bearer: apiKey, model: model, messages: messages, maxTokens: maxTokens, zeroDataRetention: zeroDataRetention)
-    }
-
-    static func parse(_ result: HTTPResult) throws -> String { try OpenAIChatFormat.parse(provider: .openrouter, result: result) }
-
-    static func makeValidationRequest(apiKey: APIKey) -> URLRequest {
-        var request = URLRequest(url: validationURL)
-        request.setValue("Bearer \(apiKey.secret)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        return request
-    }
-
-    func cleanup(_ messages: CleanupMessages) async throws -> String {
-        let request = try Self.makeRequest(messages: messages, apiKey: apiKey, model: model, endpoint: endpoint, maxTokens: maxTokens, zeroDataRetention: zeroDataRetention)
-        return try Self.parse(try await ProviderHTTP(provider: id, transport: transport, deadline: timeout).execute(request))
-    }
-
-    func validate() async throws {
-        let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15).execute(Self.makeValidationRequest(apiKey: apiKey))
-        try validationResult(provider: id, result)
     }
 }
 
