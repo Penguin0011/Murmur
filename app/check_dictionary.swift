@@ -488,8 +488,8 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         try FileManager.default.createDirectory(at: locations.chunks, withIntermediateDirectories: true)
         try Data([4, 5, 6]).write(to: locations.chunks.appendingPathComponent("chunk.wav"))
         var keychainCalled = false
-        let report = DataWipe.deleteAllData(locations) { keychainCalled = true; return ["fireworks-api-key"] }
-        check(report.succeeded && keychainCalled && report.keychainItems == ["fireworks-api-key"], "deleteAll reports keychain removal")
+        let report = DataWipe.deleteAllData(locations) { keychainCalled = true; return ["gemini-api-key"] }
+        check(report.succeeded && keychainCalled && report.keychainItems == ["gemini-api-key"], "deleteAll reports keychain removal")
         check(report.removed.count == 4, "history, dictionary+ledger, retry audio and abandoned chunks removed")
         for url in [locations.history, locations.dictionary, locations.ledger, locations.retryAudio, locations.chunks] {
             check(!FileManager.default.fileExists(atPath: url.path), "\(url.lastPathComponent) gone")

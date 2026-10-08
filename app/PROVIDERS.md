@@ -6,39 +6,20 @@ Verified on **2026-10-03** from official documentation, fetched that day. Tags: 
 
 | Route | Provider | Status on 2026-10-03 |
 |---|---|---|
-| Speech to text | Fireworks | **Not usable as the launch STT provider.** Fireworks' changelog says "Audio inference and image generation are deprecated" (2026-06-10). The transcription guide and API reference now return 404, and audio pricing no longer appears on the pricing page. [Certain] Unauthenticated probes on 2026-10-03: `audio-turbo.api.fireworks.ai` and `audio-turbo.us-virginia-1.direct.fireworks.ai` returned `503 no healthy upstream`, and `audio-prod.api.fireworks.ai` returned 401. [Certain] |
-| Speech to text | OpenRouter | **Documented and current.** `POST https://openrouter.ai/api/v1/audio/transcriptions` accepts OpenAI-style multipart. [Certain] Recommended as the launch STT route, pending a live test with a real key. [Likely] |
+| Speech to text | Fireworks | **Removed 2026-10-07.** Deprecated upstream on 2026-06-10. |
+| Speech to text | OpenRouter | **Removed 2026-10-07; deprecated upstream** (project owner's report, not re-verified here). Use **Custom Provider** settings for any OpenAI-compatible service. |
 | Speech to text | Gemini (audio-in LLM) | `generateContent` with inline audio. **Implemented as an LLM transcriber** (`GeminiTranscriptionProvider`), with mitigations; see "Gemini audio transcription" below. It is not ASR. [Certain] |
 | Speech to text | Gemini 3.5 Transcribe | A dedicated ASR model, `gemini-3.5-transcribe`, documented only through the Beta Interactions API (`POST /v1beta/interactions`). [Certain] **Implemented** as `GeminiTranscribeProvider`, per the user's decision of 2026-10-03, with `store` on: Google keeps each interaction 55 days (paid tier) or 1 day (free tier), and it can be deleted by API. See "Gemini 3.5 Transcribe" below. |
 | Cleanup | Custom OpenAI-compatible API | Configurable base URL and model ID, `POST /v1/chat/completions`; may be hosted or a local server. Implemented as `OpenAICompatibleCleanupProvider`. |
 | Cleanup | Gemini | `models.generateContent` is documented and "remains fully supported". [Certain] Implemented. |
 
-`Providers.swift` still includes the Fireworks STT client, because the PRD named it and the endpoint may come back. It is marked deprecated and unverified, and its base URL is configurable. The integration lead should not offer it in settings unless a live test with a real key passes. [Certain]
+No Fireworks or OpenRouter client remains in `Providers.swift`, and neither is offered in Settings. Settings offer Gemini and any OpenAI-compatible endpoint for speech-to-text and cleanup; each stage has its own base URL, model and key. [Certain]
 
-## Fireworks
+## Fireworks (removed 2026-10-07)
 
-Sources:
-- Changelog, 2026-06-10 entry "Audio inference and image generation deprecation": https://docs.fireworks.ai/updates/changelog
-- Documentation index (no transcription page listed): https://docs.fireworks.ai/llms.txt
-- Archived Speech to Text guide, Wayback snapshot of 2026-02-15: https://web.archive.org/web/20260215102338/https://docs.fireworks.ai/guides/querying-asr-models
-- Error codes: https://docs.fireworks.ai/guides/inference-error-codes
-- Rate limits: https://docs.fireworks.ai/serverless/rate-limits
-- Data handling: https://docs.fireworks.ai/guides/security_compliance/data_handling
-- List Models: https://docs.fireworks.ai/api-reference/list-models and https://docs.fireworks.ai/faq-new/models-inference/how-to-check-if-a-model-is-available-on-serverless
-- Third-party reports, not official: https://github.com/BerriAI/litellm/issues/30916 (2026-06-21) and https://github.com/TypeWhisper/typewhisper-win/pull/481 (2026-09-18)
+The Fireworks client was deleted on 2026-10-07. Fireworks deprecated audio inference on 2026-06-10 (changelog entry "Audio inference and image generation deprecation"), so Murmur could not offer it. Its Keychain account is no longer read. Any other OpenAI-compatible transcription service is reached through **Custom Provider** settings.
 
-Facts:
-- **Is there a true transcription endpoint?** There was one: `POST {base}/v1/audio/transcriptions`, OpenAI-compatible multipart. The archived guide lists model `whisper-v3` on base `https://audio-prod.api.fireworks.ai` and model `whisper-v3-turbo` on base `https://audio-turbo.api.fireworks.ai`. [Likely, from the archived official page] Audio inference has been deprecated since 2026-06-10. [Certain] Current docs have no transcription reference. [Certain]
-- One third-party report says `api.fireworks.ai/inference/v1/audio/transcriptions` returns 401 with keys that work for chat. [Likely] Another says Whisper V3 Turbo still worked in September 2026. [Likely] My unauthenticated probe on 2026-10-03 found both turbo hosts returning 503. [Certain] Whether turbo works with a real key today is **unverified**.
-- **Model IDs:** `whisper-v3` and `whisper-v3-turbo`, from the archived page only. [Likely] There is no current official model ID for audio.
-- **Auth header:** `Authorization: Bearer <FIREWORKS_API_KEY>`. [Certain for the Fireworks API in general; Likely for the audio hosts]
-- **Audio formats and size:** the archived guide says "Supports files up to 1GB in formats like MP3, FLAC, and WAV". [Likely] The current limit is unknown.
-- **Pricing:** audio pricing no longer appears on https://fireworks.ai/pricing. **Unverified.**
-- **Data retention:** "Fireworks does not log or store prompt or generation data for any open models, without explicit user opt-in"; data lives in volatile memory for the duration of the request, and metadata (such as token counts) is logged. [Certain] Whether this policy covered the audio hosts is not stated. [Guessing]
-- **Error codes** (official table): 400 bad request; 401 invalid API key; 402 payment required ("exceeded usage limits"); 403 authentication issues; 404 model not found or not deployed; 408 timeout; 412 account suspended; 413 payload too large; 429 rate limited; 500, 502, 503 and 504 server-side; 520 unknown. [Certain]
-- **Rate-limit headers:** adaptive TPM limits are reported in `X-Ratelimit-Limit-Tokens-*` headers. A `Retry-After` header on 429 is not documented. [Certain about the headers; Retry-After unverified]
-- **Error body shape**, observed without a key on `api.fireworks.ai`: `{"error":{"message":"...","param":null,"code":"UNAUTHORIZED","type":"error"},"request_id":"..."}`. On the audio host it was `{"error":{"object":"error","type":"unauthorized","message":"Unauthorized"}}`. [Certain, as observed]
-- **Validation call:** `GET https://api.fireworks.ai/v1/accounts/fireworks/models?pageSize=1` with Bearer auth is the documented List Models call. [Certain] It proves the key works on the general API, not that audio is available. [Certain]
+The 2026-10-03 verification notes are in git history.
 
 ## Gemini API
 
@@ -173,45 +154,26 @@ Facts and choices:
 - **Connection refused:** `URLError.cannotConnectToHost` becomes `serverNotRunning(address:)`, for example "No local model server is running at localhost:11434". The address comes from the configured URL and never includes the path, key or transcript. This was checked live on Linux. [Certain]
 - **Timeout:** 120 s by default, because a cold model load can be slow, clamped to 1–300 s. [Guessing at the right default]
 
-## OpenRouter
+## OpenRouter (removed 2026-10-07)
 
-Sources:
-- Documentation index: https://openrouter.ai/docs/llms.txt
-- Chat completions: https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion
-- Speech-to-Text: https://openrouter.ai/docs/guides/overview/multimodal/stt
-- Errors: https://openrouter.ai/docs/api_reference/errors-and-debugging
-- Limits: https://openrouter.ai/docs/api_reference/limits
-- Current key: https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key
-- Data collection: https://openrouter.ai/docs/guides/privacy/data-collection
-- Provider logging: https://openrouter.ai/docs/guides/privacy/provider-logging
-- ZDR: https://openrouter.ai/docs/guides/features/zdr
-- Live public model catalogue, no key needed: https://openrouter.ai/api/v1/models and https://openrouter.ai/api/v1/models?output_modalities=transcription
+The OpenRouter speech-to-text and cleanup clients were deleted on 2026-10-07. OpenRouter is deprecated upstream, as reported by the project owner on that date; this document did not re-verify the deprecation. Users who want OpenRouter, or any other OpenAI-compatible service, enter its base URL, model ID and key in the **Custom Provider** settings. Murmur still reads the legacy OpenRouter Keychain account once, during migration, and copies that key to the custom endpoint.
 
-Facts:
-- **Chat endpoint:** `POST https://openrouter.ai/api/v1/chat/completions` with `Authorization: Bearer <key>` and the OpenAI-style `messages` array. The response text is in `choices[0].message.content`. [Certain]
-- **Cleanup model IDs present in the live catalogue on 2026-10-03:** `google/gemini-3.5-flash-lite` (default; $0.30 in and $2.50 out per 1M tokens), `google/gemini-3.8-flash`, `openai/gpt-5.4-mini`, `~anthropic/claude-haiku-latest`. [Certain, as listed] The catalogue changes, so the model ID is configurable.
-- **STT endpoint:** `POST https://openrouter.ai/api/v1/audio/transcriptions`. It accepts JSON (`input_audio.data` base64 plus `format`) or OpenAI-style multipart with fields `file`, `model`, `language`, `temperature`, `response_format` (`json` or `verbose_json`) and `timestamp_granularities`. `prompt` is "accepted but ignored". [Certain] The response is `{"text": "...", "usage": {"seconds": …, "cost": …}}`. [Certain]
-- **STT limits:** "Multipart uploads are limited to 25 MB." Upstream providers time out after 60 seconds per request. Formats include wav, mp3, flac, m4a, ogg, webm and aac. [Certain]
-- **STT model IDs in the live catalogue:** `openai/whisper-large-v3-turbo` (default), `openai/whisper-large-v3`, `openai/whisper-1`, `openai/gpt-4o-mini-transcribe`, `nvidia/parakeet-tdt-0.6b-v3`, and others. [Certain, as listed] Pricing, per the catalogue's `prompt` field: `whisper-large-v3-turbo` 0.00000333 and `whisper-1` 0.0001. [Certain as listed] I read the unit as USD per second of audio, because whisper-1 then works out to $0.006/min. [Likely]
-- **Errors:** the body is `{"error":{"code":<int>,"message":"...","metadata":{...}}}`. Status codes: 400, 401 (invalid credentials), 402 (insufficient credits), 403 (guardrail or moderation), 408, 429 (rate limited), 502 (model down) and 503 (no provider meets routing requirements). [Certain] **Errors raised after generation starts return HTTP 200 with an error in the body**, so the parser checks for an `error` object even on 200. [Certain] `Retry-After` is sent on 429 and 503, and on 402 when the in-flight budget is exceeded. [Certain]
-- **Data retention:** OpenRouter "does not store your prompts or responses" unless the user opts into logging. Metadata is stored. Upstream providers have their own retention. The per-request `"provider": {"zdr": true}` routes only to Zero Data Retention endpoints. [Certain] `Providers.swift` exposes `zeroDataRetention` (default `false`). Turning it on can make a model return 503 when no ZDR endpoint exists. [Likely]
-- **Payload limit for chat:** not stated as a byte limit. 413 is in the general HTTP list but not described. [Guessing]
-- **Validation call:** `GET https://openrouter.ai/api/v1/key` (current key info, which costs no tokens). [Certain] Without a key it returned `{"error":{"message":"No cookie auth credentials found","code":401}}`. [Certain, as observed]
+The verification notes from 2026-10-03 are in the git history of this file, before the removal commit.
 
 ## Error classification used by `Providers.swift`
 
 | ProviderError | Triggers |
 |---|---|
 | `authentication` | 401 or 403 on any provider; Gemini 400 whose status is `INVALID_ARGUMENT` and whose message or reason mentions an API key (including Google's one-element array error bodies) |
-| `quota` | 402 on any provider; Fireworks 412; Gemini 429 whose body says the daily quota or billing limit is reached (`quota_exceeded`, "quota" plus "per day", or "billing") |
+| `quota` | 402 on any provider; Gemini 429 whose body says the daily quota or billing limit is reached (`quota_exceeded`, "quota" plus "per day", or "billing") |
 | `rateLimited(retryAfter)` | other 429s; `Retry-After` (seconds or HTTP-date) or Gemini `RetryInfo.retryDelay` |
-| `payloadTooLarge` | 413; a local size check before upload (25 MB for OpenRouter STT; 20 MB total request for Gemini, so about 14.95 MB of raw audio for Gemini STT) |
+| `payloadTooLarge` | 413; a local size check before upload (20 MB total request for Gemini, so about 14.95 MB of raw audio for Gemini STT) |
 | `timeout` | 408, 504, `URLError.timedOut`, or the explicit request timeout |
 | `network` | offline, DNS or connection failures (cloud); DNS or other failures for a local server |
 | `serverNotRunning(address)` | local server only: connection refused (`URLError.cannotConnectToHost`) |
-| `server` | 5xx (other than 504) and 520–530; OpenRouter 200-with-error |
+| `server` | 5xx (other than 504) and 520–530; an error object inside an HTTP 200 on the chat format |
 | `malformedResponse` | 2xx whose body is not parseable or has no text; Gemini empty candidates or MAX_TOKENS; Gemini STT text that is not exactly `{"transcript": string}` |
-| `contentBlocked` | Gemini `promptFeedback.blockReason` or a safety finish reason; Gemini 3.5 Transcribe `status: failed` with a documented blocked code; OpenRouter moderation 403; `content_filter` finish |
+| `contentBlocked` | Gemini `promptFeedback.blockReason` or a safety finish reason; Gemini 3.5 Transcribe `status: failed` with a documented blocked code; `content_filter` finish |
 | `rejected` | other 4xx (bad request, model not found); any 3xx (redirects are not followed for local servers) |
 
 Gemini 3.5 Transcribe also maps `status: failed` (other codes) and `cancelled` to `server`, `incomplete`, `requires_action` and unknown statuses to `malformedResponse`, and a polling deadline or `maxPolls` to `timeout`.
@@ -222,10 +184,7 @@ User messages contain only the provider name, the category and a retry hint. The
 
 ## Not verified
 
-- Whether the Fireworks turbo host currently accepts a real key, and its current size limits and pricing.
 - Gemini's 413 behaviour, the exact status for an invalid key, and `RetryInfo` presence on generateContent.
-- OpenRouter STT and chat with a real key; the ZDR availability of specific models.
-- Whether the OpenRouter STT catalogue's `prompt` price is per second.
 - Gemini STT with a real key: whether generateContent honours `responseFormat`, how often the model answers, tidies or hallucinates, and the right silence threshold.
 - Whether `gemini-3.5-transcribe` works through generateContent (the docs are silent).
 - Gemini 3.5 Transcribe with a real key. Specifically:

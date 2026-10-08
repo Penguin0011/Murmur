@@ -24,8 +24,7 @@ enum TranscriptionRoute: String, CaseIterable, Sendable {
     case cloud
 }
 
-/// Cloud transcribers offered in Settings: implemented and not deprecated upstream. Fireworks is
-/// deliberately absent (its audio inference was deprecated on 2026-06-10, see PROVIDERS.md).
+/// Cloud transcribers offered in Settings. Other OpenAI-compatible services use the custom endpoint.
 /// To add a provider, add a case here, a `displayName` and `providerID`, and one case in
 /// `makeTranscriptionProvider(id:key:)`.
 enum CloudTranscriber: String, CaseIterable, Identifiable, Sendable {
@@ -190,7 +189,7 @@ struct RouteSettings: Equatable, Sendable {
         let legacyTranscription = defaults.string(forKey: Key.cloudTranscriber) == "openrouter-whisper"
         let oldTranscriber = defaults.string(forKey: Key.cloudTranscriber)
         settings.cloudTranscriber = legacyTranscription ? .customAPI : (oldTranscriber == "gemini-audio" || oldTranscriber == "gemini-transcribe" ? .gemini : oldTranscriber.flatMap(CloudTranscriber.init(rawValue:)) ?? .gemini)
-        settings.customTranscriptionModel = defaults.string(forKey: Key.customTranscriptionModel) ?? (legacyTranscription ? OpenRouterTranscriptionProvider.defaultModel : "whisper-1")
+        settings.customTranscriptionModel = defaults.string(forKey: Key.customTranscriptionModel) ?? (legacyTranscription ? "openai/whisper-large-v3-turbo" : "whisper-1")
         settings.geminiTranscriptionModel = defaults.string(forKey: Key.geminiTranscriptionModel) ??
             (oldTranscriber == "gemini-audio" ? GeminiTranscriptionProvider.defaultModel : GeminiTranscribeProvider.defaultModel)
         let oldChoice = defaults.string(forKey: Key.cleanup)
@@ -207,7 +206,7 @@ struct RouteSettings: Equatable, Sendable {
         settings.customAPIModel = defaults.string(forKey: Key.customAPIModel) ?? {
             switch oldChoice {
             case "cerebras": return "gpt-oss-120b"
-            case "openrouter": return OpenRouterCleanupProvider.defaultModel
+            case "openrouter": return "google/gemini-3.5-flash-lite"
             case "local-server": return defaults.string(forKey: Key.legacyServerModel) ?? ""
             default: return defaultCustomAPIModel
             }
@@ -592,10 +591,6 @@ enum KeyCheck {
                 guard let key else { return KeyText.missing }
                 var p = GeminiCleanupProvider(apiKey: key); if let transport { p.transport = transport }
                 try await p.validate()
-            case .openrouter:
-                guard let key else { return KeyText.missing }
-                var p = OpenRouterCleanupProvider(apiKey: key); if let transport { p.transport = transport }
-                try await p.validate()
             case .customAPI:
                 var p = try OpenAICompatibleCleanupProvider(baseURL: apiBaseURL, model: "validation", apiKey: key, provider: .customAPI)
                 if let transport { p.transport = transport }
@@ -607,9 +602,8 @@ enum KeyCheck {
             case .localServer:
                 var p = try OpenAICompatibleCleanupProvider(baseURL: apiBaseURL, model: "validation", apiKey: key); if let transport { p.transport = transport }
                 try await p.validate()
-            case .cerebras:
-                return ProviderError.invalidConfiguration(provider).userMessage
-            case .fireworks:
+            case .cerebras, .openrouter:
+                // Legacy key accounts only; the migration copies them to the custom endpoint.
                 return ProviderError.invalidConfiguration(provider).userMessage
             }
             return KeyText.validated(provider)

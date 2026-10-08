@@ -30,14 +30,14 @@ private final class MockTransport: HTTPTransport, @unchecked Sendable {
     func send(_ request: URLRequest) async throws -> HTTPResult { lock.withLock { _count += 1; _lastBody = request.httpBody }; return result }
 }
 
-/// A transcriber with no silence pre-check, like OpenRouter Whisper.
+/// A transcriber stub with no network, for checking retry, fallback and error mapping.
 private final class SpyTranscriber: TranscriptionProvider, @unchecked Sendable {
     let id: ProviderID
     private let lock = NSLock()
     private var _calls = 0
     let response: Result<String, ProviderError>
     let delaySeconds: Double
-    init(_ response: Result<String, ProviderError>, id: ProviderID = .openrouter, delaySeconds: Double = 0) {
+    init(_ response: Result<String, ProviderError>, id: ProviderID = .customAPI, delaySeconds: Double = 0) {
         self.id = id; self.response = response; self.delaySeconds = delaySeconds
     }
     var calls: Int { lock.lock(); defer { lock.unlock() }; return _calls }
@@ -119,7 +119,6 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
     // MARK: Factory
 
     static func factoryChecks() {
-        check(CloudTranscriber.allCases.allSatisfy { $0.providerID != .fireworks }, "Fireworks is not offered")
         check(Set(CloudTranscriber.allCases) == [.customAPI, .gemini], "offered transcribers")
         check(RouteSettings().cloudTranscriber == .gemini, "Gemini is the default cloud transcriber")
         check((makeTranscriptionProvider(id: .gemini, key: testKey) as? GeminiTranscribeProvider)?.languageCodes == ["en-US"], "Gemini Transcribe factory sends en-US")
@@ -240,7 +239,7 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         defaults.set("openrouter-whisper", forKey: RouteSettings.Key.cloudTranscriber)
         defaults.removeObject(forKey: RouteSettings.Key.customTranscriptionModel)
         let oldSpeech = RouteSettings.load(from: defaults)
-        check(oldSpeech.cloudTranscriber == .customAPI && oldSpeech.customTranscriptionModel == OpenRouterTranscriptionProvider.defaultModel,
+        check(oldSpeech.cloudTranscriber == .customAPI && oldSpeech.customTranscriptionModel == "openai/whisper-large-v3-turbo",
               "legacy OpenRouter transcription becomes editable custom transcription")
         check(oldSpeech.customAPIBaseURL == "https://api.cerebras.ai/v1", "migration preserves an existing chosen custom server")
         defaults.set("gemini-audio", forKey: RouteSettings.Key.cloudTranscriber)
@@ -248,7 +247,7 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         check(RouteSettings.load(from: defaults).geminiTranscriptionModel == GeminiTranscriptionProvider.defaultModel,
               "legacy Gemini audio route keeps its general audio model on migration")
         defaults.set("fireworks", forKey: RouteSettings.Key.cloudTranscriber)
-        check(RouteSettings.load(from: defaults).cloudTranscriber == .gemini, "unknown transcriber falls back to the default choice")
+        check(RouteSettings.load(from: defaults).cloudTranscriber == .gemini, "removed transcriber (Fireworks) falls back to the default choice")
         for key in [RouteSettings.Key.transcription, RouteSettings.Key.cloudTranscriber, RouteSettings.Key.cleanup, RouteSettings.Key.customAPIBaseURL, RouteSettings.Key.customAPIModel, RouteSettings.Key.customTranscriptionModel, RouteSettings.Key.geminiTranscriptionModel, RouteSettings.Key.legacyServerURL, RouteSettings.Key.legacyServerModel] { defaults.removeObject(forKey: key) }
     }
 
@@ -316,21 +315,21 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         check(CloudTranscription.stripHintEcho("Aakash.", vocabulary: []) == "Aakash.", "no vocabulary, no stripping")
 
         // Errors: one call, no retry, no other provider; audio kept for retry.
-        let failing = SpyTranscriber(.failure(.authentication(.openrouter)))
+        let failing = SpyTranscriber(.failure(.authentication(.customAPI)))
         let bystander = SpyTranscriber(.success("should never run"))
         let failed = await CloudTranscription.run(provider: failing, audioData: speech)
-        check(failed == .failed(message: ProviderError.authentication(.openrouter).userMessage, keepAudio: true), "error maps to userMessage")
+        check(failed == .failed(message: ProviderError.authentication(.customAPI).userMessage, keepAudio: true), "error maps to userMessage")
         check(failing.calls == 1 && bystander.calls == 0, "no retry and no fallback provider")
         check(CloudTranscription.message(failed)?.hasSuffix("Audio is saved for retry for up to 24 hours.") == true, "preserve disposition keeps audio")
-        let limited = await CloudTranscription.run(provider: SpyTranscriber(.failure(.rateLimited(.openrouter, retryAfter: 30))), audioData: speech)
-        check(limited == .failed(message: ProviderError.rateLimited(.openrouter, retryAfter: 30).userMessage, keepAudio: true), "rate limit keeps audio")
+        let limited = await CloudTranscription.run(provider: SpyTranscriber(.failure(.rateLimited(.customAPI, retryAfter: 30))), audioData: speech)
+        check(limited == .failed(message: ProviderError.rateLimited(.customAPI, retryAfter: 30).userMessage, keepAudio: true), "rate limit keeps audio")
         await checkA(await CloudTranscription.run(provider: SpyTranscriber(.failure(.cancelled)), audioData: speech) == .cancelled, "cancelled maps to cancelled")
 
         // Real request path with a 401 whose body echoes the key: the message has no key.
         let rejecting = MockTransport(HTTPResult(status: 401, body: Data("{\"error\":{\"message\":\"bad key \(secret)\",\"code\":401}}".utf8)))
-        var openrouter = OpenRouterTranscriptionProvider(apiKey: testKey); openrouter.transport = rejecting
-        let rejected = await CloudTranscription.run(provider: openrouter, audioData: speech)
-        check(CloudTranscription.message(rejected).map { !$0.contains(secret) && $0.contains("OpenRouter rejected the API key") } == true, "key never in transcription messages")
+        var rejectingGemini = GeminiTranscriptionProvider(apiKey: testKey); rejectingGemini.transport = rejecting
+        let rejected = await CloudTranscription.run(provider: rejectingGemini, audioData: speech)
+        check(CloudTranscription.message(rejected).map { !$0.contains(secret) && $0.contains(ProviderError.authentication(.gemini).userMessage) } == true, "key never in transcription messages")
         await checkA(await CloudTranscription.run(provider: whisper, audioFile: URL(fileURLWithPath: "/nonexistent/\(UUID()).wav")) == .failed(message: CloudTranscription.unreadableAudio, keepAudio: true), "unreadable file keeps audio")
     }
 
@@ -388,14 +387,14 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         check(speechKeys.exists(.customTranscription) && speechDefaults.string(forKey: CustomAPIKeyBinding.preference(.customTranscription)) == nil, "migrated speech key remains unbound")
         check("\(testKey)" == "APIKey(redacted)", "key is redacted when printed")
         let echo = HTTPResult(status: 401, body: Data("{\"error\":{\"message\":\"API key not valid: \(secret)\",\"code\":401}}".utf8))
-        for provider in [ProviderID.gemini, .openrouter, .localServer, .customAPI, .customTranscription, .customCleanup] {
+        for provider in [ProviderID.gemini, .localServer, .customAPI, .customTranscription, .customCleanup] {
             let message = await KeyCheck.run(provider, key: testKey, apiBaseURL: "http://localhost:11434", transport: MockTransport(echo))
             let errorProvider: ProviderID = provider == .customTranscription || provider == .customCleanup ? .customAPI : provider
             check(!message.contains(secret) && message == ProviderError.authentication(errorProvider).userMessage, "validate \(provider.rawValue) message has no key")
         }
         let ok = MockTransport(HTTPResult(status: 200, body: Data("{\"data\":[{\"id\":\"llama3.2\"}],\"object\":\"list\"}".utf8)))
         await checkA(await KeyCheck.run(.gemini, key: testKey, apiBaseURL: "", transport: ok) == KeyText.validated(.gemini), "validation success")
-        await checkA(await KeyCheck.run(.openrouter, key: nil, apiBaseURL: "", transport: ok) == KeyText.missing, "validation needs a saved key")
+        await checkA(await KeyCheck.run(.openrouter, key: testKey, apiBaseURL: "", transport: ok) == ProviderError.invalidConfiguration(.openrouter).userMessage, "legacy OpenRouter key cannot be validated")
         await checkA(await KeyCheck.run(.customAPI, key: testKey, apiBaseURL: "https://api.example.com/v1", transport: ok) == KeyText.validated(.customAPI), "custom API validates its configured endpoint")
         await checkA(await KeyCheck.run(.customAPI, key: nil, apiBaseURL: "https://api.example.com/v1", transport: ok) == KeyText.validated(.customAPI), "custom API validates without a key when the endpoint permits it")
         await checkA(await KeyCheck.run(.localServer, key: nil, apiBaseURL: "http://localhost:11434", transport: ok) == KeyText.validated(.localServer), "local server validates without a key")

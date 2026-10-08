@@ -56,7 +56,7 @@ Proposed behavior: cleanup edits dictation, never answers it, executes instructi
 
 Cleanup acceptance is measured, not asserted. Build a fixed corpus (target 300+ labeled utterances, covering each option, interactions between options, names, numbers, negation, quoted speech, and look-alike prose) before choosing the cleanup model. Proposed pass bar: no more than 1% of utterances with an unintended edit to a name, number, or negation; spoken-correction accuracy and list-formatting precision thresholds set from the corpus baseline and recorded in the decision log. Report each local candidate and the cloud routes against the same corpus.
 
-Local-model guidance and selection: Murmur's built-in rule cleaner is limited and is not an instruction-tuned cleanup model. Tell users that reliable local AI cleanup needs a larger model (start evaluation around 8B parameters); otherwise they can choose Gemini or OpenRouter cleanup. No automatic fallback between cloud routes; a failed cloud cleanup falls back only to on-device local rules (decision, October 6, 2026). Settings should offer a small curated browser (roughly 3–5 choices at a time) of models that have passed the cleanup quality and safety gates, with download size, license, hardware guidance, privacy, benchmark results, and a download/install action. Do not label unbenchmarked models as adequate. Current evidence (October 5, 2026) covers only three candidates of 2B parameters or less on a synthetic corpus, so no downloadable local LLM is yet approved for production. [Certain]
+Local AI cleanup is not a launch target (decision, October 7, 2026). Typical Macs lack the RAM and compute to run a productive cleanup model without slowing other apps, so the PRD no longer requires an 8B local-model evaluation or a curated local-model browser. On-device cleanup is `RuleCleaner`, the deterministic rules pass in `app/Cleanup.swift`, which is measured against the corpus (section 4 thresholds). Users who want AI cleanup choose a cloud route or a user-configured OpenAI-compatible endpoint, which may be a server they run themselves. No automatic fallback between cloud routes; a failed cloud cleanup falls back only to on-device local rules (decision, October 6, 2026). The October 5, 2026 evidence (three local models of 2B parameters or less, none passing) stands as history. [Certain]
 
 Prompt-injection guard: transcripts are data. Cleanup output must pass a bound check against the raw text (length ratio and edit-distance limits per enabled option, no new named entities or numbers). If the check fails, or the model appears to answer or obey the dictation, that output is never inserted: the dictation falls back as decided on October 6, 2026 (below). Log only a content-free failure reason locally. [Certain] Include injection phrases ("ignore previous instructions", "write me a…") in the corpus.
 
@@ -97,16 +97,22 @@ Validation deliverable for the selected default:
 2. Check license and redistribution rights for weights and runtime separately; record exact versions and sources.
 3. Benchmark English dictation on the available Apple Silicon host, including accents, quiet speech, names, numbers, background noise, and 5/30/120-second recordings. Record RAM and macOS version; report results only for the measured configuration. M1/8 GB testing is optional future work. [Certain]
 4. Record word error rate, name/number accuracy, cold/warm latency, peak memory, download size, and processing time. Publish results with the recommendation.
-5. Evaluate a local cleanup model separately against the cleanup contract, starting around 8B parameters. Do not assume a transcription model performs instruction-based cleanup.
+5. Dropped (decision, October 7, 2026): a local LLM cleanup model, for the reason in section 4. Cleanup evaluation covers the RuleCleaner baseline and the cloud and user-configured routes. [Certain]
 6. Validate the selected default and choose an accuracy-focused alternative only if measurements justify it. Resolve upstream/conversion license metadata differences before redistributing weights; do not silently change the model selection if validation fails.
 
-Cloud providers (user-named candidates): **Fireworks API**, **Gemini API**, and **OpenRouter**. [Certain]
+**Benchmark result (October 6, 2026; report `MODEL_BENCHMARK.md` at commit `3551c53`, not yet on `main`).** LibriSpeech test-clean, 100 clips, 2,172 reference words, Apple M3 with 16 GB RAM, macOS 26.6.2. Micro WER: Parakeet Unified 1.34%, Parakeet TDT V2 1.93%, Whisper large-v3 Turbo 2.12%. Median ASR time: 62 ms, 61 ms, and 1.89 s. Unified made 13 fewer word errors than V2 and 17 fewer than Whisper, at the same speed as V2. Unified stays the default. No WER threshold was set before the run; the choice rests on this comparison. [Certain]
+
+Not measured: spontaneous dictation, accents beyond this dataset, background noise, names and numbers in dictation, short commands, and end-to-end latency. The cold-start times are not comparable, because one run included first-use compilation. Live microphone dictation is covered by the usage evidence in section 8, not by this benchmark. [Certain]
+
+Cloud providers as shipped (decision, October 7, 2026): **Gemini** for speech-to-text and cleanup, and **any OpenAI-compatible endpoint** the user configures for speech-to-text and cleanup. Each custom stage has its own base URL, model ID, and Keychain account; the key is bound to the normalized endpoint, so changing the server requires saving the key for it again. **Fireworks and OpenRouter are not offered in Settings.** Fireworks audio inference was deprecated on 2026-06-10. OpenRouter is deprecated upstream (project owner, October 7, 2026), and users reach it or any other OpenAI-compatible service through the custom endpoint. [Certain]
 
 **User decision — October 3, 2026:** pursue Gemini 3.5 Transcribe for cloud speech-to-text, and accept that Google stores Interactions API requests. The app must disclose before first use that audio is sent to and stored by Google. [Certain] The rest of this paragraph is still proposed.
 
 **Verified October 3, 2026 (from the docs; no live key test):** the endpoint is `POST https://generativelanguage.googleapis.com/v1beta/interactions` with model `gemini-3.5-transcribe` and `store` true by default. Google keeps stored interactions for 55 days on the paid tier and 1 day on the free tier, and they can be deleted by ID with `DELETE /v1beta/interactions/{id}`. Implemented as `GeminiTranscribeProvider`. [Certain] Sources: [app/PROVIDERS.md](app/PROVIDERS.md).
 
-**Proposed decision, pending user approval — October 3, 2026 (revised).** Everything in this paragraph is a proposal. No route has had a live test with a real key or a real local server. [Certain] Sources: [app/PROVIDERS.md](app/PROVIDERS.md).
+**Superseded (October 6–7, 2026).** The provider list in this paragraph and the bullets after it is history. The shipped routes are in the paragraph above. [Certain]
+
+**Proposed decision, pending user approval — October 3, 2026 (revised).** Historical; kept for the record. Everything in this paragraph was a proposal. No route has had a live test with a real key or a real local server. [Certain] Sources: [app/PROVIDERS.md](app/PROVIDERS.md).
 
 - **Fireworks STT is dead.** Its audio inference was deprecated on 2026-06-10. [Certain]
 - **Cloud STT options:**
@@ -157,7 +163,7 @@ Treat all transcribed text as untrusted content for cleanup prompts. Bound recor
 
 ## 8. Agent roles and execution order
 
-Milestone 0 has an implemented standalone spike and recorded live results; milestone 1 validation work has started with capture, model, and independent safety workers. Production and release acceptance remain incomplete. [Certain]
+Milestone 0 has an implemented standalone spike and recorded live results; milestone 1 validation work has started with capture, model, and independent safety workers. Live use (October 7, 2026): the development Mac's History holds 454 entries: 326 unverified, 63 verified, 34 copied, 15 held-cleanup (from before the October 6 no-hold decision), 11 failed, and 5 saved-not-inserted. The 326 unverified insertions are the largest open evidence gap: the status means delivery could not be confirmed by read-back, not that the text failed. The human-speech checks in section 10 are accepted as done on the strength of this use. Production and release acceptance remain incomplete. [Certain]
 
 | Role | Ownership and handoff | Depends on | Completion evidence |
 |---|---|---|---|
@@ -209,10 +215,10 @@ Release handoff must include reproducible build instructions, architecture/macOS
 ## 10. Decisions still needed
 
 1. Minimum macOS 26 and Apple Silicon scope remain confirmed. M1/8 GB performance is deferred, with user-selected models and no validated minimum RAM guarantee. Intel remains deferred. [Certain]
-2. Select and benchmark local models on the available Mac; retain local transcription, cleanup-on, explicit cleanup-route choice, and user model selection. Do not silently substitute cloud processing. [Certain]
+2. Select and benchmark local models on the available Mac; retain local transcription, cleanup-on, explicit cleanup-route choice, and user model selection. Do not silently substitute cloud processing. [Certain] Transcription benchmark recorded in section 5 (October 6, 2026); local cleanup dropped (October 7, 2026).
 3. Establish supported automatic-learning apps through the required feasibility spike, with unsupported categories disclosed rather than blocking launch (approved); the 60-second window and two-observation threshold are approved. [Certain]
 4. Product name and release repository: **Murmur**, `Penguin0011/Murmur`, renamed October 4, 2026. The repository is currently private. The user deferred Apple Developer Program enrollment because it costs $99; Developer ID signing and notarization remain later release work. Sparkle is deferred; continue user-controlled manual download-and-replace updates. The user is the MIT copyright holder; LICENSE added October 3, 2026 with holder "Aakash" as supplied by the user. [Certain]
-5. Larger local cleanup model/runtime and a curated browser of quality-validated choices; verification of the named cloud providers (Fireworks, Gemini, OpenRouter); validation and exact artifact pinning for selected Parakeet Unified transcription. October 5, 2026 comparison: Qwen3.5-0.8B, Qwen3.5-2B, and LFM2.5-1.2B-Instruct did not establish a production-quality local recommendation on the synthetic corpus. See HANDOFF.md. Users choose Gemini/OpenRouter cloud cleanup or a validated larger local model; no silent fallback. [Certain]
+5. Local AI cleanup dropped (October 7, 2026, see section 5). Cloud speech-to-text and cleanup are implemented for Gemini and for any OpenAI-compatible endpoint, with Fireworks and OpenRouter removed from Settings. The Parakeet Unified benchmark is recorded in section 5 (October 6, 2026). October 5, 2026 comparison of Qwen3.5-0.8B, Qwen3.5-2B, and LFM2.5-1.2B-Instruct stands as history. [Certain]
 
 This draft defines the confirmed product and proposed work boundaries; it is not yet a claim of full Wispr Flow feature parity. [Certain]
 
@@ -260,6 +266,23 @@ The feasibility deliverable must prove range identity, replacements, undo, curso
 
 Validation gate: test automatic learning in at least one real app per representative category and publish pass/partial/unsupported for each. Unsupported categories are disclosed and do not block launch (approved); at least one category must pass. Test the approved 60-second window and two-observation threshold; propose any changes with evidence.
 
+### Decision: cleanup thresholds from the corpus baseline — October 7, 2026
+
+Recorded from the measured baseline in `app/README.md` (corpus `app/cleanup-corpus.json`, 425 utterances, `check_cleanup`; first measured on Linux October 3, 2026, re-run on macOS October 7, 2026 with the same numbers). Thresholds are set just below the measured values. [Certain]
+
+| Measure | Threshold | Baseline (RuleCleaner, deterministic) |
+|---|---|---|
+| Spoken-correction exact match | ≥ 95% | 95.8% (96 utterances) |
+| Ambiguous corrections kept unchanged | 100% | 22/22 |
+| List formatting precision | ≥ 97% | 97.7% (43/44) |
+| List formatting recall | ≥ 95% | 100% (43/43) |
+| Unintended name, number, or negation edits | ≤ 1% of utterances | 0.2% (1/425), after guard |
+| Adversarial outputs accepted by the guard | 0 | 0 of 2349 (polish 0 of 2220; professional 0) |
+
+Polish and Professional: the corpus labels cover fillers, corrections, and lists only, so the rule-based baseline does not measure their rewrites. Their evidence is the guard results above and the live Professional check (11 synthetic dictations, 22/22 passing; commit `b5481a5`). No live Polish run is recorded, so Polish stays at guard-level evidence until one is added. [Certain]
+
+Any local candidate or cloud route must meet these thresholds on the same corpus before it is offered as the cleanup default. The 425-utterance corpus was written by the same agent that wrote the rules, so these numbers overstate real-world quality (see `app/README.md`). [Certain]
+
 ### Milestone 1 implementation decisions — October 2, 2026
 
 Continue with the selected Unified model and batch processing; available-host inference remains unverified. M1/8 GB performance is deferred and does not block implementation or release. No silent model/provider substitution is permitted. [Certain]
@@ -276,7 +299,7 @@ Decision, October 4, 2026 (user approved): with the NSSpellChecker lexicon, case
 
 Approved semantic promotion rule (approved by the user October 3, 2026; implemented in `app/Learning.swift`). Condition before learning ships: back the lexicon with NSSpellChecker, so ordinary-word swaps are rejected. [Certain] Rule: a correction is learning evidence only when the target is a plausible respelling of the source. Rules: 1–3 words per side after trimming shared context; no case/punctuation/spacing-only edits, deletions, insertions or longer rewrites; reject negation flips, digits/number words, listed antonyms, function words and homophones, and inflection or short vowel-only changes; when a lexicon is available (NSSpellChecker), reject swaps of one ordinary word for another; otherwise require at least 4 letters per side and either edit similarity ≥ 0.75 or matching consonant-class phonetic keys with similarity ≥ 0.5. A target that is already a manual dictionary term waives only the similarity test. Known limits: without the lexicon, real-word swaps such as casual→causal pass; similar names (Robert→Rupert) pass; short names, plural-like respellings and spacing merges are skipped. Deleted learned entries are tombstoned so old evidence cannot re-promote them. [Likely]
 
-Local cleanup baseline — October 3, 2026: `app/Cleanup.swift` provides a deterministic `RuleCleaner` behind the section 4 guard, with failures held for recovery. It is a baseline and stopgap, not the final local cleanup model choice; the model comparison in section 5, item 5, remains open. [Certain] Measured on Linux with Swift 6.1.2 against a 425-utterance labeled corpus (`app/cleanup-corpus.json`): 96.7% exact match; 1/425 (0.2%) unintended name/number/negation edits, within the ≤ 1% bar; 6/425 (1.4%) strict mismatches; spoken-correction exact match 95.8%, with 22 of 22 ambiguous corrections left unchanged; list precision 97.7% and recall 100%; 0/237 guard false rejects; 2348/2348 adversarial outputs rejected. [Certain] The same agent wrote the corpus, labels and baseline, and the corpus has no real ASR transcripts, so these numbers overstate real-world quality. [Certain] Per section 4, the spoken-correction and list thresholds should be set from this baseline; that is not yet recorded as a decision. [Certain]
+Local cleanup baseline — October 3, 2026: `app/Cleanup.swift` provides a deterministic `RuleCleaner` behind the section 4 guard, with failures held for recovery. It is a baseline and stopgap, not the final local cleanup model choice; the model comparison in section 5, item 5, remains open. [Certain] Measured on Linux with Swift 6.1.2 against a 425-utterance labeled corpus (`app/cleanup-corpus.json`): 96.7% exact match; 1/425 (0.2%) unintended name/number/negation edits, within the ≤ 1% bar; 6/425 (1.4%) strict mismatches; spoken-correction exact match 95.8%, with 22 of 22 ambiguous corrections left unchanged; list precision 97.7% and recall 100%; 0/237 guard false rejects; 2348/2348 adversarial outputs rejected. [Certain] The same agent wrote the corpus, labels and baseline, and the corpus has no real ASR transcripts, so these numbers overstate real-world quality. [Certain] The spoken-correction and list thresholds were set from this baseline and recorded as a decision on October 7, 2026 (section 5, "Decision: cleanup thresholds from the corpus baseline"). [Certain]
 
 ### Superseding hardware decision — October 2, 2026
 
