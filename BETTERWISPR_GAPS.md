@@ -53,10 +53,10 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 
 | # | Gap | BetterWispr | Murmur today | Plan | PRD impact | Size | W |
 |---|---|---|---|---|---|---|---|
-| 9 | Learning latency | Learns once the field has been unchanged for 2 s | Settles on focus-out, Return or Tab, or after 60 s | Also settle on stable text; a later edit re-records, and undo still withdraws | None | S | W4 |
-| 10 | Learn from History edits | Pencil edit in History learns the fix | History is read-only | Editable final text in History feeds the same ledger and filter (in addition to automatic learning, not a replacement) | None: the PRD forbids only *replacing* automatic learning | S | W4 |
+| 9 | Learning latency | Learns once the field has been unchanged for 2 s | Settles on focus-out, Return or Tab, or after 60 s | **Done (W4, Oct 14):** Also settle on stable text; a later edit re-records, and undo still withdraws | None | S | W4 |
+| 10 | Learn from History edits | Pencil edit in History learns the fix | History is read-only | **Done (W4, Oct 14):** Editable final text in History feeds the same ledger and filter (in addition to automatic learning, not a replacement) | None: the PRD forbids only *replacing* automatic learning | S | W4 |
 | 11 | One-fix replacement | One fix → replacement, with an optional AI review | One fix → hint; two fixes → replacement | **Awaiting user decision; not in any workstream yet.** Option: when an AI cleanup route is active, an AI review approves a first-fix replacement | Would amend the approved two-observation rule | S | W4 |
-| 12 | Commands misheard in an accent | A dictionary entry can map "Kocia Mark" → "question mark" before commands run | n/a until #2 lands | Dictionary entries whose target is a command run before command parsing | None | S | W4 (after W1) |
+| 12 | Commands misheard in an accent | A dictionary entry can map "Kocia Mark" → "question mark" before commands run | n/a until #2 lands | **Done (W4, Oct 14; command list to align with W1 on merge):** Dictionary entries whose target is a command run before command parsing | None | S | W4 (after W1) |
 
 ### Recording experience
 

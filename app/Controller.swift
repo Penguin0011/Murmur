@@ -1144,11 +1144,11 @@ final class PreStart: @unchecked Sendable {
         writeHelperVocabulary()
         if started { prewarm() }
     }
-    /// FluidAudio's vocabulary JSON: enabled entries, preferred spelling plus "heard as" aliases.
+    /// FluidAudio's vocabulary JSON: enabled entries (not command targets), preferred spelling plus "heard as" aliases.
     /// Owner-only, beside dictionary.json; absent when nothing is enabled.
     private func writeHelperVocabulary() {
         guard let vocabularyFile else { return }
-        let terms: [[String: Any]] = dictionaryEntries.filter(\.enabled).map { entry in
+        let terms: [[String: Any]] = dictionaryEntries.filter { $0.enabled && !DictionaryStore.isCommandTarget($0) }.map { entry in
             entry.variants.isEmpty ? ["text": entry.preferred] : ["text": entry.preferred, "aliases": entry.variants]
         }
         if terms.isEmpty { try? FileManager.default.removeItem(at: vocabularyFile); return }
@@ -1198,7 +1198,9 @@ final class PreStart: @unchecked Sendable {
     }
     // Learning from corrections (PRD R10): after an insertion, watch the dictated span until focus
     // leaves, 60 seconds pass, attribution is lost or the next insertion; each change goes to the
-    // ledger, which settles when the watch ends. A field that reads back the dictated text is read
+    // ledger, which settles when the watch ends or once the edited span has been stable for
+    // `stableSettleDelay` with an accepted reading (gap #9); the watch then goes on, and a later
+    // edit or undo replaces or withdraws what that early settle learned. A field that reads back the dictated text is read
     // through AX; any other field (VS Code's stub, web canvases) is followed by the keys typed in
     // that app during the window, which are never stored or logged.
     private struct Watch {
@@ -1208,6 +1210,15 @@ final class PreStart: @unchecked Sendable {
         var keyFocus: LearningFocusIdentity? = nil
         var keys: KeystrokeSpan?
         var current: String
+        /// When `current` last changed (system uptime), and whether its reading is unsettled ledger evidence.
+        var changedAt: TimeInterval = ProcessInfo.processInfo.systemUptime
+        var pending = false
+        var settledEarly = false
+    }
+    static let stableSettleDelay: TimeInterval = 2
+    /// Gap #9: an accepted reading unchanged for `stableSettleDelay` settles before the window closes.
+    static func settlesEarly(pending: Bool, changedAt: TimeInterval, now: TimeInterval) -> Bool {
+        pending && now - changedAt >= stableSettleDelay
     }
     private var watch: Watch?
     private var watchTimer: Timer?
@@ -1268,7 +1279,8 @@ final class PreStart: @unchecked Sendable {
             value = focus?.value ?? ""
             selection = focus?.selection.map { NSRange(location: $0.location, length: $0.length) } ?? NSRange(location: 0, length: 0)
         } else { return }
-        _ = w.observation.observe(value: value, selection: selection, now: ProcessInfo.processInfo.systemUptime,
+        let now = ProcessInfo.processInfo.systemUptime
+        _ = w.observation.observe(value: value, selection: selection, now: now,
                                   sameFocusedField: same, readableNonsecure: readable)
         if ending { w.observation.finish() }
         let session = w.observation.sessionID, current = w.observation.edited ?? w.observation.initial
@@ -1285,7 +1297,9 @@ final class PreStart: @unchecked Sendable {
                 }.joined(separator: ",")
                 }
                 timingLog.notice("watch edit outcome=\(outcome.map { "\($0)" } ?? "reverted", privacy: .public) changes=\(shape, privacy: .public)")
-                w.current = current
+                w.current = current; w.changedAt = now; w.pending = outcome == .provisional
+                // After an early settle, an edit or undo may have withdrawn what it learned.
+                if w.settledEarly && outcome != .sessionClosed { refreshDictionary() }
             }
             watch = w
             if w.observation.stopped {
@@ -1294,6 +1308,12 @@ final class PreStart: @unchecked Sendable {
                 defer { refreshDictionary() }
                 let learned = try processing?.settle(sessionID: session) ?? []
                 timingLog.notice("watch end reason=\(w.observation.stopReason ?? "unknown", privacy: .public) keys=\(w.keys.map { "\($0.state)" } ?? "-", privacy: .public) learned=\(learned.count, privacy: .public)")
+                if let entry = learned.last { announceLearned(entry) }
+            } else if Self.settlesEarly(pending: w.pending, changedAt: w.changedAt, now: now) {
+                w.pending = false; w.settledEarly = true; watch = w
+                defer { refreshDictionary() }
+                let learned = try processing?.settle(sessionID: session) ?? []
+                timingLog.notice("watch early-settle learned=\(learned.count, privacy: .public)")
                 if let entry = learned.last { announceLearned(entry) }
             }
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
@@ -1354,6 +1374,23 @@ final class PreStart: @unchecked Sendable {
         if lastDictationText == entry.finalText { lastDictationText = nil }
         if setupTestTranscript == entry.finalText { setupTestTranscript = "" }
         if recoveryEntryID == entry.id { recoveryEntryID = nil }
+    }
+    /// Gap #10: saves an edited final text (the raw transcript is kept) and learns from the edit
+    /// through the same filter and ledger as automatic observation. Returns false if it could not save.
+    @discardableResult
+    func editEntryText(_ entry: HistoryEntry, to text: String) -> Bool {
+        guard text != entry.finalText else { return true }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { message = "The final text cannot be empty."; return false }
+        var edited = entry; edited.finalText = text
+        do { try records?.update(edited) } catch { message = "Could not save this transcript."; return false }
+        if lastDictationText == entry.finalText { lastDictationText = text }
+        refreshHistory()
+        if let processing {
+            let learned = (try? processing.ledger.learnFromEdit(original: entry.finalText, edited: text)) ?? []
+            refreshDictionary()
+            if let learned = learned.last { announceLearned(learned) }
+        }
+        return true
     }
     func deleteEntry(_ entry: HistoryEntry) { do { try deleteTranscript(entry); refreshHistory() } catch { message = "Could not delete this transcript." } }
     func clearHistory() {

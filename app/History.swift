@@ -6,7 +6,8 @@ struct HistoryEntry: Codable, Identifiable {
     let id: String
     let recordedAt: Date
     let rawText: String
-    let finalText: String
+    /// Editable in History (gap #10); `rawText` never changes.
+    var finalText: String
     var insertionStatus: String
     /// Why the full cleanup was not used (a content-free `CleanupFailureReason`), or nil.
     var cleanupFallback: String? = nil
