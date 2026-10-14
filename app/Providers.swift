@@ -493,13 +493,11 @@ enum Multipart {
 }
 
 enum OpenAITranscriptionFormat {
-    static func makeRequest(endpoint: URL, apiKey: APIKey?, model: String, audio: AudioPayload, includePrompt: Bool, boundary: String) -> URLRequest {
+    static func makeRequest(endpoint: URL, apiKey: APIKey?, model: String, audio: AudioPayload, boundary: String) -> URLRequest {
         var fields: [(name: String, value: String)] = [("model", model), ("response_format", "json"), ("temperature", "0")]
         if let language = audio.language, !language.isEmpty { fields.append(("language", language)) }
-        // A bare term list reads to Whisper like an unfinished sentence it may continue, echoing a
-        // term at the end of the transcript; a closed sentence makes that less likely.
-        let terms = includePrompt ? GeminiTranscribeProvider.vocabularyTerms(from: audio.vocabularyHint) : []
-        if !terms.isEmpty { fields.append(("prompt", "Vocabulary: \(terms.joined(separator: ", ")).")) }
+        // Whisper treats prompt text as prior transcript context and can echo it. Apply dictionary
+        // spellings after transcription; compatible endpoints have no shared structured vocabulary field.
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         if let apiKey { request.setValue("Bearer \(apiKey.secret)", forHTTPHeaderField: "Authorization") }
@@ -594,20 +592,20 @@ struct OpenAICompatibleTranscriptionProvider: TranscriptionProvider {
         switch server.locality {
         case .onDevice:
             return DataDisclosure(provider: id, stage: .transcription, destinationHost: server.address,
-                                  leavesDevice: [], staysOnDevice: ["the recorded audio", "the dictionary's spelling hints", "history"],
-                                  retentionNote: "Audio and spelling hints go only to the server on this Mac; its logging settings apply.")
+                                  leavesDevice: [], staysOnDevice: ["the recorded audio", "the dictionary", "history"],
+                                  retentionNote: "Audio goes only to the server on this Mac; its logging settings apply.")
         case .leavesDevice(let host, let encrypted):
             return DataDisclosure(provider: id, stage: .transcription, destinationHost: host,
-                                  leavesDevice: ["the audio", "dictionary spelling hints"],
-                                  staysOnDevice: ["history"],
+                                  leavesDevice: ["the audio"],
+                                  staysOnDevice: ["the dictionary", "history"],
                                   retentionNote: "Retention is up to whoever runs that server.",
-                                  warning: encrypted ? nil : "Audio and spelling hints are sent over unencrypted http. Your API key is not sent; use https to send it.")
+                                  warning: encrypted ? nil : "Audio is sent over unencrypted http. Your API key is not sent; use https to send it.")
         }
     }
 
     func makeRequest(_ audio: AudioPayload, boundary: String = Multipart.makeBoundary()) -> URLRequest {
         OpenAITranscriptionFormat.makeRequest(endpoint: endpoint, apiKey: server.sendableKey, model: server.model,
-                                             audio: audio, includePrompt: true, boundary: boundary)
+                                             audio: audio, boundary: boundary)
     }
     func transcribe(_ audio: AudioPayload) async throws -> String {
         guard audio.data.count <= Self.uploadLimitBytes else { throw ProviderError.payloadTooLarge(id, limitBytes: Self.uploadLimitBytes) }
