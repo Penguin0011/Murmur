@@ -2697,6 +2697,21 @@
   ]
  },
  {
+  "id": "prose-not-list-023",
+  "input": "First, preheat the oven, then mix the batter, then bake it.",
+  "options": {
+   "fillers": true,
+   "corrections": true,
+   "lists": true
+  },
+  "expected": "First, preheat the oven, then mix the batter, then bake it.",
+  "tags": [
+   "prose-not-list",
+   "combo",
+   "unchanged"
+  ]
+ },
+ {
   "id": "combo-001",
   "input": "Um, meet Tuesday—sorry, Thursday at three.",
   "options": {
