@@ -14,6 +14,8 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
     case customTranscription
     case customCleanup
     case localServer
+    /// Apple's on-device system model (FoundationModels). It has no key; listed so it can name errors.
+    case appleIntelligence
 
     var displayName: String {
         switch self {
@@ -24,6 +26,7 @@ enum ProviderID: String, CaseIterable, Codable, Sendable {
         case .customTranscription: return "Custom transcription"
         case .customCleanup: return "Custom cleanup"
         case .localServer: return "Local model server"
+        case .appleIntelligence: return "Apple Intelligence"
         }
     }
 }

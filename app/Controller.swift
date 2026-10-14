@@ -610,6 +610,7 @@ final class PreStart: @unchecked Sendable {
             guard alert.runModal() == .alertFirstButtonReturn else { historyMode = appliedHistoryMode; return }
         }
         let routes = routeSettings
+        if routes.cleanup == .appleIntelligence && appliedRoutes.cleanup != .appleIntelligence { AppleCleanupProvider().prewarm() }
         appliedRoutes = routes; routes.save(to: .standard)
         appliedRetention = retention
         appliedHistoryMode = historyMode; records?.persistsTranscripts = historyMode.persistsTranscripts
@@ -737,6 +738,7 @@ final class PreStart: @unchecked Sendable {
                 session.resetShortcut?(); setPhase("Error", refusal); done(); return
             }
             sessionTranscriber = plan.transcriber; processing?.cloudCleaner = plan.cleaner
+            (plan.cleaner as? AppleCleanupProvider)?.prewarm()
             destination = try? captureFocus()
             if destination?.secure == true { session.resetShortcut?(); setPhase("Error", "Password fields cannot receive dictation."); done(); return }
             if destination?.pid == getpid() { destination = nil }

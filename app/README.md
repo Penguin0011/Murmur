@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 ```
 
@@ -260,18 +260,54 @@ No real Gemini key or local model server has been used yet; see [PROVIDERS.md](P
 
 The checks pass with Swift 6.1.2 on Linux, in both `-swift-version 5` and the default mode. No real key has been used. [Certain]
 
+## Apple Intelligence cleanup
+
+`app/AppleCleanup.swift` adds `AppleCleanupProvider`, a `CleanupProvider` (and an `AsyncCleaner`) backed by Apple's FoundationModels system model. You pick it in Settings → Cleanup runs with → Apple Intelligence. [Certain]
+- **How it runs:**
+  - It uses `CleanupPrompt.build` unchanged, puts the system text in the session's instructions, and uses greedy sampling.
+  - Each call gets a fresh session.
+  - Murmur prewarms the model when the route is applied and when a dictation starts.
+- **No key and no disclosure.** It needs no key, sends nothing off this Mac, and adds no disclosure stage.
+- **Availability** is checked on every call.
+  - If the model is unavailable, the provider throws `ProviderError.modelUnavailable`, with one of three reasons: this Mac is not eligible, Apple Intelligence is off, or the model is not ready.
+  - `ProcessingCoordinator` then uses local rules and shows "Inserted with local cleanup." with that reason.
+  - Settings shows the same reason under the route.
+- **Generation errors** are mapped to `ProviderError` and also fall back to local rules:
+
+  | Generation error | `ProviderError` |
+  |---|---|
+  | Context exceeded | payload too large |
+  | Guardrail or refusal | content blocked |
+  | Rate limit | rate limited |
+  | Assets unavailable | model not ready |
+
+- **Context window:** about 4K tokens. Text of 600 words or more is cleaned in sections of about 400 words, each guarded on its own.
+
+```sh
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/check_apple_cleanup.swift -o /tmp/murmur-apple-check && /tmp/murmur-apple-check
+```
+
+**What the check covers.** `check_apple_cleanup.swift` (29 checks) uses an injected status and a fake model:
+- the route wiring: no key read, no refusal, no disclosure;
+- each unavailable reason: the model is never called, the local-rules output is used, and the reason's message is shown;
+- the generation-error fallback;
+- guard rejection of an answer;
+- splitting long text into sections. [Certain]
+
+**Measured on October 14, 2026** with `app/tools/measure_cleanup_route.swift` (MacBook Air M3, 16 GB, macOS 27.0.1). It misses the corpus thresholds in all three styles, though the median latency is 0.6–0.8 s. The numbers are in PRD section 10, "Proposed decision: Apple Intelligence cleanup route". [Certain]
+
 ## Processing routes and API keys (wired in)
 
 `Routes.swift` is Foundation-only and holds the route decisions; Controller and UI display and act on them. [Certain]
 
 ```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/check_routes.swift -o /tmp/murmur-routes-check
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift app/check_routes.swift -o /tmp/murmur-routes-check
 /tmp/murmur-routes-check
 ```
 
 **Settings → Processing routes (R4).** Route and model changes apply as soon as they are made. Custom transcription and cleanup have separate editable base URLs, model IDs and destination-bound Keychain keys. Only endpoint preferences are stored in UserDefaults. [Certain]
 - Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini and Custom Provider. Gemini defaults to `gemini-3.5-transcribe`; other model IDs use Gemini's general audio endpoint. Custom transcription posts multipart audio and spelling hints to `/v1/audio/transcriptions`; a compatible server must implement that format. [Certain]
-- Cleanup: Local rules (the default), Gemini or Custom Provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. [Certain]
+- Cleanup: Local rules (the default), Apple Intelligence (on this Mac; see [Apple Intelligence cleanup](#apple-intelligence-cleanup)), Gemini or Custom Provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. [Certain]
 - Existing shared custom settings migrate to separate transcription and cleanup settings. Existing keys are copied to separate Keychain accounts; each remains usable only when its saved destination matches that route's endpoint. [Certain]
 
 **A dictation on a cloud route.**

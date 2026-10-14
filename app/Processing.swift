@@ -14,7 +14,8 @@ import Foundation
 // text inserted has passed the guard or is the user's own words. Reasons stay content-free.
 
 /// Where cleanup runs. `.local` is the RuleCleaner. `.cloud` means "through a `CleanupProvider`":
-/// Gemini, a custom OpenAI-compatible endpoint, or a user-run local model server (see `CleanupChoice` in Routes.swift).
+/// Gemini, a custom OpenAI-compatible endpoint, a user-run local model server, or Apple's on-device
+/// model (see `CleanupChoice` in Routes.swift).
 enum CleanupRoute: String, Codable, CaseIterable, Sendable {
     case local
     case cloud
@@ -166,7 +167,9 @@ final class ProcessingCoordinator {
         if !options.anyEnabled || prepared.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .insert(prepared.text) }
         guard let provider = cloudCleaner else { lastFallback = .cleanerFailed; return .insert(localClean(prepared.text, terms: terms)) }
         // On the slow Gemma fallback, long text is cleaned in parallel sections, each guarded on its own.
-        let sections = (provider as? GeminiCleanupProvider)?.onFallback == true ? CleanupSections.split(prepared.text) : [prepared.text]
+        // Apple's on-device model splits longer text, to stay inside its context window (AppleCleanup.swift).
+        let sections = (provider as? GeminiCleanupProvider)?.onFallback == true ? CleanupSections.split(prepared.text)
+            : provider.id == .appleIntelligence ? CleanupSections.split(prepared.text, target: 400) : [prepared.text]
         let results = await withTaskGroup(of: (Int, CloudAttempt).self) { group in
             for (index, section) in sections.enumerated() {
                 group.addTask { (index, await Self.cloudClean(section, provider: provider, options: options, terms: terms)) }

@@ -58,7 +58,7 @@ Proposed behavior: cleanup edits dictation, never answers it, executes instructi
 
 Cleanup acceptance is measured, not asserted. Build a fixed corpus (target 300+ labeled utterances, covering each option, interactions between options, names, numbers, negation, quoted speech, and look-alike prose) before choosing the cleanup model. Proposed pass bar: no more than 1% of utterances with an unintended edit to a name, number, or negation; spoken-correction accuracy and list-formatting precision thresholds set from the corpus baseline and recorded in the decision log. Report each local candidate and the cloud routes against the same corpus.
 
-Local AI cleanup is not a launch target (decision, October 7, 2026). Typical Macs lack the RAM and compute to run a productive cleanup model without slowing other apps, so the PRD no longer requires an 8B local-model evaluation or a curated local-model browser. On-device cleanup is `RuleCleaner`, the deterministic rules pass in `app/Cleanup.swift`, which is measured against the corpus (section 4 thresholds). Users who want AI cleanup choose a cloud route or a user-configured OpenAI-compatible endpoint, which may be a server they run themselves. No automatic fallback between cloud routes; a failed cloud cleanup falls back only to on-device local rules (decision, October 6, 2026). The October 5, 2026 evidence (three local models of 2B parameters or less, none passing) stands as history. [Certain]
+Local AI cleanup is not a launch target (decision, October 7, 2026). Typical Macs lack the RAM and compute to run a productive cleanup model without slowing other apps, so the PRD no longer requires an 8B local-model evaluation or a curated local-model browser. On-device cleanup is `RuleCleaner`, the deterministic rules pass in `app/Cleanup.swift`, which is measured against the corpus (section 4 thresholds). Users who want AI cleanup choose a cloud route or a user-configured OpenAI-compatible endpoint, which may be a server they run themselves. No automatic fallback between cloud routes; a failed cloud cleanup falls back only to on-device local rules (decision, October 6, 2026). The October 5, 2026 evidence (three local models of 2B parameters or less, none passing) stands as history. [Certain] Amended October 14, 2026 (user): Apple's on-device system model is allowed as an opt-in cleanup route, labelled less accurate than local rules and never the default; see "Decision: Apple Intelligence cleanup route" in section 10. [Certain]
 
 Prompt-injection guard: transcripts are data. Cleanup output must pass a bound check against the raw text (length ratio and edit-distance limits per enabled option, no new named entities or numbers). If the check fails, or the model appears to answer or obey the dictation, that output is never inserted: the dictation falls back as decided on October 6, 2026 (below). Log only a content-free failure reason locally. [Certain] Include injection phrases ("ignore previous instructions", "write me a…") in the corpus.
 
@@ -310,6 +310,63 @@ The same operations are added to the cloud prompt. [Certain]
 Without the frame, an added greeting or sign-off is still rejected. The frame never lets the model compose or answer the email. `check_cleanup.swift` covers each case. [Certain]
 
 **Evidence:** `check_cleanup.swift` covers the spec examples in both directions, plus adversarial outputs for the new path. On the 425-utterance corpus the October 7 thresholds are unchanged, with 0/237 false rejects. 0 of 2363 adversarial outputs are accepted with the option off, with it on, in Polish, or in Professional. With the option on, the rules change 4 corpus inputs, each one a spoken number that should be converted. [Certain]
+
+### Decision: Apple Intelligence cleanup route — October 14, 2026
+
+**Status: approved by the user, October 14, 2026: options 1 and 2 below (opt-in, labelled, not the default). Option 3 was declined.** This amends the October 7, 2026 decision in section 4 that local AI cleanup is not a launch target. The default route stays local rules either way. [Certain]
+
+That decision was about downloaded models: their RAM and compute cost slow other apps. Apple's FoundationModels system model doesn't have that cost. Murmur doesn't download it, macOS manages its memory, and Murmur already requires macOS 26. So BETTERWISPR_GAPS.md #1 adds it as a cleanup route: `CleanupChoice.appleIntelligence`, implemented in `app/AppleCleanup.swift`. [Certain]
+- It uses the same `CleanupPrompt` and `CleanupGuard` as the other routes.
+- It uses the October 6 failure policy:
+  - When the model is unavailable, it names the reason (this Mac is not eligible, Apple Intelligence is off, or the model is not ready).
+  - A generation error falls back to local rules.
+  - So does a guard rejection.
+- It sends nothing off this Mac and needs no key. [Certain]
+
+**Measured.** Corpus `app/cleanup-corpus.json`: 425 utterances, 402 of them with cleanup on. [Certain]
+- Run through the real `ProcessingCoordinator` path with `app/tools/measure_cleanup_route.swift`. The prompt is from `Cleanup.swift` at `42223c5`.
+- Hardware: MacBook Air M3 (Mac15,12), 16 GB RAM, macOS 27.0.1 (26A434).
+- "Inserted" means the text Murmur would insert, after the guard and the local-rules fallback.
+- The corpus labels are Strict labels. Polish and Professional are expected to differ from them, so their exact-match and correction numbers are lower bounds.
+
+| Measure (threshold) | Local rules | Apple Strict | Apple Polish | Apple Professional |
+|---|---|---|---|---|
+| Model output accepted by the guard | n/a | 78.4% (315/402) | 80.3% (323/402) | 63.7% (256/402) |
+| Unintended name, number or negation edits, inserted (≤ 1%) | 0.2% (1/425) | 1.2% (5/425) | 1.4% (6/425) | 1.4% (6/425) |
+| Spoken-correction exact match (≥ 95%) | 95.8% | 65.6% (63/96) | 51.0% (49/96) | 71.9% (69/96) |
+| Ambiguous corrections kept unchanged (100%) | 22/22 | 21/22 | 14/22 | 18/22 |
+| List precision (≥ 97%) | 97.7% | 100% (28/28) | 100% (22/22) | 97.5% (39/40) |
+| List recall (≥ 95%) | 100% | 65.1% (28/43) | 51.2% (22/43) | 90.7% (39/43) |
+| Inserted text equal to the label | 96.7% | 74.4% | 68.5% | 80.5% |
+| Model latency, median / p90 / max | instant | 0.65 / 0.83 / 2.06 s | 0.61 / 0.76 / 1.57 s | 0.80 / 1.03 / 1.53 s |
+
+What the numbers show:
+- Apple Intelligence misses the section 4 thresholds in every style. Local rules meets them. [Certain]
+- **Name, number and negation edits.** Every one of the 5–6 per style is one of two kinds:
+  - A correction the model half-applied: both versions kept, as in "Book it for 2, 3 people", "goes to Dana, Dan" and "nine, sorry, ten".
+  - Ordinal words turned into a list nobody asked for, as in "First, preheat" → "1. Preheat", or Polish's "first impressions matter, second chances" → a numbered list.
+
+  None is a legitimate Polish or Professional rewrite. The guard accepts these outputs because no word was invented. That is a guard gap on every route, noted for W1. [Certain]
+- **Most guard rejections are unexplained deletions.** The model drops words the prompt doesn't allow it to drop. It also lowercases sentence starts and drops final periods when punctuation is off. [Certain]
+- **Errors and latency.** No generation errors occurred. The first call after prewarming took up to 2.1 s. [Certain]
+- **Long dictation.** These were extra live runs in Professional, using non-repeating text built from corpus sentences.
+  - No request exceeded the context window. That includes a single 906-word unpunctuated request, which can't be split.
+  - Latency grows with length: 4.8 s for 156 words, 16.8 s for 600 words, 27–29 s for 906 words.
+  - The guard rejected every one of these long outputs, because one violation rejects the whole section, so local rules were used.
+  - In practice the route helps only short dictations. [Certain]
+
+**Cloud comparison: not run.** The only keys configured on this Mac are free tier, and neither can finish a 402-call style:
+- **Gemini** (gemini-3.5-flash-lite): an unthrottled pass had 75–83% of its calls rate limited, so its inserted text was mostly local rules.
+- **Cerebras** gpt-oss-120b, through the Custom Provider route: limited to 5 requests a minute and 150 an hour, so 97.5% of a Strict pass was rate limited, and one style would take about 3 hours.
+
+No numbers from those runs are recorded. To compare, run `app/tools/measure_cleanup_route.swift custom` or `gemini` with a paid or higher-limit key. `MCR_DELAY` spaces out the calls. [Certain]
+
+**Options put to the user (1 and 2 approved):**
+1. Amend section 4. Local AI cleanup through the system model is allowed as an **opt-in route**.
+   - Settings labels it on-device and says it is less accurate than local rules on the test corpus.
+   - A downloaded local model stays out of scope for launch.
+2. Do not offer it as the default. Do not call it recommended until a measured prompt or guard change brings it to the section 4 thresholds.
+3. The alternative is to hide the choice until it meets them. The code and checks stay in place either way.
 
 ### Milestone 1 implementation decisions — October 2, 2026
 

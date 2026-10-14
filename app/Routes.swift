@@ -76,6 +76,8 @@ func makeTranscriptionProvider(id: CloudTranscriber, key: APIKey?, apiBaseURL: S
 enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
     /// The built-in RuleCleaner. The default.
     case localRules = "local-rules"
+    /// Apple's on-device system model (AppleCleanup.swift): no key, nothing leaves this Mac.
+    case appleIntelligence = "apple-intelligence"
     case gemini
     case customAPI = "custom-api"
 
@@ -84,6 +86,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
     var displayName: String {
         switch self {
         case .localRules: return "Local rules (this Mac)"
+        case .appleIntelligence: return "Apple Intelligence (this Mac)"
         case .gemini: return "Gemini"
         case .customAPI: return "Custom Provider"
         }
@@ -95,6 +98,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
     var providerID: ProviderID? {
         switch self {
         case .localRules: return nil
+        case .appleIntelligence: return .appleIntelligence
         case .gemini: return .gemini
         case .customAPI: return .customAPI
         }
@@ -107,6 +111,7 @@ enum CleanupChoice: String, CaseIterable, Identifiable, Sendable {
 func makeCleanupProvider(_ choice: CleanupChoice, key: APIKey?, apiBaseURL: String, model: String) -> CleanupProvider? {
     switch choice {
     case .localRules: return nil
+    case .appleIntelligence: return AppleCleanupProvider()
     case .gemini: return key.map { GeminiCleanupProvider(apiKey: $0) }
     case .customAPI:
         let name = model.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -293,7 +298,7 @@ struct RoutePlan {
         }
         var cleaner: CleanupProvider?
         if settings.cleanup != .localRules && cleanupSendsText, let provider = settings.cleanup.providerID {
-            let storedKey = key(settings.cleanup.credentialID ?? provider)
+            let storedKey = settings.cleanup == .appleIntelligence ? nil : key(settings.cleanup.credentialID ?? provider)
             cleaner = makeCleanupProvider(settings.cleanup, key: storedKey, apiBaseURL: settings.customAPIBaseURL, model: settings.customAPIModel)
             if cleaner == nil, refusal == nil { refusal = ProviderError.invalidConfiguration(provider).userMessage }
             let preview = cleaner ?? makeCleanupProvider(settings.cleanup, key: storedKey ?? placeholderKey,
@@ -602,6 +607,8 @@ enum KeyCheck {
             case .localServer:
                 var p = try OpenAICompatibleCleanupProvider(baseURL: apiBaseURL, model: "validation", apiKey: key); if let transport { p.transport = transport }
                 try await p.validate()
+            case .appleIntelligence:
+                return AppleCleanupProvider().status()?.userMessage ?? "Apple Intelligence is ready."
             case .cerebras, .openrouter:
                 // Legacy key accounts only; the migration copies them to the custom endpoint.
                 return ProviderError.invalidConfiguration(provider).userMessage
