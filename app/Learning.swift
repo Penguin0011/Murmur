@@ -493,28 +493,29 @@ final class CorrectionLedger {
     }
 
     /// Feed the latest attributed replacement for a session while its window is open. A session
-    /// that already settled early (stable text, gap #9) and now reads differently is reopened: what
-    /// its settle promoted is withdrawn and its evidence replaced, so one session never counts twice.
-    /// The same accepted pairs again (more typing after the fix) change nothing.
+    /// that already settled early (stable text, gap #9) is reconciled pair by pair: a settled pair
+    /// missing from the new reading is withdrawn with whatever it promoted, a settled pair still
+    /// present stays as it is (so one session never counts twice), and only new pairs are recorded.
     @discardableResult
     func record(_ observed: ObservedCorrection) throws -> RecordOutcome {
         guard state.learningEnabled else { return .learningDisabled }
         try reconcile()
         let session = observed.sessionID
         let (fresh, outcome) = candidates(observed)
-        // A second-tier promotion consumes its evidence, so its session list also marks a settled session.
+        // A second-tier promotion consumes its evidence, so its session list also marks a settled pair.
         let settled = Set(state.evidence.filter { $0.correction.sessionID == session && $0.settled }.map(\.pair))
             .union(state.promotions.filter { $0.sessions.contains(session) }.map(\.pair))
-        if !settled.isEmpty {
-            if Set(fresh.map { Pair(of: $0.source, $0.target) }) == settled { return .sessionClosed }
-            // ponytail: withdrawing a second-tier promotion loses the other session's consumed evidence
-            // (as `revert` always has); keep promotion evidence if refinements after an early settle prove common.
-            for promotion in state.promotions where promotion.sessions.contains(session) { withdraw(promotion, tombstone: false) }
+        let gone = settled.subtracting(fresh.map { Pair(of: $0.source, $0.target) })
+        // ponytail: withdrawing a second-tier promotion loses the other session's consumed evidence
+        // (as `revert` always has); keep promotion evidence if refinements after an early settle prove common.
+        for promotion in state.promotions where promotion.sessions.contains(session) && gone.contains(promotion.pair) {
+            withdraw(promotion, tombstone: false)
         }
-        state.evidence.removeAll { $0.correction.sessionID == session }
-        state.evidence += fresh.map { Evidence(correction: $0, settled: false) }
+        state.evidence.removeAll { $0.correction.sessionID == session && (!$0.settled || gone.contains($0.pair)) }
+        let added = fresh.filter { !settled.contains(Pair(of: $0.source, $0.target)) }
+        state.evidence += added.map { Evidence(correction: $0, settled: false) }
         try save()
-        return outcome
+        return !settled.isEmpty && gone.isEmpty && added.isEmpty ? .sessionClosed : outcome
     }
 
     /// The filter's accepted, reduced replacements for one snapshot, and the outcome to report.

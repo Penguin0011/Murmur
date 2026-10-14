@@ -248,6 +248,16 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             // A refinement after a second-tier early settle withdraws that replacement.
             try check(ledger.record(obs(b, "Acme", "Akmé", 11)) == .provisional, "refinement after second-tier settle re-records")
             check(dict.apply(to: "Ask Acme") == "Ask Acme" && learned(dict).count == 1, "second-tier early settle withdrawn, hint kept")
+            // A second fix after a second-tier early settle keeps the first fix's replacement.
+            let (dict3, ledger3) = try fresh("early-second-fix")
+            let d = UUID(), e = UUID()
+            try ledger3.record(obs(d, "Acme", "Akme")); try ledger3.settle(sessionID: d)
+            try ledger3.record(obs(e, "Acme met Zorblat", "Akme met Zorblat", 10)); try ledger3.settle(sessionID: e)
+            let owner = learned(dict3)[0].id
+            try check(ledger3.record(obs(e, "Acme met Zorblat", "Akme met Zorblatt", 11)) == .provisional, "second fix in the same span records")
+            check(dict3.apply(to: "Ask Acme") == "Ask Akme" && learned(dict3)[0].id == owner, "first fix's replacement survives a second fix")
+            try check(ledger3.settle(sessionID: e).map(\.preferred) == ["Zorblatt"], "second fix adds its own hint")
+            check(dict3.apply(to: "Ask Acme") == "Ask Akme", "replacement still applies after the final settle")
             // Undo after an early settle withdraws what it promoted.
             let (dict2, ledger2) = try fresh("early-undo")
             try ledger2.record(obs(c, "Acme", "Akme")); try ledger2.settle(sessionID: c)
