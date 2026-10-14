@@ -400,6 +400,24 @@ enum CloudTranscription {
         guard !terms.isEmpty else { return text }
         let chars = Array(text), tokens = TermText.tokens(chars)
         let lengths = Set(terms.map(\.count)).sorted(by: >)
+        // Whisper can echo the label too, including a repeated unfinished "Vocabulary is".
+        // Require a sentence boundary and at least two distinct hints, with no other words.
+        for start in tokens.indices where tokens[start].folded == "vocabulary" {
+            let before = chars[..<tokens[start].start].reversed().first { !$0.isWhitespace }
+            guard start == 0 || before.map({ ".!?".contains($0) }) == true else { continue }
+            var end = start, seen = Set<[String]>()
+            while end < tokens.count {
+                if tokens[end].folded == "vocabulary" {
+                    end += 1
+                    if end < tokens.count, tokens[end].folded == "is" { end += 1 }
+                } else if let n = lengths.first(where: { end + $0 <= tokens.count && terms.contains(tokens[end..<(end + $0)].map(\.folded)) }) {
+                    seen.insert(tokens[end..<(end + n)].map(\.folded)); end += n
+                } else { break }
+            }
+            if end == tokens.count, seen.count >= 2 {
+                return String(chars[..<tokens[start].start]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
         var cut = tokens.count, matched = 0
         while let n = lengths.first(where: { $0 <= cut && terms.contains(tokens[(cut - $0)..<cut].map(\.folded)) }) {
             cut -= n; matched += 1

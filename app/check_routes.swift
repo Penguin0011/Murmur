@@ -318,6 +318,16 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
 
         // Whisper echoes its prompt (the dictionary) on silence; the echo is not dictation.
         let vocab = ["Aakash", "spaceyboi", "Open Router"]
+        let echoed = "We adjusted the camera settings. Vocabulary is aakash, spaceyboi. Vocabulary is"
+        let hints = ["Aakash", "spaceyboi"]
+        check(CloudTranscription.stripHintEcho(echoed, vocabulary: hints) == "We adjusted the camera settings.", "recorded labeled and repeated hint echo dropped")
+        await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success(echoed)), audioData: speech, vocabulary: hints) == .transcript("We adjusted the camera settings."), "labeled echo removed before processing and history")
+        check(CloudTranscription.stripHintEcho("Vocabulary: Aakash, spaceyboi.", vocabulary: hints).isEmpty, "only labeled hints is no speech")
+        check(CloudTranscription.stripHintEcho("Meet at three. Vocabulary is Aakash, spaceyboi.", vocabulary: hints) == "Meet at three.", "single labeled hint list dropped")
+        check(CloudTranscription.stripHintEcho("Meet at three. Vocabulary: Open Router, Aakash.", vocabulary: vocab) == "Meet at three.", "multiword labeled hints dropped")
+        for spoken in ["My vocabulary is growing.", "Vocabulary is important to Aakash and spaceyboi.", "Vocabulary is Aakash, spaceyboi, and unfamiliar words.", "Vocabulary is Aakash.", "Discuss vocabulary with Aakash, then call spaceyboi tomorrow."] {
+            check(CloudTranscription.stripHintEcho(spoken, vocabulary: hints) == spoken, "preserve spoken vocabulary context: \(spoken)")
+        }
         await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success("Aakash.")), audioData: silence, vocabulary: vocab) == .noSpeech(skipped: false), "a lone hint echo is no speech")
         await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success(" Aakash, spaceyboi, open router.")), audioData: silence, vocabulary: vocab) == .noSpeech(skipped: false), "an echoed hint list is no speech")
         check(CloudTranscription.stripHintEcho("Meet at three. Aakash.", vocabulary: vocab) == "Meet at three.", "trailing echo sentence dropped")
