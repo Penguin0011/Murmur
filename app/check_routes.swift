@@ -271,6 +271,10 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         let tail = CloudAudio.prepare(WAVAudio.encodePCM16(tone(seconds: 1, amplitude: 0.5) + [Float](repeating: 0.001, count: 96_000), sampleRate: 48_000))
         check(tail.payload.data.count == 44 + 24_000 * 2 && abs((tail.duration ?? 0) - 3) < 0.001, "silent tail trimmed to a 0.5 s pad; duration is the recording's")
         check(CloudAudio.trimTrailingSilence([0.001, 0, 0.002], sampleRate: 16_000) == [0.001, 0, 0.002], "all-silent clip left for the pre-check")
+        var click = [Float](repeating: 0.002, count: 48_000); click[20_000] = 0.5
+        check(GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel: CloudAudio.prepare(WAVAudio.encodePCM16(click, sampleRate: 48_000)).peak ?? 1), "a lone click does not make a silent clip count as speech")
+        let word = [Float](repeating: 0.002, count: 24_000) + tone(seconds: 0.2, amplitude: 0.3) + [Float](repeating: 0.002, count: 24_000)
+        check(!GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel: CloudAudio.prepare(WAVAudio.encodePCM16(word, sampleRate: 48_000)).peak ?? 0), "a 0.2 s word is speech")
     }
 
     // MARK: Cloud transcription
