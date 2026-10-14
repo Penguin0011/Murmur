@@ -269,7 +269,7 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 
 **A dictation on a cloud route.**
 - At start, `RoutePlan` picks the transcriber and cleaner from the applied settings and the Keychain. It refuses, without fallback, when a key is missing or the custom endpoint or model is invalid. Local loopback endpoints do not need a key. The model gate applies only to local transcription.
-- `CloudTranscription.run` replaces the ModelBench runner. It converts the recording to 16 kHz mono 16-bit WAV (`CloudAudio`) and makes one provider call. If the provider has a silence pre-check (Gemini), silent or very short recordings are skipped and reported as "No speech was detected".
+- `CloudTranscription.run` replaces the ModelBench runner. It converts the recording to 16 kHz mono 16-bit WAV (`CloudAudio`), trims the silent tail to 0.5 s (Whisper transcribes a silent tail as "Thank you."), and makes one provider call. If the provider has a silence pre-check (Gemini audio, the custom transcription endpoint), silent or very short recordings are skipped and reported as "No speech was detected".
 - A transcript then follows the local path: history save, dictionary and cleanup, insertion. An empty transcript is "no speech".
 - A provider error shows its `userMessage` in the Error phase. On preserve dispositions the audio stays for retry (24-hour policy).
 - A Gemini transcript that looks like an answer (`answerSuspected`) is saved with status `held-transcript` (raw text only, Copy Raw) and never inserted.

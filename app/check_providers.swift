@@ -205,7 +205,14 @@ func checkKeychainStore() {
         check(parts["model"] == Data("whisper-1".utf8), "model field")
         check(parts["response_format"] == Data("json".utf8), "response_format field")
         check(parts["language"] == Data("en".utf8), "language field")
-        check(parts["prompt"] == Data("Akme, Penguin0011".utf8), "transcription sends vocabulary hint as prompt")
+        check(parts["prompt"] == Data("Vocabulary: Akme, Penguin0011.".utf8), "transcription sends vocabulary hint as a closed sentence prompt")
+        func promptPart(_ hint: String) -> Data? {
+            let request = OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "whisper-1",
+                                                                audio: AudioPayload(data: audioBytes, vocabularyHint: hint), includePrompt: true, boundary: boundary)
+            return splitMultipart(request.httpBody ?? Data(), boundary: boundary)["prompt"]
+        }
+        check(promptPart("Aakash\nspaceyboi, Aakash") == Data("Vocabulary: Aakash, spaceyboi.".utf8), "prompt terms split on newlines and deduplicated")
+        check(promptPart(" ,\n ") == nil, "blank hint sends no prompt")
         check(parts["file"] == audioBytes, "file bytes intact, including CRLF and dashes")
         check(String(decoding: body, as: UTF8.self).contains("Content-Disposition: form-data; name=\"file\"; filename=\"clip.wav\"\r\nContent-Type: audio/wav\r\n\r\n"), "file part headers")
         check(body.suffix(18) == Data("\r\n--TESTBOUNDARY--\r\n".utf8.suffix(18)), "closing boundary")

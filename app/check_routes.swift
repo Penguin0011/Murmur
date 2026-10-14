@@ -268,6 +268,13 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         let raw = CloudAudio.prepare(Data("not a wav".utf8))
         check(raw.peak == nil && raw.payload.data == Data("not a wav".utf8), "unparsable audio is sent unchanged with no peak")
         check(WAVAudio.downsample([1, 2, 3], from: 8_000, to: 16_000) == [1, 2, 3], "never upsamples")
+        let tail = CloudAudio.prepare(WAVAudio.encodePCM16(tone(seconds: 1, amplitude: 0.5) + [Float](repeating: 0.001, count: 96_000), sampleRate: 48_000))
+        check(tail.payload.data.count == 44 + 24_000 * 2 && abs((tail.duration ?? 0) - 3) < 0.001, "silent tail trimmed to a 0.5 s pad; duration is the recording's")
+        check(CloudAudio.trimTrailingSilence([0.001, 0, 0.002], sampleRate: 16_000) == [0.001, 0, 0.002], "all-silent clip left for the pre-check")
+        var click = [Float](repeating: 0.002, count: 48_000); click[20_000] = 0.5
+        check(GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel: CloudAudio.prepare(WAVAudio.encodePCM16(click, sampleRate: 48_000)).peak ?? 1), "a lone click does not make a silent clip count as speech")
+        let word = [Float](repeating: 0.002, count: 24_000) + tone(seconds: 0.2, amplitude: 0.3) + [Float](repeating: 0.002, count: 24_000)
+        check(!GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel: CloudAudio.prepare(WAVAudio.encodePCM16(word, sampleRate: 48_000)).peak ?? 0), "a 0.2 s word is speech")
     }
 
     // MARK: Cloud transcription
@@ -283,6 +290,11 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         check(quiet.count == 0, "skipped silence sends no request")
         let tap = WAVAudio.encodePCM16(tone(seconds: 0.1, amplitude: 0.5), sampleRate: 48_000)
         await checkA(await CloudTranscription.run(provider: gemini, audioData: tap) == .noSpeech(skipped: true), "an accidental tap is skipped")
+        var custom = try! OpenAICompatibleTranscriptionProvider(baseURL: "https://stt.example.test", model: "whisper-large-v3-turbo", apiKey: testKey)
+        let whisperQuiet = MockTransport(HTTPResult(status: 200, body: Data(#"{"text":"Thank you."}"#.utf8)))
+        custom.transport = whisperQuiet
+        await checkA(await CloudTranscription.run(provider: custom, audioData: silence) == .noSpeech(skipped: true), "custom Whisper transcriber skips silence")
+        check(whisperQuiet.count == 0, "skipped silence sends no Whisper request")
 
         // Answer-suspected hold.
         let answer = MockTransport(HTTPResult(status: 200, body: geminiBody("Sure, here's a poem about the sea.")))
@@ -299,10 +311,10 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         _ = await CloudTranscription.run(provider: gemini, audioData: speech, vocabulary: ["Kubernetes", "Shelfmate"])
         check(plain.lastBody.contains("Kubernetes, Shelfmate"), "dictionary spellings reach cloud transcription")
 
-        // Whisper has no pre-check: silence is sent, and an empty result is "no speech".
+        // A transcriber without a pre-check: silence is sent, and an empty result is "no speech".
         let whisper = SpyTranscriber(.success("  "))
         await checkA(await CloudTranscription.run(provider: whisper, audioData: silence) == .noSpeech(skipped: false), "empty transcript is no speech")
-        check(whisper.calls == 1, "no pre-check for Whisper")
+        check(whisper.calls == 1, "no pre-check for a transcriber without one")
 
         // Whisper echoes its prompt (the dictionary) on silence; the echo is not dictation.
         let vocab = ["Aakash", "spaceyboi", "Open Router"]
