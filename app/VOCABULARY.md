@@ -1,0 +1,59 @@
+# Vocabulary routing review — PR #45
+
+Reviewed October 14, 2026, starting at `b19124b`. The original PR expanded an output filter to recognize a trailing “Vocabulary is … Vocabulary is” list. [Certain]
+
+## Decision
+
+Remove dictionary `prompt` text from the custom OpenAI-compatible transcription adapter and remove `CloudTranscription.stripHintEcho` entirely. Keep the existing provider-specific Gemini vocabulary inputs, post-transcription dictionary correction, silence pre-check, trailing-silence trimming, and LLM answer detection. [Certain]
+
+The old filter could erase actual speech: `Aakash.`, `Call Aakash, spaceyboi`, or a spoken `Vocabulary: Aakash, spaceyboi.` It ran on every cloud provider, including Gemini's structured-vocabulary ASR, before History saved the raw text. These cases fail against the original PR and pass after removing the filter. [Certain]
+
+Whisper prompt conditioning is the likely cause of the reported labeled echo, rather than an incomplete set of output patterns. This is an inference from the request, the artifact, and decoder semantics; no paired audio replay was performed. [Likely]
+
+## Murmur's flow
+
+`CorrectionLedger.settle` creates a preferred-only learned entry after one consistent session and adds a heard-form variant after two. `DictionaryStore.vocabularyTerms` collects enabled preferred spellings, manual first, deduplicated and with commas removed. The controller passes these to `CloudTranscription.run`, which puts them in `AudioPayload.vocabularyHint`; each provider decides whether to serialize them. Variants are not cloud ASR hints. [Certain]
+
+| Route | Vocabulary input after this change |
+|---|---|
+| Local Parakeet | `refreshDictionary` writes enabled preferred spellings **and variants as aliases** to private helper JSON. `HelperLaunch` supplies it with the verified optional CTC model; FluidAudio rescoring and `BoostFilter` limit replacements. [Certain] |
+| Gemini 3.5 Transcribe | `generation_config.transcription_config.custom_vocabulary`, a structured array of preferred spellings, cleaned and capped at 1,000. [Certain] |
+| Gemini audio LLM | Preferred spellings in system instructions, limited to 1,000 characters, explicitly for words actually spoken. JSON transcript parsing and answer detection remain. [Certain] |
+| Custom OpenAI-compatible, including Whisper | Audio, model, language, response format and temperature; **no dictionary prompt or invented vocabulary field**. [Certain] |
+
+After transcription, the controller saves raw provider text to History, then `ProcessingCoordinator.prepare` applies exact whole-word/phrase dictionary variants in every mode, including Faithful. It collects relevant preferred spellings (exact matches plus at most ten near matches) for optional model cleanup. The cleanup guard permits plausible respellings and rejects unrelated edits; provider failure falls back to local processing of the dictionary-applied text. [Certain]
+
+Thus `Akash → Aakash` and learned `spacey boy → spaceyboi` variants still work without ASR hints, without cleanup, and on cleanup failure. A preferred-only learned `Shelfmate` can still correct `shelf made` through model cleanup. Faithful/local-only processing deliberately does not make that near-match replacement. [Certain]
+
+## Why remove rather than reword the Whisper prompt?
+
+[Whisper's decoder](https://github.com/openai/whisper/blob/main/whisper/decoding.py#L535-L557) places prompt tokens after its previous-context marker, before the new transcription. [Groq's Whisper documentation](https://console.groq.com/docs/speech-to-text#prompting-guidelines) describes `prompt` as style/context guidance, not chat instructions. It supports spelling guidance, but lists no structured vocabulary request field. [Certain]
+
+Changing `Vocabulary: Aakash, spaceyboi.` to a bare list removes the label but still supplies decoder context that can be continued or repeated. Adding “do not repeat” instructions uses the same channel. Neither provides a basis for reliably distinguishing a hallucinated name from a spoken name afterward. Removing this optional input eliminates Murmur's dictionary-derived decoder context at the source. It is expected to reduce that echo mechanism, not to eliminate all ASR hallucination. [Likely]
+
+Custom model IDs can be aliases, and Murmur has no capability negotiation for arbitrary servers. The policy therefore applies to the custom adapter, including non-Whisper models, without a `model.contains("whisper")` check. [Certain] A provider with an explicit structured vocabulary contract should get its own adapter if needed. [Likely]
+
+[Gemini's documented `custom_vocabulary`](https://ai.google.dev/gemini-api/docs/transcribe#custom-vocabulary) is a dedicated biasing feature, not prior transcript prose; it supports up to 1,000 terms and cannot be combined with diarization or word timestamps. Murmur already uses that contract, so this change preserves it. Structured biasing does not prove hallucination is impossible. [Certain]
+
+## BetterWispr comparison
+
+Source inspected at [`d504749fc7e86476ef15a522e01d5ed4ef10498c`](https://github.com/opennookorg/betterwispr/tree/d504749fc7e86476ef15a522e01d5ed4ef10498c), the repository's current HEAD when fetched for this review. [Certain]
+
+- [`APISpeechProvider`](https://github.com/opennookorg/betterwispr/blob/d504749fc7e86476ef15a522e01d5ed4ef10498c/Sources/BetterWisprCore/Speech/APISpeechProvider.swift) accepts `vocabulary` but does not use it in requests, including OpenAI-compatible, Sarvam and Smallest routes. [Certain]
+- [`WhisperKitProvider`](https://github.com/opennookorg/betterwispr/blob/d504749fc7e86476ef15a522e01d5ed4ef10498c/Sources/BetterWisprCore/Speech/WhisperKitProvider.swift#L96-L109) still feeds a comma-separated list into `promptTokens` (64 terms, 100 characters per term, 160 tokens). This code establishes no echo-prevention guarantee. [Certain] It likely shares the prompt-conditioning risk. [Likely]
+- [`AppleSpeechProvider`](https://github.com/opennookorg/betterwispr/blob/d504749fc7e86476ef15a522e01d5ed4ef10498c/Sources/BetterWisprCore/Speech/AppleSpeechProvider.swift) uses `contextualStrings`; [`ParakeetProvider`](https://github.com/opennookorg/betterwispr/blob/d504749fc7e86476ef15a522e01d5ed4ef10498c/Sources/BetterWisprCore/Speech/ParakeetProvider.swift) uses `CustomVocabularyContext` and CTC rescoring. These are distinct vocabulary APIs, not Whisper prompt synonyms. [Certain]
+- [`VocabularyProcessor`](https://github.com/opennookorg/betterwispr/blob/d504749fc7e86476ef15a522e01d5ed4ef10498c/Sources/BetterWisprCore/Transcription/VocabularyProcessor.swift) performs exact boundary-aware phrase replacement; [`AppModel`](https://github.com/opennookorg/betterwispr/blob/d504749fc7e86476ef15a522e01d5ed4ef10498c/Sources/BetterWispr/App/AppModel.swift#L420-L455) applies it after optional polishing. These paths establish how it works, not that its accuracy is better. [Certain]
+
+## Evidence and limits
+
+The deterministic checks use synthetic PCM and mocked provider responses, not speech recognition. Before production edits, the new expectations produced five provider assertion failures and 27 route failures against the original PR. [Certain]
+
+- Request tests verify omission of prompts for hosted, LAN and loopback endpoints and Whisper IDs, a private alias, and a non-Whisper ID; audio, model, authentication, and multipart validation remain checked. [Certain]
+- Eight transcript cases cross custom, Gemini audio LLM and Gemini ASR routes; all preserve names and lists, including the reported artifact when returned literally. Gemini ASR requests retain their structured vocabulary. [Certain]
+- The custom-request-to-processing integration checks raw-text preservation, manual and learned variants without cleanup, a preferred-only learned near match through guarded cleanup, and exact correction on provider failure. Existing dictionary/learning, processing, cleanup and silence checks cover the surrounding flow. [Certain]
+
+The reviewed code and tests establish no distinct failure requiring vocabulary-based text deletion after removing the prompt. Existing audio checks and trimming address the separate silence/noise path. If an unprompted provider still emits the labeled artifact, these tests intentionally preserve it. [Certain] Its audio and provider output would be needed to diagnose the remaining cause. [Likely]
+
+No real provider or representative audio A/B benchmark was run. The tests prove request policy, preservation of literal speech, and downstream correction behavior; they do not quantify echo frequency or rare-term ASR recall. Known variants still correct; near matches require model cleanup. [Certain] Without prompts, unusual words may be recognized less accurately, especially preferred-only learned entries in Faithful mode. [Likely]
+
+Validation on October 14, 2026: 592 provider assertions, 169 route checks, 132 processing checks, and 177 dictionary/learning checks passed. The 425-utterance cleanup suite passed, including 2,349/2,349 adversarial outputs rejected and 2,685/2,685 punctuation transfers preserving words. `git diff --check` and `app/build.sh` passed; the latter built the release helper and optimized app and completed strict code-signature verification. No app installation, live microphone dictation, or provider replay was performed. [Certain]
