@@ -49,6 +49,12 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 /tmp/murmur-processing-check
 ```
 
+Writing modes, tone and screen context (BetterWispr gaps #6–#8; PRD decisions of October 14, 2026): `WritingMode`, `WritingModes` (matching: trigger word, then website, then app) and `DictationStyle` (the settings with a mode's overrides) are in `Processing.swift`; `Tone` and `ScreenContext` are in `Cleanup.swift`. `process` and `processAsync` take an optional `DictationStyle`; tone is applied last, and screen context and custom instructions reach only `CleanupPrompt` on AI routes. `AppController` matches the app (and, through Accessibility, the page URL) when recording starts, captures screen context then if it is on, and resolves a trigger word on the transcript. [Certain]
+
+```sh
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_modes.swift -o /tmp/murmur-modes-check && /tmp/murmur-modes-check
+```
+
 The processing check passes with Swift 6.1.2 on Linux. The Controller/UI integration has only been typechecked on Linux against hand-written AppKit/SwiftUI stubs; it has not been built or run on the Mac. [Certain]
 
 ## Dictionary, learning and retention

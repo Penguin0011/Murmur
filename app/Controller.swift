@@ -270,6 +270,12 @@ final class PreStart: @unchecked Sendable {
     /// Professional above Polish (`CleanupOptions.professional`).
     @Published var cleanupProfessional: Bool
     @Published var cleanupSpoken: Bool
+    /// Screen context for AI cleanup (gap #8), opt-in; a writing mode can override it.
+    @Published var screenContext: Bool
+    /// Writing modes (gap #6), saved as soon as they change and read at each recording start.
+    @Published var writingModes: [WritingMode] { didSet { WritingModes.save(writingModes, to: .standard) } }
+    /// Apps dictated into since launch, newest first, for the mode app picker. Memory only.
+    @Published private(set) var recentApps: [String] = []
     @Published var learningEnabled: Bool
     @Published var learningRequiresReadableField: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
@@ -325,6 +331,19 @@ final class PreStart: @unchecked Sendable {
     /// What a stage would send off this Mac with the settings as edited, or nil when nothing leaves.
     /// Reads no key (SwiftUI calls it on every render); shows the configured route's disclosure.
     func routeDisclosure(_ stage: ProcessingStage) -> String? { DisclosureText.summary(RoutePlan.make(routeSettings, cleanupSendsText: true) { _ in nil }, stage: stage) }
+    /// What screen context and writing modes add to the cleanup route's disclosure, or nil when that
+    /// route sends nothing off this Mac or neither is in use (gaps #6, #8).
+    var cleanupExtrasDisclosure: String? {
+        guard routeDisclosure(.cleanup) != nil else { return nil }
+        let modes = writingModes.filter(\.enabled)
+        var items: [String] = []
+        if screenContext || modes.contains(where: { $0.screenContext == true }) {
+            items.append("with screen context on, the selected text, the clipboard (except items marked as passwords or private) and up to \(ScreenContext.windowLimit.formatted()) characters of the focused window's text, as reference only")
+        }
+        if modes.contains(where: { !$0.instructions.isEmpty }) { items.append("your writing modes' custom instructions") }
+        guard !items.isEmpty else { return nil }
+        return "Also sends " + items.joined(separator: "; and ") + ". Murmur never sends web page addresses; it uses them on this Mac to pick a mode."
+    }
     var canCancelRequest: Bool { cloudRequest.isActive }
     var isBusy: Bool { phase == "Listening" || phase == "Processing" || (sessionAvailable && session.state != .idle) }
     var openSettings: (() -> Void)?
@@ -359,7 +378,13 @@ final class PreStart: @unchecked Sendable {
     /// This session's cloud transcriber, chosen at start; nil means local Parakeet.
     private var sessionTranscriber: TranscriptionProvider?
     private var capture: Capture?
-    private var destination: FocusSnapshot?
+    /// The field focused when recording started. Clearing it ends the session's mode and context too.
+    private var destination: FocusSnapshot? { didSet { if destination == nil { sessionMode = nil; sessionContext = nil } } }
+    /// The app or website mode matched when recording started (a trigger word can still override it).
+    /// Only the mode is kept: the page URL is read once at start and never stored or logged.
+    private var sessionMode: WritingMode?
+    /// Screen text captured at start, in memory only, for AI cleanup when the resolved mode allows it.
+    private var sessionContext: ScreenContext?
     private var destinationScreen: NSScreen?
     private var insertThisSession = true
     private var leadingSpaceThisSession = false
@@ -439,6 +464,8 @@ final class PreStart: @unchecked Sendable {
         cleanupPolish = processingSettings.options.polish
         cleanupProfessional = processingSettings.options.professional
         cleanupSpoken = processingSettings.options.spoken
+        screenContext = processingSettings.screenContext
+        writingModes = WritingModes.load(from: defaults)
         learningEnabled = processingSettings.learningEnabled
         learningRequiresReadableField = processingSettings.learningRequiresReadableField
         historyMode = processingSettings.historyMode
@@ -630,6 +657,7 @@ final class PreStart: @unchecked Sendable {
             next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
             next.learningRequiresReadableField = learningRequiresReadableField
             next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled
+            next.screenContext = screenContext
             do { try processing.update(next) } catch { setPhase("Error", "Could not save cleanup and learning settings.") }
         }
         // Also saved directly, so they persist when the dictionary (and so processing) is unavailable.
@@ -730,7 +758,9 @@ final class PreStart: @unchecked Sendable {
             guard !IsSecureEventInputEnabled() else { session.resetShortcut?(); setPhase("Error", "Dictation is unavailable while Secure Input is active."); done(); return }
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
             // An unconfigured cloud route refuses; it never falls back to local.
-            let plan = routePlan(appliedRoutes, cleanupSendsText: processing?.settings.options.anyEnabled ?? false)
+            // A mode may turn cleanup on even when the Cleanup settings have it all off.
+            let sendsText = (processing?.settings.options.anyEnabled ?? false) || writingModes.contains { $0.enabled && $0.options?.anyEnabled == true }
+            let plan = routePlan(appliedRoutes, cleanupSendsText: sendsText)
             if let refusal = plan.refusal {
                 session.resetShortcut?(); setPhase("Error", refusal); done(); return
             }
@@ -745,6 +775,7 @@ final class PreStart: @unchecked Sendable {
             insertThisSession = automaticInsertion; leadingSpaceThisSession = intelligentLeadingSpace; activeModelDirectory = modelDirectory
             listeningStarted = Date(); generation = UUID(); recoveryEntryID = nil; recordingFailed = false
             destinationScreen = screenForDestination(destination)
+            captureModeAndContext(aiCleanup: plan.cleaner != nil)
         }
         session.receive(action, completed: done)
         if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
@@ -752,6 +783,40 @@ final class PreStart: @unchecked Sendable {
         else if action == .start && session.state == .idle { setPhase("Error", "The microphone could not start. Check the selected input device.") }
         else if action == .finish && session.state == .idle && phase == "Listening" {
             destination = nil; setPhase("Error", "No audio was captured. Check your microphone and try again.")
+        }
+    }
+    /// Writing mode for the app (and page) focused at start, and screen context when an AI route will
+    /// use it. The page URL is read through Accessibility (no Automation prompt), only when an enabled
+    /// mode lists a website, and is used here and dropped. Screen text is read only with screen context
+    /// on (globally or in a mode), never under Secure Input or in a secure field, and stays in memory.
+    private func captureModeAndContext(aiCleanup: Bool) {
+        sessionMode = nil; sessionContext = nil
+        let front = NSWorkspace.shared.frontmostApplication
+        let pid = destination?.pid ?? front?.processIdentifier
+        guard let pid, pid != getpid() else { return }
+        let modes = writingModes
+        if modes.contains(where: \.enabled) {
+            let url = WritingModes.needsURL(modes) ? focusedPageURL(pid: pid, from: destination?.element) : nil
+            sessionMode = WritingModes.match(modes, bundleID: destination?.bundleID ?? front?.bundleIdentifier, url: url)
+        }
+        // Read only if this dictation could use it: the start mode (or the global setting) has it on,
+        // or a mode that a trigger word could still pick does.
+        let wanted = (sessionMode?.screenContext ?? screenContext) || modes.contains { $0.enabled && !$0.triggers.isEmpty && ($0.screenContext ?? screenContext) }
+        guard aiCleanup, wanted,
+              !IsSecureEventInputEnabled(), destination?.secure != true else { return }
+        let pasteboard = NSPasteboard.general
+        let types = pasteboard.types?.map(\.rawValue) ?? []
+        // Never read the string of an item marked as a password or otherwise private.
+        let clipboard = types.contains(where: ScreenContext.privateTypes.contains) ? nil : pasteboard.string(forType: .string)
+        let selected = destination.flatMap { focusedSelectedText($0.element) }
+        let token = generation
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let window = focusedWindowText(pid: pid, limit: ScreenContext.windowLimit)
+            DispatchQueue.main.async {
+                guard let self, self.generation == token else { return }
+                self.sessionContext = ScreenContext.make(selected: selected, clipboard: clipboard, clipboardTypes: types, window: window,
+                                                         secureInput: IsSecureEventInputEnabled(), secureField: self.destination?.secure == true)
+            }
         }
     }
     /// Local route: transcribe this recording's chunks on the warm helper while it records.
@@ -976,12 +1041,16 @@ final class PreStart: @unchecked Sendable {
     /// any other cleanup route makes one provider call in a cancellable Task (no local fallback).
     private func deliver(_ savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, token: UUID, done: @escaping () -> Void) {
         recoveryEntryID = savedEntry.id
-        let text = savedEntry.rawText
+        // A trigger word beats the app or website matched at start; it is cut from the text, not from History's raw transcript.
+        let trigger = WritingModes.trigger(writingModes, in: savedEntry.rawText)
+        let text = trigger?.text ?? savedEntry.rawText
+        let style = processing.map { DictationStyle(mode: trigger?.mode ?? sessionMode, settings: $0.settings, context: sessionContext) }
+        sessionContext = nil
         guard let processing, processing.settings.route != .local else {
-            complete(processing?.process(text) ?? .heldForRecovery(raw: text, reason: .cleanerFailed), entry: savedEntry, store: store, done: done); return
+            complete(processing?.process(text, style: style) ?? .heldForRecovery(raw: text, reason: .cleanerFailed), entry: savedEntry, store: store, done: done); return
         }
         cloudStage = .cleanup; cloudDone = done
-        cloudRequest.start({ await processing.processAsync(text) }) { [weak self] outcome in
+        cloudRequest.start({ await processing.processAsync(text, style: style) }) { [weak self] outcome in
             guard let self, self.generation == token else { return }
             self.cloudStage = nil; self.cloudDone = nil
             self.complete(outcome, entry: savedEntry, store: store, done: done)
@@ -1047,6 +1116,7 @@ final class PreStart: @unchecked Sendable {
                 let insertion = readable ? insertText(entry.finalText, into: target!) : pasteIntoFrontmostApp(entry.finalText)
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 attempted = true
+                if let app = target?.bundleID, !app.isEmpty { recentApps = [app] + recentApps.filter { $0 != app }.prefix(9) }
                 lastDictationText = entry.finalText
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
@@ -1666,6 +1736,82 @@ extension HistoryEntry: RetainedHistoryItem {}
 /// The learning lexicon (PRD approved condition): a word is common when the English spell checker
 /// finds no misspelling in it, so ordinary-word swaps (lunch→launch) are never learned.
 /// CorrectionLedger calls it on the main thread only.
+// MARK: - Screen reading for writing modes and screen context (gaps #6, #8)
+
+private func axCopy(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
+    var value: CFTypeRef?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+}
+private func axElement(_ element: AXUIElement, _ name: String) -> AXUIElement? {
+    guard let raw = axCopy(element, name), CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+    return unsafeBitCast(raw, to: AXUIElement.self)
+}
+private func axChildren(_ element: AXUIElement) -> [AXUIElement] {
+    guard let raw = axCopy(element, kAXChildrenAttribute), CFGetTypeID(raw) == CFArrayGetTypeID() else { return [] }
+    return (raw as? [AnyObject] ?? []).compactMap { CFGetTypeID($0) == AXUIElementGetTypeID() ? unsafeBitCast($0, to: AXUIElement.self) : nil }
+}
+private func axSecure(_ element: AXUIElement) -> Bool {
+    let role = axCopy(element, kAXRoleAttribute) as? String, subrole = axCopy(element, kAXSubroleAttribute) as? String
+    return role == kAXSecureTextFieldSubrole || subrole == kAXSecureTextFieldSubrole
+        || (axCopy(element, "AXDOMInputType") as? String)?.lowercased() == "password" || axCopy(element, "AXProtectedContent") as? Bool == true
+}
+
+/// The page URL in a known browser, from its web area's AXURL: first up from the focused field,
+/// then a short search of the focused window. Never forces accessibility modes on the browser.
+/// The result is for mode matching only; callers never store or log it.
+func focusedPageURL(pid: pid_t, from element: AXUIElement?) -> URL? {
+    guard let bundle = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier, browserBundleIDs.contains(bundle) else { return nil }
+    let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 0.25)
+    func pageURL(_ e: AXUIElement) -> URL? {
+        guard axCopy(e, kAXRoleAttribute) as? String == "AXWebArea", let raw = axCopy(e, kAXURLAttribute),
+              CFGetTypeID(raw) == CFURLGetTypeID() else { return nil }
+        return unsafeBitCast(raw, to: CFURL.self) as URL
+    }
+    // The messaging timeout covers only the app element, so a time budget bounds the whole search.
+    let deadline = ProcessInfo.processInfo.systemUptime + 0.3
+    var current = element
+    for _ in 0..<40 {
+        guard let e = current, ProcessInfo.processInfo.systemUptime < deadline else { break }
+        if let url = pageURL(e) { return url }
+        current = axElement(e, kAXParentAttribute)
+    }
+    // ponytail: breadth-first, 400 nodes; a page whose web area sits deeper is not matched.
+    var queue = axElement(app, kAXFocusedWindowAttribute).map { [$0] } ?? [], seen = 0
+    while !queue.isEmpty, seen < 400, ProcessInfo.processInfo.systemUptime < deadline {
+        let e = queue.removeFirst(); seen += 1
+        if let url = pageURL(e) { return url }
+        queue += axChildren(e)
+    }
+    return nil
+}
+
+/// The focused field's selected text, unless it is a secure field.
+func focusedSelectedText(_ element: AXUIElement) -> String? {
+    axSecure(element) ? nil : axCopy(element, kAXSelectedTextAttribute) as? String
+}
+
+/// Visible text of the app's focused window through Accessibility, up to `limit` characters,
+/// skipping secure fields. Bounded by node count and time so a large page cannot stall a dictation.
+func focusedWindowText(pid: pid_t, limit: Int) -> String {
+    let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 0.25)
+    guard let window = axElement(app, kAXFocusedWindowAttribute) else { return "" }
+    let deadline = ProcessInfo.processInfo.systemUptime + 0.5
+    var queue = [window], seen = 0, out = ""
+    while !queue.isEmpty, seen < 2_000, out.count < limit, ProcessInfo.processInfo.systemUptime < deadline {
+        let e = queue.removeFirst(); seen += 1
+        if axSecure(e) { continue }
+        let role = axCopy(e, kAXRoleAttribute) as? String
+        if ["AXStaticText", "AXTextField", "AXTextArea", "AXHeading"].contains(role ?? ""),
+           let text = axCopy(e, kAXValueAttribute) as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out += (out.isEmpty ? "" : "\n") + text
+        }
+        queue += axChildren(e)
+    }
+    return String(out.prefix(limit))
+}
+
 func isCommonEnglishWord(_ word: String) -> Bool {
     MainActor.assumeIsolated {
         NSSpellChecker.shared.checkSpelling(of: word, startingAt: 0, language: "en", wrap: false, inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound

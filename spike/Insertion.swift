@@ -30,6 +30,9 @@ enum InsertionError: Error, CustomStringConvertible {
     var description: String { switch self { case .unavailable(let reason): return reason } }
 }
 
+/// Browsers whose web fields have unknown input types; the app also reads their page URL for writing modes.
+let browserBundleIDs: Set<String> = ["com.apple.Safari", "com.apple.SafariTechnologyPreview", "com.google.Chrome", "com.google.Chrome.canary", "org.mozilla.firefox", "com.microsoft.edgemac", "company.thebrowser.Browser", "com.brave.Browser"]
+
 private func axAttribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
@@ -101,8 +104,7 @@ func captureFocus() throws -> FocusSnapshot {
     let inputType = axString(element, "AXDOMInputType")?.lowercased()
     let protected = axAttribute(element, "AXProtectedContent") as? Bool ?? false
     let secure = (subrole == kAXSecureTextFieldSubrole || role == kAXSecureTextFieldSubrole) || inputType == "password" || protected
-    let browsers: Set<String> = ["com.apple.Safari", "com.apple.SafariTechnologyPreview", "com.google.Chrome", "com.google.Chrome.canary", "org.mozilla.firefox", "com.microsoft.edgemac", "company.thebrowser.Browser", "com.brave.Browser"]
-    let browser = browsers.contains(bundleID)
+    let browser = browserBundleIDs.contains(bundleID)
     let knownWebType = ["text", "search", "email", "url", "tel", "number", "textarea"].contains(inputType ?? "")
     var selection: CFRange?
     if let rawRange = axAttribute(element, kAXSelectedTextRangeAttribute), CFGetTypeID(rawRange) == AXValueGetTypeID() {
