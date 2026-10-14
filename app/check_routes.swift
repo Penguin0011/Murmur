@@ -132,7 +132,7 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         check(makeCleanupProvider(.customAPI, key: nil, apiBaseURL: "http://localhost:11434", model: " ") == nil, "custom API needs a model")
         check(makeCleanupProvider(.customAPI, key: testKey, apiBaseURL: "ftp://x", model: "m") == nil, "custom API rejects a bad URL")
         check(makeCleanupProvider(.customAPI, key: nil, apiBaseURL: "https://api.example.com/v1", model: "m") is OpenAICompatibleCleanupProvider, "custom API key is optional")
-        check(CleanupChoice.allCases == [.localRules, .gemini, .customAPI], "cleanup choices show only local rules, Gemini and custom API")
+        check(CleanupChoice.allCases == [.localRules, .appleIntelligence, .gemini, .customAPI], "cleanup choices: local rules, Apple Intelligence, Gemini and custom API")
         check(ProviderID.customAPI.displayName == "Custom Provider" && CleanupChoice.customAPI.displayName == "Custom Provider", "custom provider name matches key and route controls")
         check(CleanupChoice.localRules.processingRoute == .local && CleanupChoice.customAPI.processingRoute == .cloud, "processing route mapping")
     }

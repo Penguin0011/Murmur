@@ -603,12 +603,15 @@ struct SettingsView: View {
             .padding(.top, 16)
 
             eyebrow("Cleanup runs with").padding(.top, 28)
-            segmented(CleanupChoice.allCases.map { ($0, $0 == .localRules ? "On this Mac" : short($0.displayName)) }, $controller.cleanupChoice, size: 14)
+            segmented(CleanupChoice.allCases.map { ($0, short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
-            help("On this Mac uses simple built-in rules. For AI cleanup, choose Gemini or a Custom Provider (a local model server of 8B or larger works too). Murmur never switches routes on its own.")
+            help("Local rules are simple built-in rules. For AI cleanup, choose Apple Intelligence (on this Mac), Gemini or a Custom Provider (a local model server of 8B or larger works too). If AI cleanup fails, local rules clean that dictation; Murmur never switches routes on its own.")
                 .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
+            } else if controller.cleanupChoice == .appleIntelligence {
+                help("Cleanup runs on this Mac with Apple's on-device model. Nothing is sent anywhere.").padding(.top, 12)
+                if let reason = AppleSystemModel.status() { help(reason.userMessage + " Until then, local rules clean dictations.").padding(.top, 8) }
             } else {
                 disclosure(controller.routeDisclosure(.cleanup)).padding(.top, 16)
             }

@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 ```
 
@@ -258,13 +258,13 @@ The checks pass with Swift 6.1.2 on Linux, in both `-swift-version 5` and the de
 `Routes.swift` is Foundation-only and holds the route decisions; Controller and UI display and act on them. [Certain]
 
 ```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/check_routes.swift -o /tmp/murmur-routes-check
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift app/check_routes.swift -o /tmp/murmur-routes-check
 /tmp/murmur-routes-check
 ```
 
 **Settings → Processing routes (R4).** Route and model changes apply as soon as they are made. Custom transcription and cleanup have separate editable base URLs, model IDs and destination-bound Keychain keys. Only endpoint preferences are stored in UserDefaults. [Certain]
 - Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini and Custom Provider. Gemini defaults to `gemini-3.5-transcribe`; other model IDs use Gemini's general audio endpoint. Custom transcription posts multipart audio and spelling hints to `/v1/audio/transcriptions`; a compatible server must implement that format. [Certain]
-- Cleanup: Local rules (the default), Gemini or Custom Provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. [Certain]
+- Cleanup: Local rules (the default), Apple Intelligence (on this Mac; see [Apple Intelligence cleanup](#apple-intelligence-cleanup)), Gemini or Custom Provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. [Certain]
 - Existing shared custom settings migrate to separate transcription and cleanup settings. Existing keys are copied to separate Keychain accounts; each remains usable only when its saved destination matches that route's endpoint. [Certain]
 
 **A dictation on a cloud route.**

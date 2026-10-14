@@ -4,7 +4,7 @@
 // waits out rate limits. Transcripts here are synthetic; nothing is logged from real dictations.
 //
 //   SDKROOT="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk" swiftc -swift-version 5 -parse-as-library app/Cleanup.swift app/Providers.swift \
-//     app/Credentials.swift app/Routes.swift app/Processing.swift app/Dictionary.swift app/Learning.swift app/Retention.swift \
+//     app/Credentials.swift app/Routes.swift app/AppleCleanup.swift app/Processing.swift app/Dictionary.swift app/Learning.swift app/Retention.swift \
 //     spike/Observation.swift app/tools/check_professional_live.swift -o /tmp/pl && /tmp/pl [runs per case, default 3]
 import Foundation
 struct Case { var raw: String; var must: [String]; var mustNot: [String] }
