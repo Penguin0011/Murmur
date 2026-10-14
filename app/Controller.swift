@@ -797,7 +797,10 @@ final class PreStart: @unchecked Sendable {
             let url = WritingModes.needsURL(modes) ? focusedPageURL(pid: pid, from: destination?.element) : nil
             sessionMode = WritingModes.match(modes, bundleID: destination?.bundleID ?? front?.bundleIdentifier, url: url)
         }
-        guard aiCleanup, screenContext || modes.contains(where: { $0.enabled && $0.screenContext == true }),
+        // Read only if this dictation could use it: the start mode (or the global setting) has it on,
+        // or a mode that a trigger word could still pick does.
+        let wanted = (sessionMode?.screenContext ?? screenContext) || modes.contains { $0.enabled && !$0.triggers.isEmpty && ($0.screenContext ?? screenContext) }
+        guard aiCleanup, wanted,
               !IsSecureEventInputEnabled(), destination?.secure != true else { return }
         let pasteboard = NSPasteboard.general
         let types = pasteboard.types?.map(\.rawValue) ?? []
@@ -1763,15 +1766,17 @@ func focusedPageURL(pid: pid_t, from element: AXUIElement?) -> URL? {
               CFGetTypeID(raw) == CFURLGetTypeID() else { return nil }
         return unsafeBitCast(raw, to: CFURL.self) as URL
     }
+    // The messaging timeout covers only the app element, so a time budget bounds the whole search.
+    let deadline = ProcessInfo.processInfo.systemUptime + 0.3
     var current = element
     for _ in 0..<40 {
-        guard let e = current else { break }
+        guard let e = current, ProcessInfo.processInfo.systemUptime < deadline else { break }
         if let url = pageURL(e) { return url }
         current = axElement(e, kAXParentAttribute)
     }
     // ponytail: breadth-first, 400 nodes; a page whose web area sits deeper is not matched.
     var queue = axElement(app, kAXFocusedWindowAttribute).map { [$0] } ?? [], seen = 0
-    while !queue.isEmpty, seen < 400 {
+    while !queue.isEmpty, seen < 400, ProcessInfo.processInfo.systemUptime < deadline {
         let e = queue.removeFirst(); seen += 1
         if let url = pageURL(e) { return url }
         queue += axChildren(e)

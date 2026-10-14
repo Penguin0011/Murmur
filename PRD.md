@@ -324,7 +324,7 @@ Each mode can override the cleanup options (Faithful, Strict, Polish, Profession
 
 **Page address:** the page URL is read through Accessibility (the web area's AXURL), not AppleScript, so there is no Automation prompt. It is read only in a known browser and only while an enabled mode lists a website. It is used once at recording start to pick the mode and is never stored, logged or sent. Murmur still never turns on accessibility modes in other apps, so a browser that exposes no web area to Accessibility does not match websites. [Certain]
 
-**Evidence:** `check_modes.swift` covers matching priority, subdomain and path rules, trigger stripping at either end without taking part of a word, override inheritance and persistence. Not verified in the live app: reading the URL in Safari, Chrome, Arc, Edge, Brave and Firefox, and the Settings screen beyond the fixture building and launching. [Certain]
+**Evidence:** `check_modes.swift` covers matching priority, subdomain and path rules, trigger stripping at either end without taking part of a word, override inheritance and persistence. Not verified in the live app: reading the URL in Safari, Chrome, Arc, Edge, Brave and Firefox (Chromium may not expose its web area without an accessibility mode Murmur will not force), and the Settings screen beyond the fixture building and launching. [Certain]
 
 ### Decision: tone per writing mode — October 14, 2026
 
@@ -342,7 +342,7 @@ Tone is never applied to the email layout. The guard's ordinary checks are not l
 
 BetterWispr gap #8, in scope per the user's decision of the same date. This amends the disclosure rule in section 4 ("avoid sending unrelated history"): with screen context on, an AI cleanup route also receives text from the screen. [Certain]
 
-**What is read:** when recording starts and an AI cleanup route will run, Murmur reads:
+**What is read:** when recording starts, an AI cleanup route will run, and the dictation could use context (the mode matched at start, or the global setting, has it on, or a mode with trigger words does), Murmur reads:
 - the focused field's selected text
 - the clipboard's plain text
 - up to 3,000 characters of the focused window's text through Accessibility, bounded by node count and time

@@ -687,6 +687,7 @@ struct SettingsView: View {
             let current = mode.wrappedValue.options.flatMap { $0.anyEnabled ? $0 : nil }
             var o = current ?? CleanupOptions(fillers: controller.cleanupFillers, corrections: controller.cleanupCorrections, lists: controller.cleanupLists,
                                               punctuation: controller.cleanupPunctuation, spoken: controller.cleanupSpoken)
+            if !o.anyEnabled { o = .standard } // Over Faithful settings, start from the defaults.
             o.polish = value >= 2; o.professional = value == 3
             mode.wrappedValue.options = o
         })
@@ -736,7 +737,7 @@ struct SettingsView: View {
 
             eyebrow("Websites").padding(.top, 20)
             ModeListEditor(items: mode.websites, placeholder: "github.com, docs.google.com/document/*, *.slack.com", label: "Website")
-            help("Matches the page in Safari, Chrome, Edge, Brave, Arc or Firefox when recording starts. A site includes its subdomains; add a path to match only that part. The address is read through Accessibility, only while a mode lists a website, and is never saved or sent.", color: Palette.ink64)
+            help("Matches the page open in the browser when recording starts. A site includes its subdomains; add a path to match only that part. The address is read through Accessibility, only while a mode lists a website, and is never saved or sent. A browser that does not show its page to Accessibility matches by app only.", color: Palette.ink64)
                 .font(.system(size: 12)).padding(.top, 6)
 
             eyebrow("Trigger words").padding(.top, 20)
