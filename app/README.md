@@ -56,7 +56,7 @@ The processing check passes with Swift 6.1.2 on Linux. The Controller/UI integra
 `Dictionary.swift`, `Learning.swift` and `Retention.swift` are Foundation-only, so their checks also run on Linux. They are compiled into the app through `Processing.swift`. The history cap, history-off mode and Delete all data are wired in through `AppServices.swift` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)).
 
 ```sh
-swiftc app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
 ```
 
 - `DictionaryStore` keeps `dictionary.json` (0600, directory 0700). `apply(to:)` replaces exact variants as whole words and space-separated phrases (case-insensitive, longest match, never fuzzy). It inserts the preferred spelling as stored, and capitalizes its first letter only at a sentence start when the spelling is all lowercase. `relevantEntries(for:)` returns the entries present in the text, plus up to 10 whose preferred spelling sounds like a 1–3 word span (`DictionaryStore.soundsLike`: matching phonetic keys and similarity ≥ 0.5, or similarity ≥ 0.75 for terms of 6+ letters). That is what a cloud stage may receive. Near matches only feed the cleanup prompt and the guard, which then accepts the term in place of 1–3 sound-alike words; `apply` never uses them.

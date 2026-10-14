@@ -194,13 +194,9 @@ final class DictionaryStore {
     }
 
     /// Gap #12: spoken commands a dictionary entry may target ("Kocia Mark" -> "question mark").
-    /// MERGE NOTE (W1): W1 adds spoken-command parsing in Cleanup.swift. Whoever merges second points
-    /// this at W1's command phrase list, so the two never drift. Dictionary application runs before
-    /// cleanup (`ProcessingCoordinator.prepare`), so these entries already apply before command parsing.
-    static var commandPhrases: Set<String> = [
-        "comma", "period", "full stop", "question mark", "exclamation mark", "exclamation point",
-        "colon", "semicolon", "hyphen", "dash", "new line", "new paragraph",
-    ]
+    /// Derived from `RuleCleaner.markCommands` (plus its "@" phrases) so the two never drift. Dictionary
+    /// application runs before cleanup (`ProcessingCoordinator.prepare`), so these entries apply first.
+    static let commandPhrases: Set<String> = Set(RuleCleaner.markCommands.map { $0.0.joined(separator: " ") } + ["at the rate", "at sign"])
     /// An entry whose preferred form is a spoken command: applied ahead of other entries and kept
     /// out of every transcription boost and cleanup hint (it is not a word to bias toward).
     static func isCommandTarget(_ entry: DictionaryEntry) -> Bool {
