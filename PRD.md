@@ -316,14 +316,25 @@ That decision was about downloaded models: their RAM and compute cost slow other
 
 What the numbers show:
 - Apple Intelligence misses the section 4 thresholds in every style. Local rules meets them. [Certain]
-- **Name, number and negation edits.** Most of the 5–6 come from a correction the model half-applied. It dropped the cue but kept both versions, as in "Book it for 2, 3 people". The guard can't reject that, because no word was invented. One came from an unannounced list. [Certain]
+- **Name, number and negation edits.** Every one of the 5–6 per style is one of two kinds:
+  - A correction the model half-applied: both versions kept, as in "Book it for 2, 3 people", "goes to Dana, Dan" and "nine, sorry, ten".
+  - Ordinal words turned into a list nobody asked for, as in "First, preheat" → "1. Preheat", or Polish's "first impressions matter, second chances" → a numbered list.
+
+  None is a legitimate Polish or Professional rewrite. The guard accepts these outputs because no word was invented. That is a guard gap on every route, noted for W1. [Certain]
 - **Most guard rejections are unexplained deletions.** The model drops words the prompt doesn't allow it to drop. It also lowercases sentence starts and drops final periods when punctuation is off. [Certain]
 - **Errors and latency.** No generation errors occurred. The first call after prewarming took up to 2.1 s. [Certain]
+- **Long dictation.** These were extra live runs in Professional, using non-repeating text built from corpus sentences.
+  - No request exceeded the context window. That includes a single 906-word unpunctuated request, which can't be split.
+  - Latency grows with length: 4.8 s for 156 words, 16.8 s for 600 words, 27–29 s for 906 words.
+  - The guard rejected every one of these long outputs, because one violation rejects the whole section, so local rules were used.
+  - In practice the route helps only short dictations. [Certain]
 
 **Comparison with Gemini.** GEMINI_RESULT [Certain]
 
 **Proposal for the user to decide:**
-1. Amend section 4. Local AI cleanup through the system model is allowed as an **opt-in route, labeled on-device and below the thresholds**. A downloaded local model stays out of scope for launch.
+1. Amend section 4. Local AI cleanup through the system model is allowed as an **opt-in route**.
+   - Settings labels it on-device and says it is less accurate than local rules on the test corpus.
+   - A downloaded local model stays out of scope for launch.
 2. Do not offer it as the default. Do not call it recommended until a measured prompt or guard change brings it to the section 4 thresholds.
 3. The alternative is to hide the choice until it meets them. The code and checks stay in place either way.
 

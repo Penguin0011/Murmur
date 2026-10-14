@@ -610,7 +610,7 @@ struct SettingsView: View {
             if controller.cleanupChoice == .localRules {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
             } else if controller.cleanupChoice == .appleIntelligence {
-                help("Cleanup runs on this Mac with Apple's on-device model. Nothing is sent anywhere.").padding(.top, 12)
+                help("Cleanup runs on this Mac with Apple's on-device model. Nothing is sent anywhere. On Murmur's test corpus it is less accurate than local rules, so Murmur checks every edit and uses local rules when one fails.").padding(.top, 12)
                 if let reason = AppleSystemModel.status() { help(reason.userMessage + " Until then, local rules clean dictations.").padding(.top, 8) }
             } else {
                 disclosure(controller.routeDisclosure(.cleanup)).padding(.top, 16)

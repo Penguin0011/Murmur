@@ -60,7 +60,9 @@ func quantile(_ xs: [Double], _ q: Double) -> Double { let s = xs.sorted(); retu
             inner = apple
         case "gemini":
             guard let key = try KeychainCredentialStore().read(.gemini) else { print("No Gemini key in Murmur's Keychain"); exit(2) }
-            inner = GeminiCleanupProvider(apiKey: key)
+            // Measure the primary model only: no silent failover to Gemma when it is rate limited.
+            var gemini = GeminiCleanupProvider(apiKey: key); gemini.fallback = nil
+            inner = gemini
         default: print("route must be apple or gemini"); exit(2)
         }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("murmur-measure-\(UUID())")
