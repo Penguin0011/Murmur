@@ -285,6 +285,28 @@ Polish and Professional: the corpus labels cover fillers, corrections, and lists
 
 Any local candidate or cloud route must meet these thresholds on the same corpus before it is offered as the cleanup default. The 425-utterance corpus was written by the same agent that wrote the rules, so these numbers overstate real-world quality (see `app/README.md`). [Certain]
 
+### Decision: spoken commands, numbers and the email layout — October 14, 2026
+
+BetterWispr gaps #2–#5 (`BETTERWISPR_GAPS.md`) ship as one cleanup option, "Spoken commands and numbers" (`CleanupOptions.spoken`, key `cleanupSpokenCommands`). It is on by default and off in Faithful. Saved options from before it existed decode with it off. `RuleCleaner.spokenCommands` runs first in local cleanup. It is conservative: when a rule is unsure, the words stay. It handles:
+- dictated marks and layout ("comma", "period", "new paragraph")
+- spoken numbers that contain hundred or a scale word, or come before "percent" ("250,000", "2,50,000", "2.5 million", "10%")
+- @ and # ("at the rate", "hashtag", "hash forty two")
+- the email layout
+
+The same operations are added to the cloud prompt. [Certain]
+
+**Guard:** with the option on, `CleanupGuard.check` first judges output against the raw transcript as usual. If that fails, it judges the output against `spokenCommands(raw)` instead. That text is a deterministic rewrite of what was said, so every check still applies to it: answers, obeyed instructions, inserted words, and names, negations and number values. A model has to make the same conversions as the rules; otherwise its output falls back as decided on October 6, 2026. [Certain]
+
+**Email-layout exception:** this amends "cleanup never adds structure or greetings", and only for an explicit frame at the start of the dictation: "write", "draft" or "compose" an email to someone "saying" something. With that frame, cleanup may:
+- drop the frame words
+- add "Hi <name>," as the greeting ("Hi" is the only word it may add)
+- lay the message out with blank lines
+- put a sign-off the speaker said at the end ("best regards, Kartik") on its own lines
+
+Without the frame, an added greeting or sign-off is still rejected. The frame never lets the model compose or answer the email. `check_cleanup.swift` covers each case. [Certain]
+
+**Evidence:** `check_cleanup.swift` covers the spec examples in both directions, plus adversarial outputs for the new path. On the 425-utterance corpus the October 7 thresholds are unchanged, with 0/237 false rejects. 0 of 2363 adversarial outputs are accepted with the option off, with it on, in Polish, or in Professional. With the option on, the rules change 4 corpus inputs, each one a spoken number that should be converted. [Certain]
+
 ### Milestone 1 implementation decisions — October 2, 2026
 
 Continue with the selected Unified model and batch processing; available-host inference remains unverified. M1/8 GB performance is deferred and does not block implementation or release. No silent model/provider substitution is permitted. [Certain]

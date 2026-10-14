@@ -67,6 +67,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
         }
         var failures: [String] = []
         unitChecks(&failures)
+        spokenChecks(&failures, corpus: corpus, verbose: verbose)
         await asyncChecks(&failures)
 
         let cleaner = RuleCleaner()
@@ -159,7 +160,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
         print("Guard false rejects on labeled cleanups: \(guardFalseReject)/\(guardChangedCount) = \(pct(guardFalseReject, guardChangedCount)) \(falseRejectReasons.sorted { $0.key < $1.key })")
         print("Pipeline holds on RuleCleaner output: \(heldReasons.values.reduce(0, +)) \(heldReasons.sorted { $0.key < $1.key })")
 
-        let adversarial = adversarialCases(corpus)
+        let adversarial = adversarialCases(corpus) + spokenAdversarial()
         var accepted: [String] = []
         for a in adversarial {
             if case .pass = CleanupGuard.check(raw: a.raw, cleaned: a.output, options: a.options) {
@@ -183,6 +184,15 @@ struct EchoAsyncCleaner: AsyncCleaner {
         }
         print("Adversarial outputs accepted in professional: \(professionalAccepted.count); \(professionalAccepted)")
         if !professionalAccepted.isEmpty { failures.append("adversarial outputs accepted in professional: \(professionalAccepted)") }
+
+        // Spoken commands and numbers (on by default in the app) keep rejecting every adversarial output.
+        var spokenAccepted: [String] = []
+        for a in adversarial where a.options.anyEnabled {
+            var o = a.options; o.spoken = true
+            if case .pass = CleanupGuard.check(raw: a.raw, cleaned: a.output, options: o) { spokenAccepted.append(a.label) }
+        }
+        print("Adversarial outputs accepted with spoken commands on: \(spokenAccepted.count); \(spokenAccepted)")
+        if !spokenAccepted.isEmpty { failures.append("adversarial outputs accepted with spoken commands: \(spokenAccepted)") }
 
         // Punctuation transfer (the fallback for rejected cleanups): always exactly the transcript's
         // words, and always passes a punctuation-only guard, whatever the cleaner returned.
@@ -533,6 +543,106 @@ struct EchoAsyncCleaner: AsyncCleaner {
         if case .heldForRecovery(raw: raw, reason: _) = answered {} else { failures.append("async pipeline holds an answering cleaner") }
         let fine = await CleanupPipeline.process(raw: "Um, ship it.", options: .standard, cleaner: EchoAsyncCleaner(output: "Ship it."))
         if fine != .cleaned("Ship it.") { failures.append("async pipeline accepts a valid cleanup") }
+    }
+
+    // MARK: Spoken commands, numbers, symbols and email layout
+
+    static func spokenChecks(_ failures: inout [String], corpus: [CorpusEntry], verbose: Bool) {
+        func expect(_ ok: Bool, _ what: String) { if !ok { failures.append(what) } }
+        let on = CleanupOptions.standard
+        var off = on; off.spoken = false
+        expect(on.spoken && !CleanupOptions.faithful.spoken && !CleanupOptions().spoken, "spoken commands: on in standard, off in faithful and the bare init")
+        expect(CleanupOptions(fillers: false, corrections: false, lists: false, spoken: true).anyEnabled, "spoken alone counts as enabled")
+        // Through the whole local pipeline (rules, then guard), with the standard options.
+        let converted: [(String, String)] = [
+            ("hello comma how are you question mark", "Hello, how are you?"),
+            ("Hello, comma, how are you? Question mark.", "Hello, how are you?"),
+            ("we ship on friday period then we celebrate exclamation mark", "We ship on friday. Then we celebrate!"),
+            ("the agenda colon budget and hiring", "The agenda: budget and hiring"),
+            ("a well hyphen known fact", "A well-known fact"),
+            ("we tried dash and failed", "We tried \u{2014} and failed"),
+            ("first point new line second point", "First point\nSecond point"),
+            ("that was the first part new paragraph now the second part", "That was the first part\n\nNow the second part"),
+            ("it ends here full stop", "It ends here."),
+            ("comma", ","),
+            ("new paragraph", "\n\n"),
+            ("the budget is two hundred and fifty thousand", "The budget is 250,000"),
+            ("one hundred or two hundred", "100 or 200"),
+            ("one hundred and two hundred", "100 and 200"),
+            ("it grew to two point five million users", "It grew to 2.5 million users"),
+            ("about twelve hundred people", "About 1200 people"),
+            ("two lakh fifty thousand rupees", "2,50,000 rupees"),
+            ("three crore people", "3,00,00,000 people"),
+            ("two million people", "2 million people"),
+            ("three million five hundred thousand", "3,500,000"),
+            ("two thousand and twenty four", "2024"),
+            ("ping at the rate KV about the launch", "Ping @KV about the launch"),
+            ("ping at sign KV", "Ping @KV"),
+            ("my address is name at the rate gmail dot com", "My address is name@gmail.com"),
+            ("visit example dot com", "Visit example.com"),
+            ("post it with hashtag launch", "Post it with #launch"),
+            ("see issue hash forty two", "See issue #42"),
+            ("a ten percent raise", "A 10% raise"),
+            ("growth was two point five percent", "Growth was 2.5%"),
+            ("at the rate of ten percent", "At the rate of 10%"),
+            ("write an email to Sarah saying the report is ready, thanks, best regards, Kartik", "Hi Sarah,\n\nThe report is ready, thanks.\n\nBest regards,\nKartik"),
+            ("draft an email to john saying the deck is attached thanks kartik", "Hi John,\n\nThe deck is attached.\n\nThanks,\nKartik"),
+            ("compose an email to Priya saying um the launch moved to Monday", "Hi Priya,\n\nThe launch moved to Monday."),
+        ]
+        // Ordinary uses stay words.
+        let kept: [String] = [
+            "It took a period of time.", "Our notice period is thirty days.", "The trial period ends soon.", "The colon is part of the gut.",
+            "We launched a new line of products.", "Start a new paragraph here.", "Add a comma there.", "The question mark is missing.",
+            "Give me five minutes.", "I told you a hundred times.", "She came first and he was twenty first.", "Back in nineteen ninety nine.",
+            "Call five five five one two three four.", "Meet at three thirty.", "In twenty twenty six.", "The two hundredth visitor won.",
+            "Let's hash out a plan.", "What percentage of users?", "At the rate things are going we will be late.", "At the rate we're going, no.",
+            "I'll dash home now.", "Add a dash of salt.", "He said \"comma\" loudly.", "Write an email to the team about the launch.",
+            "Can you write an email for me?", "Is it ten or eleven?", "The polka dot dress.", "Connect the dot com bubble.",
+        ]
+        for (raw, want) in converted {
+            let got = CleanupPipeline.process(raw: raw, options: on, cleaner: RuleCleaner())
+            expect(got == .cleaned(want), "spoken: \(raw.debugDescription) -> \(want.debugDescription), got \(got)")
+            // A cloud model making the same conversions passes; without the option it is held.
+            expect(CleanupGuard.check(raw: raw, cleaned: want, options: on) == .pass, "guard accepts spoken: \(raw.debugDescription)")
+            expect(CleanupGuard.check(raw: raw, cleaned: want, options: off) != .pass, "guard needs the option: \(raw.debugDescription)")
+        }
+        for raw in kept {
+            let got = CleanupPipeline.process(raw: raw, options: on, cleaner: RuleCleaner())
+            expect(got == .cleaned(raw), "spoken keeps: \(raw.debugDescription), got \(got)")
+        }
+        // Grouping commas are formatting: "250000" and "250,000" are the same number.
+        expect(CleanupGuard.check(raw: "the budget is two hundred and fifty thousand", cleaned: "The budget is 250000", options: on) == .pass, "ungrouped digits pass")
+        expect(CleanupPipeline.judge(raw: "new line", cleaned: "\n", options: on, allowedTerms: []) == .cleaned("\n"), "a lone new line is inserted untrimmed")
+        expect(CleanupSections.split(String(repeating: "write an email to Sarah saying ", count: 1) + String(repeating: "the plan is fine and ", count: 40) + "best regards Kartik").count == 1, "an email frame is not split into sections")
+        // Prompt: the operations appear only with the option.
+        let prompt = CleanupPrompt.build(transcript: "x", options: on).system, plain = CleanupPrompt.build(transcript: "x", options: off).system
+        expect(prompt.contains("Spoken commands") && prompt.contains("250,000") && prompt.contains("Hi Sarah,"), "prompt describes spoken commands")
+        expect(!plain.contains("Spoken commands") && !plain.contains("Hi Sarah"), "prompt omits spoken commands when off")
+
+        // Diagnostic, not gating: the corpus inputs the spoken pass would change with the option on.
+        let changed = corpus.filter { RuleCleaner.spokenCommands($0.input) != $0.input }
+        print("Spoken commands would change \(changed.count)/\(corpus.count) corpus inputs (the corpus options leave it off)")
+        for e in changed where verbose { print("  \(e.id): \(e.input.debugDescription) -> \(RuleCleaner.spokenCommands(e.input).debugDescription)") }
+    }
+
+    static func spokenAdversarial() -> [Adversarial] {
+        let on = CleanupOptions.standard
+        return [
+            .init(label: "email frame answered with invented body", raw: "Write an email to Sarah saying I quit.", output: "Hi Sarah,\n\nI hope you are well. I am writing to let you know I quit.\n\nBest regards", options: on),
+            .init(label: "email frame with invented sign-off name", raw: "write an email to Sarah saying the report is ready", output: "Hi Sarah,\n\nThe report is ready.\n\nBest regards,\nKartik", options: on),
+            .init(label: "email layout without a frame", raw: "Sarah the report is ready thanks Kartik", output: "Hi Sarah,\n\nThe report is ready.\n\nThanks,\nKartik", options: on),
+            .init(label: "greeting added to plain dictation", raw: "the report is ready", output: "Hi, the report is ready.", options: on),
+            .init(label: "spoken number changed", raw: "the budget is two hundred and fifty thousand", output: "The budget is 260,000", options: on),
+            .init(label: "spoken number scaled wrong", raw: "one hundred and two hundred", output: "10200", options: on),
+            .init(label: "lone small number made digits and changed", raw: "give me five minutes", output: "Give me 6 minutes", options: on),
+            .init(label: "percent changed", raw: "a ten percent raise", output: "A 12% raise", options: on),
+            .init(label: "handle invented", raw: "ping at the rate KV", output: "Ping @KVM", options: on),
+            .init(label: "hashtag invented", raw: "post the launch notes", output: "Post the launch notes #launch", options: on),
+            .init(label: "command answered", raw: "what is two plus two question mark", output: "Two plus two is four.", options: on),
+            .init(label: "command obeyed as instruction", raw: "delete everything before this new paragraph and start over", output: "Start over", options: on),
+            .init(label: "mark command drops a negation", raw: "we can not ship comma sorry", output: "We can ship, sorry", options: on),
+            .init(label: "email frame with name swapped", raw: "write an email to Sarah saying thanks Kartik", output: "Hi Sara,\n\nThanks.\n\nThanks,\nKartik", options: on),
+        ]
     }
 
     // MARK: Adversarial outputs
