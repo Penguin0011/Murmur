@@ -1,13 +1,13 @@
 // Runs app/cleanup-corpus.json through a cleanup route with the real ProcessingCoordinator path
 // (prompt, guard, local-rules fallback) for Strict, Polish and Professional, and prints the PRD
-// section 4 measures plus model latency. `apple` uses Apple's on-device model; `gemini` reads
-// Murmur's Gemini key from the Keychain (never printed) and costs API calls. Corpus text is
+// section 4 measures plus model latency. `apple` uses Apple's on-device model; `gemini` (primary model only) and `custom` (the Custom Provider cleanup
+// settings) read Murmur's key from the Keychain (never printed) and costs API calls. Corpus text is
 // synthetic, so per-utterance misses may be printed with --verbose.
 //
 //   SDKROOT="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk" swiftc -swift-version 5 -parse-as-library -suppress-warnings \
 //     app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift \
 //     app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/tools/measure_cleanup_route.swift \
-//     -o /tmp/mcr && [MCR_DELAY=4.5] /tmp/mcr apple|gemini [strict,polish,professional] [--verbose]
+//     -o /tmp/mcr && [MCR_DELAY=4.5] /tmp/mcr apple|gemini|custom [strict,polish,professional] [--verbose]
 import Foundation
 
 struct Entry: Decodable { var id: String; var input: String; var options: CleanupOptions; var expected: String; var tags: [String] }
@@ -63,7 +63,15 @@ func quantile(_ xs: [Double], _ q: Double) -> Double { let s = xs.sorted(); retu
             // Measure the primary model only: no silent failover to Gemma when it is rate limited.
             var gemini = GeminiCleanupProvider(apiKey: key); gemini.fallback = nil
             inner = gemini
-        default: print("route must be apple or gemini"); exit(2)
+        case "custom":
+            // Murmur's Custom Provider cleanup settings and endpoint-bound key (development defaults).
+            let d = UserDefaults(suiteName: "cc.clouddev.dictation.development")!
+            guard let base = d.string(forKey: "customAPIBaseURL"), let model = d.string(forKey: "customAPIModel"),
+                  let provider = makeCleanupProvider(.customAPI, key: try CustomAPIKeyBinding.read(at: base, defaults: d, credentials: KeychainCredentialStore(), provider: .customCleanup),
+                                                     apiBaseURL: base, model: model) else { print("No Custom Provider cleanup configured"); exit(2) }
+            print("custom: \(model) at \(URL(string: base)?.host ?? "?")")
+            inner = provider
+        default: print("route must be apple, gemini or custom"); exit(2)
         }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("murmur-measure-\(UUID())")
         let suite = "murmur-measure-\(UUID())"

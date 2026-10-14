@@ -329,7 +329,11 @@ What the numbers show:
   - The guard rejected every one of these long outputs, because one violation rejects the whole section, so local rules were used.
   - In practice the route helps only short dictations. [Certain]
 
-**Comparison with Gemini.** GEMINI_RESULT [Certain]
+**Cloud comparison: not run.** The only keys configured on this Mac are free tier, and neither can finish a 402-call style:
+- **Gemini** (gemini-3.5-flash-lite): an unthrottled pass had 75–83% of its calls rate limited, so its inserted text was mostly local rules.
+- **Cerebras** gpt-oss-120b, through the Custom Provider route: limited to 5 requests a minute and 150 an hour, so 97.5% of a Strict pass was rate limited, and one style would take about 3 hours.
+
+No numbers from those runs are recorded. To compare, run `app/tools/measure_cleanup_route.swift custom` or `gemini` with a paid or higher-limit key. `MCR_DELAY` spaces out the calls. [Certain]
 
 **Proposal for the user to decide:**
 1. Amend section 4. Local AI cleanup through the system model is allowed as an **opt-in route**.
