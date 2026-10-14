@@ -137,6 +137,9 @@ struct SettingsView: View {
     /// The expanded History row.
     @State private var selectedID: String?
     @State private var copiedID: String?
+    /// The History entry whose final text is being edited (gap #10), and the draft.
+    @State private var editingTextID: String?
+    @State private var textDraft = ""
     @State private var searchText = ""
     @State private var attentionOnly = false
     @State private var newPreferred = ""
@@ -995,8 +998,23 @@ struct SettingsView: View {
                             .background(Palette.accent16).padding(.bottom, 16)
                     }
                     eyebrow("Final text")
-                    Text(entry.finalText.isEmpty ? "No final text saved." : entry.finalText).font(.system(size: 16)).lineSpacing(3)
-                        .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                    if editingTextID == entry.id {
+                        TextEditor(text: $textDraft).font(.system(size: 16)).scrollContentBackground(.hidden)
+                            .frame(minHeight: 88).padding(8).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+                            .accessibilityLabel("Final text").padding(.top, 6)
+                        HStack(spacing: 8) {
+                            Button("Save") { if controller.editEntryText(entry, to: textDraft) { editingTextID = nil } }
+                                .buttonStyle(InkButtonStyle(kind: .filled)).fixedSize()
+                                .disabled(textDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            Button("Cancel") { editingTextID = nil }.buttonStyle(InkButtonStyle(kind: .outline)).fixedSize()
+                                .keyboardShortcut(.cancelAction)
+                        }.padding(.top, 8)
+                        Text("Murmur learns misheard words from your fix, as it does from edits after insertion.")
+                            .font(.system(size: 13)).foregroundStyle(Palette.ink64).padding(.top, 8)
+                    } else {
+                        Text(entry.finalText.isEmpty ? "No final text saved." : entry.finalText).font(.system(size: 16)).lineSpacing(3)
+                            .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+                    }
                     if entry.rawText != entry.finalText {
                         eyebrow("Raw transcription").padding(.top, 16)
                         Text(entry.rawText).font(.system(size: 15)).lineSpacing(3).foregroundStyle(Palette.ink70)
@@ -1010,6 +1028,10 @@ struct SettingsView: View {
                         if entry.rawText != entry.finalText {
                             Button(copiedID == entry.id + "r" ? "Copied ✓" : "Copy Raw") { controller.copyRawEntry(entry); flashCopied(entry.id + "r") }
                                 .buttonStyle(InkButtonStyle(kind: .outline))
+                        }
+                        if !entry.finalText.isEmpty && editingTextID != entry.id {
+                            Button("Edit") { textDraft = entry.finalText; editingTextID = entry.id }.buttonStyle(InkButtonStyle(kind: .outline))
+                                .accessibilityLabel("Edit final text")
                         }
                         Spacer()
                         Button("Delete", role: .destructive) { controller.deleteEntry(entry) }.buttonStyle(InkButtonStyle(kind: .plain))

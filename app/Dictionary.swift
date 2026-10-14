@@ -193,6 +193,20 @@ final class DictionaryStore {
         return removed
     }
 
+    /// Gap #12: spoken commands a dictionary entry may target ("Kocia Mark" -> "question mark").
+    /// MERGE NOTE (W1): W1 adds spoken-command parsing in Cleanup.swift. Whoever merges second points
+    /// this at W1's command phrase list, so the two never drift. Dictionary application runs before
+    /// cleanup (`ProcessingCoordinator.prepare`), so these entries already apply before command parsing.
+    static var commandPhrases: Set<String> = [
+        "comma", "period", "full stop", "question mark", "exclamation mark", "exclamation point",
+        "colon", "semicolon", "hyphen", "dash", "new line", "new paragraph",
+    ]
+    /// An entry whose preferred form is a spoken command: applied ahead of other entries and kept
+    /// out of every transcription boost and cleanup hint (it is not a word to bias toward).
+    static func isCommandTarget(_ entry: DictionaryEntry) -> Bool {
+        TermText.phraseKey(entry.preferred).map(commandPhrases.contains) ?? false
+    }
+
     /// The enabled entry whose variant matches `phrase` (folded, whole words), if any.
     func entry(forVariant phrase: String) -> DictionaryEntry? {
         guard let key = TermText.phraseKey(phrase) else { return nil }
@@ -229,10 +243,13 @@ final class DictionaryStore {
                                source: entry.source, createdAt: entry.createdAt, enabled: entry.enabled)
     }
 
-    /// Folded variant key -> entry. Manual entries win over learned ones, then older entries.
+    /// Folded variant key -> entry. Command targets win, then manual entries over learned ones,
+    /// then older entries.
     private func variantTable() -> [String: DictionaryEntry] {
         var table: [String: DictionaryEntry] = [:]
         let ordered = entries.filter(\.enabled).sorted {
+            let command0 = Self.isCommandTarget($0), command1 = Self.isCommandTarget($1)
+            if command0 != command1 { return command0 }
             if $0.source != $1.source { return $0.source == .manual }
             return $0.createdAt < $1.createdAt
         }
@@ -248,33 +265,32 @@ final class DictionaryStore {
     /// Replaces whole-word variant phrases with preferred spellings. Matching is exact on the
     /// stored variants after case folding: no fuzzy or phonetic matching, so similar-sounding
     /// words are never touched. Words in a phrase must be separated by spaces/tabs only (a line
-    /// break or punctuation ends a phrase). At each position the longest phrase wins.
+    /// break or punctuation ends a phrase). At each position a command-target phrase wins (gap #12),
+    /// then the longest phrase; replaced text is never matched again, so another entry cannot
+    /// rewrite words inside an inserted command ("question mark" stays, even with mark -> Marc).
     func apply(to text: String) -> String {
         let table = variantTable()
         guard !table.isEmpty else { return text }
         let maxWords = table.keys.map { $0.split(separator: " ").count }.max() ?? 1
+        let lengths = Array(stride(from: maxWords, through: 1, by: -1))
         let chars = Array(text)
         let words = TermText.tokens(chars)
         var output = ""
         var cursor = 0
         var i = 0
         while i < words.count {
-            var matched = false
-            for length in stride(from: min(maxWords, words.count - i), through: 1, by: -1) {
+            let spans = lengths.filter { $0 <= words.count - i }.compactMap { length -> (Int, DictionaryEntry)? in
                 let span = words[i..<(i + length)]
-                guard Self.spacedPhrase(span, chars) else { continue }
-                let key = span.map(\.folded).joined(separator: " ")
-                guard let entry = table[key] else { continue }
-                let start = words[i].start, end = words[i + length - 1].end
-                output += String(chars[cursor..<start])
-                output += Self.cased(entry.preferred, original: String(chars[start..<end]),
-                                     sentenceStart: Self.atSentenceStart(start, chars))
-                cursor = end
-                i += length
-                matched = true
-                break
+                guard Self.spacedPhrase(span, chars), let entry = table[span.map(\.folded).joined(separator: " ")] else { return nil }
+                return (length, entry)
             }
-            if !matched { i += 1 }
+            guard let (length, entry) = spans.first(where: { Self.isCommandTarget($0.1) }) ?? spans.first else { i += 1; continue }
+            let start = words[i].start, end = words[i + length - 1].end
+            output += String(chars[cursor..<start])
+            output += Self.isCommandTarget(entry) ? entry.preferred
+                : Self.cased(entry.preferred, original: String(chars[start..<end]), sentenceStart: Self.atSentenceStart(start, chars))
+            cursor = end
+            i += length
         }
         output += String(chars[cursor...])
         return output
@@ -287,7 +303,7 @@ final class DictionaryStore {
     /// because nothing can be filtered before a transcript exists.
     var vocabularyTerms: [String] {
         var seen = Set<String>()
-        let enabled = entries.filter(\.enabled)
+        let enabled = entries.filter { $0.enabled && !Self.isCommandTarget($0) }
         return (enabled.filter { $0.source == .manual } + enabled.filter { $0.source == .learned }).compactMap { entry in
             let term = TermText.collapseWhitespace(entry.preferred.replacingOccurrences(of: ",", with: " "))
             return seen.insert(TermText.fold(term)).inserted ? term : nil
@@ -300,9 +316,9 @@ final class DictionaryStore {
     /// similarity rules), so a misheard term can still be corrected by cleanup. Never the whole
     /// dictionary. `apply(to:)` stays exact; only the cleanup hint uses near matches.
     func relevantEntries(for text: String) -> [DictionaryEntry] {
-        let exact = exactEntries(for: text)
+        let exact = exactEntries(for: text).filter { !Self.isCommandTarget($0) }
         let exactIDs = Set(exact.map(\.id))
-        let candidates = entries.filter { $0.enabled && !exactIDs.contains($0.id) }
+        let candidates = entries.filter { $0.enabled && !exactIDs.contains($0.id) && !Self.isCommandTarget($0) }
         guard !candidates.isEmpty else { return exact }
         let chars = Array(text)
         let words = TermText.tokens(chars)

@@ -492,14 +492,35 @@ final class CorrectionLedger {
         try save()
     }
 
-    /// Feed the latest attributed replacement for a session while its window is open.
+    /// Feed the latest attributed replacement for a session while its window is open. A session
+    /// that already settled early (stable text, gap #9) is reconciled pair by pair: a settled pair
+    /// missing from the new reading is withdrawn with whatever it promoted, a settled pair still
+    /// present stays as it is (so one session never counts twice), and only new pairs are recorded.
     @discardableResult
     func record(_ observed: ObservedCorrection) throws -> RecordOutcome {
         guard state.learningEnabled else { return .learningDisabled }
         try reconcile()
         let session = observed.sessionID
-        if state.evidence.contains(where: { $0.correction.sessionID == session && $0.settled }) { return .sessionClosed }
-        state.evidence.removeAll { $0.correction.sessionID == session }
+        let (fresh, outcome) = candidates(observed)
+        // A second-tier promotion consumes its evidence, so its session list also marks a settled pair.
+        let settled = Set(state.evidence.filter { $0.correction.sessionID == session && $0.settled }.map(\.pair))
+            .union(state.promotions.filter { $0.sessions.contains(session) }.map(\.pair))
+        let gone = settled.subtracting(fresh.map { Pair(of: $0.source, $0.target) })
+        // ponytail: withdrawing a second-tier promotion loses the other session's consumed evidence
+        // (as `revert` always has); keep promotion evidence if refinements after an early settle prove common.
+        for promotion in state.promotions where promotion.sessions.contains(session) && gone.contains(promotion.pair) {
+            withdraw(promotion, tombstone: false)
+        }
+        state.evidence.removeAll { $0.correction.sessionID == session && (!$0.settled || gone.contains($0.pair)) }
+        let added = fresh.filter { !settled.contains(Pair(of: $0.source, $0.target)) }
+        state.evidence += added.map { Evidence(correction: $0, settled: false) }
+        try save()
+        return !settled.isEmpty && gone.isEmpty && added.isEmpty ? .sessionClosed : outcome
+    }
+
+    /// The filter's accepted, reduced replacements for one snapshot, and the outcome to report.
+    private func candidates(_ observed: ObservedCorrection) -> ([ObservedCorrection], RecordOutcome) {
+        var fresh: [ObservedCorrection] = []
         var outcome: RecordOutcome?
         var rejection = CandidateRejection.identical
         switch CorrectionFilter.replacements(observed.source, observed.target) {
@@ -523,18 +544,17 @@ final class CorrectionLedger {
                     if state.tombstones.contains(where: { $0.folded == pair.folded }) { if outcome == nil { outcome = .tombstoned } }
                     else if state.suppressed.contains(pair.source) { if outcome == nil { outcome = .suppressed } }
                     else {
-                        let reduced = ObservedCorrection(sessionID: session, source: source, target: target, observedAt: observed.observedAt)
-                        state.evidence.append(Evidence(correction: reduced, settled: false))
+                        fresh.append(ObservedCorrection(sessionID: observed.sessionID, source: source, target: target, observedAt: observed.observedAt))
                         outcome = .provisional
                     }
                 }
             }
         }
-        try save()
-        return outcome ?? .rejected(rejection)
+        return (fresh, outcome ?? .rejected(rejection))
     }
 
-    /// The session's observation window closed: commit its evidence and promote if consistent.
+    /// The session's observation window closed, or its text has been stable long enough (gap #9):
+    /// commit its evidence and promote if consistent. Settling again without new evidence does nothing.
     /// Returns entries newly added to the dictionary (a variant added to an existing entry is not).
     @discardableResult
     func settle(sessionID: UUID) throws -> [DictionaryEntry] {
@@ -600,6 +620,18 @@ final class CorrectionLedger {
         }
         try save()
         return promoted
+    }
+
+    /// Gap #10: the user corrected a dictation's final text in History. The edit is one more
+    /// observation (a fresh session, settled at once) through the same filter, ledger, thresholds,
+    /// tombstones and conflicts; it adds to automatic learning and never replaces it (PRD R10).
+    /// Returns entries newly added to the dictionary.
+    @discardableResult
+    func learnFromEdit(original: String, edited: String, at date: Date = Date()) throws -> [DictionaryEntry] {
+        guard original != edited else { return [] }
+        let session = UUID()
+        try record(ObservedCorrection(sessionID: session, source: original, target: edited, observedAt: date))
+        return try settle(sessionID: session)
     }
 
     /// Undo/reversion: removes the session's evidence. If a promotion relied on this session, its
