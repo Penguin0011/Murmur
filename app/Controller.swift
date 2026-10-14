@@ -269,6 +269,7 @@ final class PreStart: @unchecked Sendable {
     @Published var cleanupPolish: Bool
     /// Professional above Polish (`CleanupOptions.professional`).
     @Published var cleanupProfessional: Bool
+    @Published var cleanupSpoken: Bool
     @Published var learningEnabled: Bool
     @Published var learningRequiresReadableField: Bool
     // Dictionary edits apply immediately; dictionaryMessage reports the last edit error.
@@ -437,6 +438,7 @@ final class PreStart: @unchecked Sendable {
         cleanupPunctuation = processingSettings.options.punctuation
         cleanupPolish = processingSettings.options.polish
         cleanupProfessional = processingSettings.options.professional
+        cleanupSpoken = processingSettings.options.spoken
         learningEnabled = processingSettings.learningEnabled
         learningRequiresReadableField = processingSettings.learningRequiresReadableField
         historyMode = processingSettings.historyMode
@@ -623,7 +625,7 @@ final class PreStart: @unchecked Sendable {
                 stopWatching()
             }
             var next = processing.settings
-            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation, polish: cleanupPolish, professional: cleanupProfessional)
+            next.options = CleanupOptions(fillers: cleanupFillers, corrections: cleanupCorrections, lists: cleanupLists, punctuation: cleanupPunctuation, polish: cleanupPolish, professional: cleanupProfessional, spoken: cleanupSpoken)
             next.learningEnabled = learningEnabled; next.route = routes.cleanup.processingRoute
             next.learningRequiresReadableField = learningRequiresReadableField
             next.historyMode = historyMode; next.updateChecksEnabled = updateChecksEnabled
@@ -1135,7 +1137,7 @@ final class PreStart: @unchecked Sendable {
     }
     func copyRawEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.rawText, forType: .string) }
     /// Turns all three cleanup options off. Like other settings, it takes effect at once.
-    func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false; cleanupPunctuation = false }
+    func useFaithfulTranscription() { cleanupFillers = false; cleanupCorrections = false; cleanupLists = false; cleanupPunctuation = false; cleanupSpoken = false }
     /// Every dictionary change ends here: it rewrites the helper's vocabulary file and restarts
     /// the warm helper with it, so a wipe or edit never leaves old terms loaded.
     func refreshDictionary() {

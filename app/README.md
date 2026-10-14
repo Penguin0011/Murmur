@@ -185,6 +185,13 @@ swiftc app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServ
 
 `Cleanup.swift` is Foundation-only. The app uses it through `Processing.swift` (see above). It provides:
 - `CleanupOptions`: fillers, corrections, and lists toggle independently. All are on by default, and `.faithful` turns all off.
+- `spoken` ("Spoken commands and numbers", on by default in the app): `RuleCleaner.spokenCommands` runs first and handles:
+  - dictated marks and layout
+  - spoken numbers with hundred or a scale word, or before "percent", as digits
+  - @ and # symbols
+  - the explicit "write an email to X saying …" layout
+
+  `CleanupGuard.check` also accepts output that matches `spokenCommands(raw)` (PRD decision, October 14, 2026).
 - `CleanupGuard`: the PRD bound check between raw and cleaned text.
 - `CleanupPrompt`: messages for an LLM provider.
 - `RuleCleaner`: a deterministic local baseline.

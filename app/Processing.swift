@@ -47,6 +47,7 @@ struct ProcessingSettings: Equatable, Sendable {
         static let punctuation = "cleanupPunctuation"
         static let polish = "cleanupPolish"
         static let professional = "cleanupProfessional"
+        static let spoken = "cleanupSpokenCommands"
         static let route = "cleanupRoute"
         static let learning = "learningEnabled"
         static let readableLearning = "learningRequiresReadableField"
@@ -58,7 +59,7 @@ struct ProcessingSettings: Equatable, Sendable {
     static func load(from defaults: UserDefaults) -> ProcessingSettings {
         var settings = ProcessingSettings()
         func flag(_ key: String, _ fallback: Bool) -> Bool { defaults.object(forKey: key) as? Bool ?? fallback }
-        settings.options = CleanupOptions(fillers: flag(Key.fillers, true), corrections: flag(Key.corrections, true), lists: flag(Key.lists, true), punctuation: flag(Key.punctuation, true), polish: flag(Key.polish, false), professional: flag(Key.professional, false))
+        settings.options = CleanupOptions(fillers: flag(Key.fillers, true), corrections: flag(Key.corrections, true), lists: flag(Key.lists, true), punctuation: flag(Key.punctuation, true), polish: flag(Key.polish, false), professional: flag(Key.professional, false), spoken: flag(Key.spoken, true))
         settings.route = defaults.string(forKey: Key.route).flatMap(CleanupRoute.init(rawValue:)) ?? .local
         settings.learningEnabled = flag(Key.learning, true)
         settings.learningRequiresReadableField = flag(Key.readableLearning, false)
@@ -74,6 +75,7 @@ struct ProcessingSettings: Equatable, Sendable {
         defaults.set(options.punctuation, forKey: Key.punctuation)
         defaults.set(options.polish, forKey: Key.polish)
         defaults.set(options.professional, forKey: Key.professional)
+        defaults.set(options.spoken, forKey: Key.spoken)
         defaults.set(route.rawValue, forKey: Key.route)
         defaults.set(learningEnabled, forKey: Key.learning)
         defaults.set(learningRequiresReadableField, forKey: Key.readableLearning)

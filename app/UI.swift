@@ -593,12 +593,13 @@ struct SettingsView: View {
             toggleRow("Apply spoken corrections", "“Friday, no wait, Monday” becomes “Monday”.", isOn: $controller.cleanupCorrections)
             toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
             toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
+            toggleRow("Spoken commands and numbers", "“comma”, “new paragraph”, “two hundred thousand” → 200,000, “at the rate” → @, and “write an email to…” layout.", isOn: $controller.cleanupSpoken)
             HStack(spacing: 16) {
                 help("If cleanup goes too far, Murmur inserts your own words. The raw transcript stays in History. Faithful turns all cleanup off.")
                 Spacer()
                 Button("Faithful Transcription", action: controller.useFaithfulTranscription)
                     .buttonStyle(InkButtonStyle(kind: .outline))
-                    .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists && !controller.cleanupPunctuation)
+                    .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists && !controller.cleanupPunctuation && !controller.cleanupSpoken)
             }
             .padding(.top, 16)
 
@@ -1206,6 +1207,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupCorrections) { controller.settingsChanged() }
             .onChange(of: controller.cleanupLists) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPunctuation) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupSpoken) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPolish) { controller.settingsChanged() }
             .onChange(of: controller.cleanupProfessional) { controller.settingsChanged() }
             .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
