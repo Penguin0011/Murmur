@@ -151,17 +151,20 @@ struct SettingsView: View {
     @State private var openKey: ProviderID?
     @State private var keyDraft = ""
     @State private var checkedSetup = false
+    /// The writing mode whose editor is open.
+    @State private var editingModeID: UUID?
     @AppStorage("showDetailedSettingsInfo") private var showDetailedSettingsInfo = false
     /// A window preference only; the floating indicator keeps following the system appearance.
     @AppStorage("appearance") private var appearance = "light"
     /// API address and model apply when editing ends (Return or leaving the field), not per keystroke.
     @FocusState private var apiFieldFocused: Bool
 
-    private static let sections = ["General", "Transcription", "Cleanup", "Dictionary", "History & Privacy", "API Keys", "Updates"]
+    private static let sections = ["General", "Transcription", "Cleanup", "Modes", "Dictionary", "History & Privacy", "API Keys", "Updates"]
     private static let ledes = [
         "The shortcut, how text is inserted, and what Murmur is allowed to do.",
         "Where your voice is turned into text. On this Mac by default.",
         "Tidy the transcript before it is typed. Each option works on its own.",
+        "Different cleanup for an app, a website or a word you say.",
         "Words Murmur should spell your way, in every mode.",
         "What Murmur saves, and for how long. Nothing leaves this Mac.",
         "Needed only for cloud routes. Stored in your Keychain.",
@@ -418,9 +421,10 @@ struct SettingsView: View {
         case 0: general
         case 1: transcription
         case 2: cleanup
-        case 3: dictionary
-        case 4: privacy
-        case 5: apiKeys
+        case 3: modes
+        case 4: dictionary
+        case 5: privacy
+        case 6: apiKeys
         default: updates
         }
     }
@@ -615,7 +619,10 @@ struct SettingsView: View {
                 help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
             } else {
                 disclosure(controller.routeDisclosure(.cleanup)).padding(.top, 16)
+                disclosure(controller.cleanupExtrasDisclosure).padding(.top, 8)
             }
+            toggleRow("Use screen context", "AI cleanup also gets the selected text, the clipboard and the focused window's text, as reference for spelling names and terms. Never read under Secure Input, in password fields, or from clipboard items marked as passwords. Not used by On this Mac. Modes can turn it on or off.", isOn: $controller.screenContext)
+                .padding(.top, 12).disabled(controller.cleanupChoice == .localRules)
             if controller.cleanupChoice == .customAPI {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Cleanup API base URL").font(.system(size: 14, weight: .semibold))
@@ -629,6 +636,149 @@ struct SettingsView: View {
                 }
                 .padding(.top, 16)
             }
+        }
+    }
+
+    // MARK: Writing modes (gaps #6-#8)
+
+    private var modes: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            help("A mode is picked by a trigger word said at the start or end of a dictation, then by the website, then by the app focused when you started. If two modes match the same way, the first in this list wins. Anything a mode leaves as “Same as Cleanup” follows the Cleanup settings.")
+                .padding(.top, 12)
+            rule.padding(.top, 20)
+            ForEach($controller.writingModes) { $mode in
+                modeRow($mode).overlay(alignment: .bottom) { softRule }
+            }
+            if controller.writingModes.isEmpty { help("No modes yet.").padding(.vertical, 16) }
+            Button("Add Mode") {
+                let mode = WritingMode(); controller.writingModes.append(mode); editingModeID = mode.id
+            }
+            .buttonStyle(InkButtonStyle(kind: .outline)).fixedSize().padding(.top, 16)
+        }
+    }
+
+    private func modeSummary(_ mode: WritingMode) -> String {
+        var parts: [String] = []
+        if !mode.triggers.isEmpty { parts.append("Said: " + mode.triggers.joined(separator: ", ")) }
+        if !mode.websites.isEmpty { parts.append(mode.websites.joined(separator: ", ")) }
+        if !mode.apps.isEmpty { parts.append(mode.apps.map(appName).joined(separator: ", ")) }
+        return parts.isEmpty ? "Matches nothing yet" : parts.joined(separator: " · ")
+    }
+
+    private func appName(_ bundleID: String) -> String {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID).map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") } ?? bundleID
+    }
+
+    /// Apps dictated into since launch, then running apps, without ones already in the mode.
+    private func pickableApps(excluding chosen: [String]) -> [String] {
+        let running = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && $0.processIdentifier != getpid() }.compactMap(\.bundleIdentifier)
+        var seen = Set(chosen)
+        return (controller.recentApps + running.sorted { appName($0).localizedCaseInsensitiveCompare(appName($1)) == .orderedAscending }).filter { seen.insert($0).inserted }
+    }
+
+    /// Same as Cleanup (-1), Faithful (0), Strict (1), Polish (2), Professional (3).
+    private func modeStyle(_ mode: Binding<WritingMode>) -> Binding<Int> {
+        Binding(get: {
+            guard let o = mode.wrappedValue.options else { return -1 }
+            return !o.anyEnabled ? 0 : o.professional ? 3 : o.polish ? 2 : 1
+        }, set: { value in
+            guard value >= 0 else { mode.wrappedValue.options = nil; return }
+            guard value > 0 else { mode.wrappedValue.options = .faithful; return }
+            let current = mode.wrappedValue.options.flatMap { $0.anyEnabled ? $0 : nil }
+            var o = current ?? CleanupOptions(fillers: controller.cleanupFillers, corrections: controller.cleanupCorrections, lists: controller.cleanupLists,
+                                              punctuation: controller.cleanupPunctuation, spoken: controller.cleanupSpoken)
+            o.polish = value >= 2; o.professional = value == 3
+            mode.wrappedValue.options = o
+        })
+    }
+
+    private func modeFlag(_ mode: Binding<WritingMode>, _ key: WritableKeyPath<CleanupOptions, Bool>) -> Binding<Bool> {
+        Binding(get: { mode.wrappedValue.options?[keyPath: key] ?? false }, set: { mode.wrappedValue.options?[keyPath: key] = $0 })
+    }
+
+    @ViewBuilder private func modeRow(_ mode: Binding<WritingMode>) -> some View {
+        let m = mode.wrappedValue
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(m.name.isEmpty ? "Untitled mode" : m.name).font(.system(size: 16, weight: .semibold))
+                    help(m.enabled ? modeSummary(m) : "Off · " + modeSummary(m)).lineLimit(2)
+                }
+                Spacer()
+                Button(editingModeID == m.id ? "Done" : "Edit") { editingModeID = editingModeID == m.id ? nil : m.id }
+                    .buttonStyle(InkButtonStyle(kind: .outline)).fixedSize()
+            }
+            .padding(.vertical, 12)
+            if editingModeID == m.id { modeEditor(mode).padding(.bottom, 16) }
+        }
+    }
+
+    private func modeEditor(_ mode: Binding<WritingMode>) -> some View {
+        let m = mode.wrappedValue
+        return VStack(alignment: .leading, spacing: 0) {
+            field("Mode name", text: mode.name)
+            toggleRow("Mode on", "When off, this mode never matches.", isOn: mode.enabled)
+
+            eyebrow("Apps").padding(.top, 20)
+            ForEach(m.apps, id: \.self) { app in
+                HStack {
+                    Text(appName(app)).font(.system(size: 15)); help(app, color: Palette.ink64).font(.system(size: 12))
+                    Spacer()
+                    Button("Remove") { mode.wrappedValue.apps.removeAll { $0 == app } }.buttonStyle(InkButtonStyle(kind: .plain)).fixedSize()
+                }
+            }
+            Menu("Add App") {
+                ForEach(pickableApps(excluding: m.apps), id: \.self) { app in
+                    Button(appName(app)) { mode.wrappedValue.apps.append(app) }
+                }
+            }
+            .fixedSize().padding(.top, 8)
+
+            eyebrow("Websites").padding(.top, 20)
+            ModeListEditor(items: mode.websites, placeholder: "github.com, docs.google.com/document/*, *.slack.com", label: "Website")
+            help("Matches the page in Safari, Chrome, Edge, Brave, Arc or Firefox when recording starts. A site includes its subdomains; add a path to match only that part. The address is read through Accessibility, only while a mode lists a website, and is never saved or sent.", color: Palette.ink64)
+                .font(.system(size: 12)).padding(.top, 6)
+
+            eyebrow("Trigger words").padding(.top, 20)
+            ModeListEditor(items: mode.triggers, placeholder: "email mode", label: "Trigger")
+            help("Say one at the start or end of a dictation to use this mode; it is removed from the text. Pick a phrase you would not otherwise say there.", color: Palette.ink64)
+                .font(.system(size: 12)).padding(.top, 6)
+
+            eyebrow("Cleanup").padding(.top, 20)
+            segmented([(-1, "Same as Cleanup"), (0, "Faithful"), (1, "Strict"), (2, "Polish"), (3, "Professional")], modeStyle(mode), size: 13).padding(.top, 8)
+            if let o = m.options, o.anyEnabled {
+                toggleRow("Remove filler words", "Takes out “um”, “uh” and similar.", isOn: modeFlag(mode, \.fillers))
+                toggleRow("Apply spoken corrections", "“Friday, no wait, Monday” becomes “Monday”.", isOn: modeFlag(mode, \.corrections))
+                toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: modeFlag(mode, \.lists))
+                toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: modeFlag(mode, \.punctuation))
+                toggleRow("Spoken commands and numbers", "“comma”, “new paragraph”, numbers as digits, “at the rate” → @.", isOn: modeFlag(mode, \.spoken))
+            }
+
+            eyebrow("Tone").padding(.top, 20)
+            segmented(Tone.allCases.map { ($0, $0.displayName) }, mode.tone, size: 13).padding(.top, 8)
+            help(m.tone == .formal ? "Text stays as cleanup wrote it."
+                 : m.tone == .casual ? "Drops commas and the final period. Commas inside numbers stay."
+                 : m.tone == .veryCasual ? "Casual, and sentences start in lowercase. “I” and words like “iPhone” keep their capitals."
+                 : "The final period becomes “!”.", color: Palette.ink64)
+                .font(.system(size: 12)).padding(.top, 6)
+            help("Applied by rules after cleanup, on every route. Never applied to an email laid out from “write an email to…”.", color: Palette.ink64)
+                .font(.system(size: 12))
+
+            eyebrow("Screen context").padding(.top, 20)
+            segmented([(Bool?.none, "Same as Cleanup"), (true, "On"), (false, "Off")], mode.screenContext, size: 13).padding(.top, 8)
+
+            eyebrow("Custom instructions").padding(.top, 20)
+            TextEditor(text: Binding(get: { m.instructions }, set: { mode.wrappedValue.instructions = String($0.prefix(WritingModeLimits.instructions)) }))
+                .font(.system(size: 15)).scrollContentBackground(.hidden)
+                .frame(minHeight: 72).padding(8).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+                .accessibilityLabel("Custom instructions").padding(.top, 8)
+            help("\(m.instructions.count) of \(WritingModeLimits.instructions) characters. Sent only to AI cleanup routes, never used by On this Mac. They cannot make cleanup add content: Murmur still checks the result against what you said.", color: Palette.ink64)
+                .font(.system(size: 12)).padding(.top, 6)
+
+            Button("Delete Mode", role: .destructive) {
+                controller.writingModes.removeAll { $0.id == m.id }; editingModeID = nil
+            }
+            .buttonStyle(InkButtonStyle(kind: .outline)).fixedSize().padding(.top, 20)
         }
     }
 
@@ -1220,6 +1370,38 @@ private struct AutoApplyGeneral: ViewModifier {
     }
 }
 
+/// A list of short strings with an add field and remove buttons (mode websites and trigger words).
+private struct ModeListEditor: View {
+    @Binding var items: [String]
+    let placeholder: String
+    let label: String
+    @State private var draft = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                HStack {
+                    Text(item).font(.system(size: 15))
+                    Spacer()
+                    Button("Remove") { items.removeAll { $0 == item } }.buttonStyle(InkButtonStyle(kind: .plain)).fixedSize()
+                }
+            }
+            HStack(spacing: 8) {
+                TextField(placeholder, text: $draft).textFieldStyle(.plain).font(.system(size: 15)).accessibilityLabel(label)
+                    .padding(.horizontal, 12).frame(height: 44).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+                    .onSubmit(add)
+                Button("Add", action: add).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize()
+                    .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(.top, 8)
+    }
+    private func add() {
+        // Several at once, separated by commas.
+        for item in draft.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }) where !item.isEmpty && !items.contains(item) { items.append(item) }
+        draft = ""
+    }
+}
+
 private struct AutoApplyRoutes: ViewModifier {
     @ObservedObject var controller: AppController
     let apiFieldFocused: Bool
@@ -1232,6 +1414,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupSpoken) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPolish) { controller.settingsChanged() }
             .onChange(of: controller.cleanupProfessional) { controller.settingsChanged() }
+            .onChange(of: controller.screenContext) { controller.settingsChanged() }
             .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
             .onChange(of: controller.learningRequiresReadableField) { controller.settingsChanged() }
             .onChange(of: controller.transcriptionRoute) { controller.settingsChanged() }
