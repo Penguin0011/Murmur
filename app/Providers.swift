@@ -496,7 +496,10 @@ enum OpenAITranscriptionFormat {
     static func makeRequest(endpoint: URL, apiKey: APIKey?, model: String, audio: AudioPayload, includePrompt: Bool, boundary: String) -> URLRequest {
         var fields: [(name: String, value: String)] = [("model", model), ("response_format", "json"), ("temperature", "0")]
         if let language = audio.language, !language.isEmpty { fields.append(("language", language)) }
-        if includePrompt, let hint = audio.vocabularyHint, !hint.isEmpty { fields.append(("prompt", hint)) }
+        // A bare term list reads to Whisper like an unfinished sentence it may continue, echoing a
+        // term at the end of the transcript; a closed sentence makes that less likely.
+        let terms = includePrompt ? GeminiTranscribeProvider.vocabularyTerms(from: audio.vocabularyHint) : []
+        if !terms.isEmpty { fields.append(("prompt", "Vocabulary: \(terms.joined(separator: ", ")).")) }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         if let apiKey { request.setValue("Bearer \(apiKey.secret)", forHTTPHeaderField: "Authorization") }
