@@ -331,6 +331,13 @@ extension GeminiTranscriptionProvider: SilencePrecheckedTranscriber, LLMTranscri
     }
 }
 
+/// Whisper-style models invent "Thank you." or "Okay." for silence, so silent clips are not sent.
+extension OpenAICompatibleTranscriptionProvider: SilencePrecheckedTranscriber {
+    func shouldSkip(peakLevel: Float, durationSeconds: Double?) -> Bool {
+        GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel: peakLevel, durationSeconds: durationSeconds)
+    }
+}
+
 enum CloudTranscriptionOutcome: Equatable, Sendable {
     case transcript(String)
     /// An LLM transcriber's output looked like an answer: save it for recovery, never insert.
@@ -436,11 +443,19 @@ enum CloudAudio {
         guard let decoded = WAVAudio.decode(data), decoded.sampleRate > 0 else {
             return Prepared(payload: AudioPayload(data: data), peak: nil, duration: nil)
         }
-        let samples = WAVAudio.downsample(decoded.samples, from: decoded.sampleRate, to: targetRate)
         let rate = decoded.sampleRate > targetRate ? targetRate : decoded.sampleRate
+        let samples = trimTrailingSilence(WAVAudio.downsample(decoded.samples, from: decoded.sampleRate, to: targetRate), sampleRate: rate)
         let peak = decoded.samples.reduce(Float(0)) { max($0, $1.isFinite ? abs($1) : 0) }
         return Prepared(payload: AudioPayload(data: WAVAudio.encodePCM16(samples, sampleRate: rate)),
                         peak: min(peak, 1), duration: Double(decoded.samples.count) / Double(decoded.sampleRate))
+    }
+
+    /// Drops the silent tail (below the silence pre-check's level) after the last speech, keeping
+    /// `pad` seconds, because Whisper-style models transcribe a silent tail as "Thank you." An
+    /// all-silent clip is returned unchanged for the pre-check to judge.
+    static func trimTrailingSilence(_ samples: [Float], sampleRate: Int, pad: Double = 0.5) -> [Float] {
+        guard let last = samples.lastIndex(where: { abs($0) >= GeminiTranscriptionProvider.defaultSilencePeak }) else { return samples }
+        return Array(samples.prefix(last + 1 + Int(pad * Double(sampleRate))))
     }
 }
 
