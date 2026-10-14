@@ -716,6 +716,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
             .init(label: "correction cue and filler dropped, both days kept", raw: "I think, uh, we should go Friday, no wait, Saturday.", output: "I think we should go Friday, Saturday.", options: all),
             .init(label: "correction cue and filler dropped, both days kept (sentence start)", raw: "So, um, Monday, no, Tuesday works best.", output: "So, Monday, Tuesday works best.", options: all),
             .init(label: "correction cue dropped inside a list item", raw: "Steps: first restart at nine, sorry, ten, second check the logs.", output: "Steps:\n1. Restart at nine, ten\n2. Check the logs", options: all),
+            .init(label: "correction cue dropped after a hesitation in a list item", raw: "Um, agenda: first, uh, intros at nine, sorry, ten, second demos.", output: "Agenda:\n1. Intros at nine, ten\n2. Demos", options: all),
             .init(label: "scratch that dropped, both sentences kept", raw: "Send it today. Scratch that, send it tomorrow.", output: "Send it today. Send it tomorrow.", options: all),
             // Lists nobody asked for: prose with sequence words.
             .init(label: "lone ordinal made a list", raw: "First, preheat the oven to 350.", output: "1. Preheat the oven to 350.", options: all),
