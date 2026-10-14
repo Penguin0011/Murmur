@@ -314,7 +314,12 @@ final class ProcessingCoordinator {
         let style = style ?? DictationStyle(mode: nil, settings: settings)
         let prepared = prepare(raw)
         let options = style.options, terms = prepared.terms
-        let context = style.context, instructions = style.instructions
+        var context = style.context, instructions = style.instructions
+        // ponytail: fixed caps keep prompt + a 400-word section inside Apple's ~4K-token window; size by token count if it still overflows.
+        if cloudCleaner?.id == .appleIntelligence, var c = context {
+            c.selected = String(c.selected.prefix(400)); c.clipboard = String(c.clipboard.prefix(400)); c.window = String(c.window.prefix(1_000))
+            context = c
+        }
         if !options.anyEnabled || prepared.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .insert(toned(prepared.text, input: prepared.text, style: style)) }
         guard let provider = cloudCleaner else { lastFallback = .cleanerFailed; return .insert(toned(localClean(prepared.text, terms: terms, options: options), input: prepared.text, style: style)) }
         // On the slow Gemma fallback, long text is cleaned in parallel sections, each guarded on its own.
