@@ -7,7 +7,7 @@
 //   SDKROOT="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk" swiftc -swift-version 5 -parse-as-library -suppress-warnings \
 //     app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift \
 //     app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/tools/measure_cleanup_route.swift \
-//     -o /tmp/mcr && /tmp/mcr apple [strict,polish,professional] [--verbose]
+//     -o /tmp/mcr && [MCR_DELAY=4.5] /tmp/mcr apple|gemini [strict,polish,professional] [--verbose]
 import Foundation
 
 struct Entry: Decodable { var id: String; var input: String; var options: CleanupOptions; var expected: String; var tags: [String] }
@@ -47,6 +47,8 @@ func quantile(_ xs: [Double], _ q: Double) -> Double { let s = xs.sorted(); retu
         setvbuf(stdout, nil, _IOLBF, 0)
         var args = Array(CommandLine.arguments.dropFirst())
         let verbose = args.contains("--verbose"); args.removeAll { $0 == "--verbose" }
+        // Seconds between calls, e.g. 4.5 for a free-tier Gemini key (about 15 requests a minute).
+        let delay = Double(ProcessInfo.processInfo.environment["MCR_DELAY"] ?? "") ?? 0
         let route = args.first ?? "apple"
         let styles = (args.dropFirst().first ?? "strict,polish,professional").split(separator: ",").map(String.init)
         let corpus = try JSONDecoder().decode([Entry].self, from: Data(contentsOf: URL(fileURLWithPath: "app/cleanup-corpus.json")))
@@ -80,6 +82,7 @@ func quantile(_ xs: [Double], _ q: Double) -> Double { let s = xs.sorted(); retu
                 o.polish = style != "strict"; o.professional = style == "professional"
                 var s = p.settings; s.route = .cloud; s.options = o
                 try p.update(s, persist: false)
+                if delay > 0 && o.anyEnabled { try await Task.sleep(nanoseconds: UInt64(delay * 1e9)) }
                 guard case .insert(let out) = await p.processAsync(e.input) else { continue }
                 if let error = p.lastProviderError { errors += 1; errorKinds[Mirror(reflecting: error).children.first?.label ?? "\(error)", default: 0] += 1 }
                 else if let why = p.lastFallback { rejected += 1; reasons[why.rawValue, default: 0] += 1 }

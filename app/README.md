@@ -253,6 +253,42 @@ No real Gemini key or local model server has been used yet; see [PROVIDERS.md](P
 
 The checks pass with Swift 6.1.2 on Linux, in both `-swift-version 5` and the default mode. No real key has been used. [Certain]
 
+## Apple Intelligence cleanup
+
+`app/AppleCleanup.swift` adds `AppleCleanupProvider`, a `CleanupProvider` (and an `AsyncCleaner`) backed by Apple's FoundationModels system model. You pick it in Settings → Cleanup runs with → Apple Intelligence. [Certain]
+- **How it runs:**
+  - It uses `CleanupPrompt.build` unchanged, puts the system text in the session's instructions, and uses greedy sampling.
+  - Each call gets a fresh session.
+  - Murmur prewarms the model when the route is applied and when a dictation starts.
+- **No key and no disclosure.** It needs no key, sends nothing off this Mac, and adds no disclosure stage.
+- **Availability** is checked on every call.
+  - If the model is unavailable, the provider throws `ProviderError.modelUnavailable`, with one of three reasons: this Mac is not eligible, Apple Intelligence is off, or the model is not ready.
+  - `ProcessingCoordinator` then uses local rules and shows "Inserted with local cleanup." with that reason.
+  - Settings shows the same reason under the route.
+- **Generation errors** are mapped to `ProviderError` and also fall back to local rules:
+
+  | Generation error | `ProviderError` |
+  |---|---|
+  | Context exceeded | payload too large |
+  | Guardrail or refusal | content blocked |
+  | Rate limit | rate limited |
+  | Assets unavailable | model not ready |
+
+- **Context window:** about 4K tokens. Text of 600 words or more is cleaned in sections of about 400 words, each guarded on its own.
+
+```sh
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/check_apple_cleanup.swift -o /tmp/murmur-apple-check && /tmp/murmur-apple-check
+```
+
+**What the check covers.** `check_apple_cleanup.swift` (29 checks) uses an injected status and a fake model:
+- the route wiring: no key read, no refusal, no disclosure;
+- each unavailable reason: the model is never called, the local-rules output is used, and the reason's message is shown;
+- the generation-error fallback;
+- guard rejection of an answer;
+- splitting long text into sections. [Certain]
+
+**Measured on October 14, 2026** with `app/tools/measure_cleanup_route.swift` (MacBook Air M3, 16 GB, macOS 27.0.1). It misses the corpus thresholds in all three styles, though the median latency is 0.6–0.8 s. The numbers are in PRD section 10, "Proposed decision: Apple Intelligence cleanup route". [Certain]
+
 ## Processing routes and API keys (wired in)
 
 `Routes.swift` is Foundation-only and holds the route decisions; Controller and UI display and act on them. [Certain]
