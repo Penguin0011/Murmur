@@ -10,6 +10,8 @@ Hardware scope: Apple Silicon, including M1; Intel support is deferred beyond la
 
 Proposed launch boundary: dictation and recovery, without meeting recording, an AI assistant, billing accounts, or automatic message submission.
 
+Decision, October 14, 2026 (user: close the feature gaps with BetterWispr): the gaps listed in [BETTERWISPR_GAPS.md](BETTERWISPR_GAPS.md) are in scope, except #11 (one-fix learned replacement), which awaits a decision. They bring in a meeting notetaker, which replaces the "without meeting recording" boundary above, plus opt-in screen context for AI cleanup and a local Home/Insights page. Multilingual models stay out of scope. Each amended rule (local AI cleanup, tone, screen-context disclosure, meetings) still needs its own documented decision when its workstream lands. [Certain]
+
 ## 2. Confirmed requirements
 
 | ID | Requirement | Acceptance criteria |
