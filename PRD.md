@@ -692,6 +692,16 @@ Each milestone is its own pull request with its own evidence (11.10) and live-te
   - In the same run, chunked WER was Me 1.51% and Them 1.52%, and CPU was 1.3% of one core.
 - **Not measured:** the app's own memory and CPU during a real meeting, the tap, echo with speakers, and real calls. These are on the W7a pull request's live checklist.
 
+**W7a fix (October 15, 2026, after the first live test).** A FaceTime meeting transcribed nothing on either stream. The record shows gaps at 20 s and 44 s, and no microphone restart succeeded. [Certain]
+- **Likely cause:** the call reconfigured the audio devices, which stopped the microphone engine and the tap's aggregate device without an error. Neither was rebuilt. [Likely]
+- **What happened:** a stall watch (`StreamWatch`) now notices 3 s without audio on a stream. It marks one gap, then rebuilds the stream every 3 s until audio flows: a new microphone engine, or a new tap and aggregate device. A change of default output device also rebuilds the tap. The old stream is stopped first, which transcribes its last partial chunk. [Certain]
+- **Logs:** every gap, rebuild, recovery, chunk and line is logged with no content. Chunks log their length and peak level; lines log their word count. The tap logs which processes it tapped and which were playing audio. [Certain]
+- **Reproduced on the M3:**
+  - A meeting microphone kept running while another process turned voice processing on and off.
+  - Stop flushed the last partial chunk.
+  - A rebuilt microphone continued at once, with a dictation capture running alongside.
+- **Not reproduced:** a real FaceTime call, and the tap side, which needs System Audio Recording for the test process. [Certain]
+
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
 ### 11.12 Amendments (applied October 15, 2026)
