@@ -343,13 +343,15 @@ enum WelcomeGuide {
 
 enum DeleteAllDataText {
     static let title = "Delete all Murmur data?"
-    static let body = "This permanently deletes transcript history, your dictionary and learned entries, retry audio, and API keys Murmur saved in the Keychain. Settings and the downloaded model are kept. Backups or snapshots may still hold copies. This cannot be undone."
-    static let explanation = "Deletes history, dictionary, learned entries, retry audio and saved API keys. Settings and the downloaded model stay."
+    static let body = "This permanently deletes transcript history, meeting transcripts and notes, your dictionary and learned entries, retry audio, and API keys Murmur saved in the Keychain. A meeting being recorded is stopped and discarded. Settings and the downloaded model are kept. Backups or snapshots may still hold copies. This cannot be undone."
+    static let explanation = "Deletes history, meetings, dictionary, learned entries, retry audio and saved API keys. Settings and the downloaded model stay."
 }
 
 /// What happens after DataWipe: every in-memory store pointing at a deleted directory is discarded
 /// and recreated empty, in this order. Steps run even when an earlier one fails.
 enum PostWipeStep: String, CaseIterable, Equatable {
+    /// A meeting being recorded is stopped and discarded first, so nothing writes into the wiped folders.
+    case stopMeeting
     /// Drop history router (including memory-only entries), recovery selection and retry-audio pointer.
     case discardInMemoryState
     case recreateHistory
@@ -360,6 +362,7 @@ enum PostWipeStep: String, CaseIterable, Equatable {
 
     var label: String {
         switch self {
+        case .stopMeeting: return "meeting recording"
         case .discardInMemoryState: return "in-memory data"
         case .recreateHistory: return "history"
         case .recreateRetryAudio: return "retry audio"

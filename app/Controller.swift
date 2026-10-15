@@ -1869,7 +1869,7 @@ final class PreStart: @unchecked Sendable {
             self.liveText = text
         }) else { return }
         live = stream
-        capture.setTee { stream.feed($0) }
+        capture.setTee { buffer, _ in stream.feed(buffer) }
         bubble.show(phase: phase, message: message, screen: destinationScreen)
     }
     /// Keeps the last text up until the Processing bubble replaces it; the next start clears it.
