@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Insights.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/check_recording.swift -o /tmp/murmur-recording-check
 /tmp/murmur-recording-check
@@ -102,7 +102,11 @@ swiftc app/Cleanup.swift app/Providers.swift app/Credentials.swift app/check_pro
 /tmp/murmur-providers-check
 swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check
 /tmp/murmur-updates-check
+swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check
+/tmp/murmur-insights-check
 ```
+
+`check_insights.swift` covers Home and Insights (gap #19): pace in five-character words per minute against 51.56 typed, time saved and its clamp at zero, words changed, apps, streaks across days, time zones and a daylight-saving change, and the History-off and empty states. `check_app_services.swift` covers the welcome guide (gap #21): resuming at the saved step, clamping, version-stamped completion, replay and the upgrade default. [Certain]
 
 No provider call has been made with a real API key. The request shapes come from official documentation, and the error shapes from documentation or from unauthenticated responses (see [PROVIDERS.md](PROVIDERS.md), verified October 3, 2026). Fireworks and OpenRouter clients were removed on October 7, 2026 (Fireworks deprecated audio inference on June 10, 2026; OpenRouter is deprecated upstream, per the project owner). Any other OpenAI-compatible service is reached through the custom endpoint. Each new route needs a live check with a real key before it is offered. [Certain]
 
@@ -132,13 +136,22 @@ app/check_ui.sh --paste-failed --bubble-only
 app/check_ui.sh --undo --bubble-only
 app/check_ui.sh --not-pasted --bubble-only
 app/check_ui.sh --listening --live-words --bubble-only
+app/check_ui.sh --light --insights
+app/check_ui.sh --insights --tall
+app/check_ui.sh --history-off
+app/check_ui.sh --empty --insights
+app/check_ui.sh --light --guide 1
+app/check_ui.sh --guide 4
+app/check_ui.sh --settings --system-appearance
 ```
+
+The window opens on Home (gap #19). `--insights` seeds timed dictations into four apps over 24 days and opens Insights; with `--empty` it shows the empty state, and `--history-off` shows the History-off state. `--guide STEP` opens the welcome guide (gap #21) at step 0–4; without it the fixture marks the guide finished. `--settings` opens Settings, `--tall` makes the window 1100 points tall where the screen allows, and `--system-appearance` stores System (or, with `--light` or `--dark`, that choice) without forcing the app's appearance, so the bubble follows macOS (gap #20). `--snapshot PATH` renders the window offscreen to a PNG and quits, which works while the screen is locked. [Certain]
 
 `--live-words` with `--listening` shows the live-words bubble (gap #13) with a synthetic preview. `--paste-failed` shows the paste-failure card (gap #17) with a synthetic three-line text, and `--not-pasted` the same card for a dictation saved with Insert at the cursor off; `--undo` shows the Undo card (gap #18) without its 5-second timer. Settings → General shows the shortcut recorder, the sounds toggle and the Automatic microphone option without a flag. [Certain]
 
 `--dictionary` seeds three sample entries (one turned off); open Settings → Dictionary to see them. The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
 
-`--matrix` seeds the History delivery and held-result states in temporary storage, including one session-only row; `--empty` opens History with no entries. `--light` sets both the fixture window and Settings appearance. [Certain]
+`--matrix` seeds the History delivery and held-result states in temporary storage, including one session-only row; `--empty` seeds no entries. `--light` sets both the fixture window and Settings appearance. [Certain]
 
 The developer audio probe requires both flags and must target a disposable field:
 

@@ -19,8 +19,24 @@ import SwiftUI
         appMenu.addItem(withTitle: "Quit UI Check", action: #selector(FixtureDelegate.quit), keyEquivalent: "q").target = delegate
         item.submenu = appMenu; menu.addItem(item); menu.addItem(standardEditMenuItem()); application.mainMenu = menu
         let light = CommandLine.arguments.contains("--light")
-        UserDefaults.standard.set(light ? "light" : "dark", forKey: "appearance")
-        application.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
+        let args = CommandLine.arguments
+        // --system-appearance leaves the app's appearance alone, so the bubble shows it follows macOS
+        // while the window uses the stored choice.
+        if args.contains("--system-appearance") {
+            // With --light or --dark the window stores that choice; the app (and so the bubble) follows macOS.
+            UserDefaults.standard.set(light ? "light" : args.contains("--dark") ? "dark" : "system", forKey: "appearance")
+        } else {
+            UserDefaults.standard.set(light ? "light" : "dark", forKey: "appearance")
+            application.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
+        }
+        // The fixture's defaults persist between runs: set the guide and History mode every time.
+        UserDefaults.standard.set(args.contains("--history-off") ? "off" : "on", forKey: "historyMode")
+        if let flag = args.firstIndex(of: "--guide") {
+            let step = args.indices.contains(flag + 1) ? Int(args[flag + 1]) ?? 0 : 0
+            UserDefaults.standard.set(0, forKey: WelcomeGuide.completedKey); UserDefaults.standard.set(step, forKey: WelcomeGuide.stepKey)
+        } else {
+            WelcomeGuide.complete(.standard)
+        }
         let controller = AppController(preview: true)
         if CommandLine.arguments.contains("--custom-transcription") {
             controller.transcriptionRoute = .cloud
@@ -29,7 +45,7 @@ import SwiftUI
         delegate.controller = controller
         let compact = CommandLine.arguments.contains("--compact")
         let opaque = CommandLine.arguments.contains("--opaque")
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: compact ? 760 : 1000, height: compact ? 560 : 680), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: compact ? 760 : 1000, height: compact ? 560 : args.contains("--tall") ? 1100 : 680), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = "Murmur UI Check"; window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true; window.backgroundColor = Palette.paperNS
         window.contentView = NSHostingView(rootView: SettingsView(controller: controller).environment(\.utilityOpaquePreview, opaque))
         window.contentMinSize = NSSize(width: 760, height: 560)
@@ -40,6 +56,19 @@ import SwiftUI
             HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-3600), rawText: "Synthetic verified transcript.", finalText: "Synthetic verified transcript.", insertionStatus: "verified")
         ]
         if CommandLine.arguments.contains("--empty") { entries = [] }
+        // Insights (gap #19): timed dictations into a few apps on most of the last 24 days.
+        if args.contains("--insights") && !args.contains("--empty") {
+            let apps = ["com.apple.TextEdit", "com.apple.mail", "com.apple.Notes", "com.apple.Safari"]
+            let text = "Synthetic dictation about the quarterly plan with um enough words to measure a speaking pace."
+            for day in 0..<24 where day % 7 != 5 && day != 9 {
+                for n in 0..<(1 + day % 3) {
+                    var entry = HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-Double(day) * 86400 - Double(n) * 1800),
+                                             rawText: text, finalText: text.replacingOccurrences(of: "um ", with: ""), insertionStatus: "unverified")
+                    entry.seconds = 6.5 + Double(n); entry.app = apps[(day + n) % apps.count]
+                    entries.append(entry)
+                }
+            }
+        }
         if CommandLine.arguments.contains("--matrix") && !CommandLine.arguments.contains("--empty") {
             entries += [
                 HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-7200), rawText: "Synthetic failed paste.", finalText: "Synthetic failed paste.", insertionStatus: "failed"),
@@ -67,6 +96,8 @@ import SwiftUI
                 controller.blockedWords = [.heard("versel"), .spelling("Akme")]
             }
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
+            if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }
+            if args.contains("--settings") || args.contains("--dictionary") { controller.screenRequest = "settings" }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
             controller.message = CommandLine.arguments.contains("--credential-warning")
@@ -92,6 +123,16 @@ import SwiftUI
                 }
             }
             if CommandLine.arguments.contains("--bubble-only") { window.orderOut(nil) }
+            // --snapshot PATH renders the window offscreen to a PNG and quits; works with the screen locked.
+            if let flag = args.firstIndex(of: "--snapshot"), args.indices.contains(flag + 1) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    if let view = window.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                        view.cacheDisplay(in: view.bounds, to: image)
+                        try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: args[flag + 1]))
+                    }
+                    application.terminate(nil)
+                }
+            }
             print("Fixture content: \(window.contentLayoutRect.size), full window: \(window.frame.size)"); fflush(stdout)
         }
         controller.openSettings = { application.activate(ignoringOtherApps: true); window.makeKeyAndOrderFront(nil) }

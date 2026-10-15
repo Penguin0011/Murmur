@@ -83,6 +83,14 @@ struct ShortcutMachine {
         return .finish
     }
 
+    /// A start no key press began (Home's Start button): latched like a toggle, so the next press
+    /// or Finish ends it.
+    mutating func startToggled() -> Action? {
+        guard state == .idle, pressedAt == nil else { return nil }
+        state = .listening; mode = .toggled; ignoreRelease = false
+        return .start
+    }
+
     mutating func processingFinished() { if state == .processing { state = .idle } }
 
     /// Processing that no press started (Undo of a canceled recording): presses wait it out.

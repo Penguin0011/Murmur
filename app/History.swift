@@ -14,6 +14,17 @@ struct HistoryEntry: Codable, Identifiable {
     /// The cleanup model's output the guard rejected, kept for debugging (user request, October 6,
     /// 2026). It is dictation text, so it lives and expires with the rest of the entry.
     var cleanupRejectedOutput: String? = nil
+    /// Recording length in seconds, for Insights' pace and time saved (gap #19); nil before October 15, 2026.
+    var seconds: Double? = nil
+    /// Bundle ID of the app the text was pasted into, for Insights; nil when unknown or not pasted.
+    var app: String? = nil
+
+    /// The same dictation with new text and status; the recording facts carry over.
+    func with(finalText: String, status: String, fallback: String? = nil, rejected: String? = nil) -> HistoryEntry {
+        var next = self
+        next.finalText = finalText; next.insertionStatus = status; next.cleanupFallback = fallback; next.cleanupRejectedOutput = rejected
+        return next
+    }
 }
 
 struct HistoryStore {
