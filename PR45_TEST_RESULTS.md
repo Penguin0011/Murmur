@@ -1,6 +1,6 @@
 # PR #45 test results
 
-**Current status: PASS for preferred-only regression checks and saved-response replay; live alias-free retest pending.** The user's live miss and the original provider benchmark are preserved below. PR #45 remains unmerged. [Certain]
+**Current status: PASS for preferred-only regression checks, saved-response replay, and the user-confirmed live alias-free name test.** The user's live miss and the original provider benchmark are preserved below. PR #45 remains unmerged. [Certain]
 
 ## Preferred-only names follow-up — `38c7b73`
 
@@ -24,7 +24,9 @@ Evidence: `/Users/aakash/.codex/worktrees/833a/Murmur/runtime/pr45-preferred-onl
 
 **Build/install: PASS.** `app/build.sh` exited 0, strict signature verification passed, and `git diff --check` passed. The revised bundle was installed at `/Users/aakash/Applications/Murmur.app` and relaunched; the installed app and helper binaries match the fresh build. App executable SHA-256: `727deb60dc1dbb285b2d3d13bcc17a0ad5bbecc58a0974e6b1021b11bbad7879`. The previous bundle is backed up at `/tmp/murmur-pr45-install.rOehJA/Murmur.app`. The user's dictionary, settings and History were not edited. Build evidence is `runtime/pr45-preferred-only/build.log`. [Certain]
 
-**Limits and next live check:** this only generalizes the measured miss to single-letter doubling; it does not infer arbitrary names or phrases. A genuinely intended alternate name such as Alison can still be replaced by the stored preferred spelling allison; dictionary intent cannot be proven from text alone. Other ambiguous/short forms need explicit aliases or optional cleanup. To validate the new app live, temporarily remove only the workaround `Akash` heard-as variant, retain the enabled `aakash` entry and all other variants, select Faithful, and dictate `Please ask Aakash to review the report.` The expected output is `Please ask aakash to review the report.` under the existing stored-case policy. This live alias-free retest is **NOT RUN**. [Certain]
+**Live alias-free retest: PASS (user reported).** On the installed revised build, the user dictated `Please ask Aakash to review the report.` and supplied that exact output. They confirmed Faithful was enabled, the `Akash` heard-as workaround was removed, and the preferred entry had been capitalized from `aakash` to `Aakash` because it is a name. The output therefore matches the updated preferred spelling exactly and contains no extra vocabulary. This supersedes the pending live check, not the historical miss above. [Certain]
+
+**Limits:** this is one user-confirmed end-to-end sentence, not a captured raw-ASR/final-output pair or a broader live benchmark. It demonstrates the requested output without the alias; it does not establish whether ASR itself produced the correct spelling in this recording. The implementation only generalizes the measured miss to single-letter doubling, and a genuinely intended alternate name such as Alison can still be replaced by stored allison. Other ambiguous/short forms or phrases may need aliases or optional cleanup. Existing learning can add a preferred spelling after one qualifying settled correction and a heard-as variant after two consistent sessions; its meaning and field-observation guards still apply, so not every new name is guaranteed to be learned. PR #45 remains unmerged. [Certain]
 
 ## Faithful spelling follow-up — `cc5326e`
 

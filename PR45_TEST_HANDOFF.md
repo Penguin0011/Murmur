@@ -22,6 +22,8 @@ The user's live Faithful test exposed `aakash` → `Akash` without an explicit a
 
 The current rule permits exactly one adjacent doubled letter, with source ≥5 and term ≥6, while preserving lowercase common words, other known-name changes, ambiguity, disabled terms and explicit alias priority. Exercise the persistent preferred-only checks with both fake and native lexicons, and the 28-term native 425-input corpus. Replay the saved 60 provider responses with every dictionary entry preferred-only; record controls separately from the old alias-seeded replay. A fresh live test must omit the workaround alias to count as evidence of automatic correction. Broader known-name substitutions and phrases still need aliases. [Certain]
 
+The user subsequently confirmed the installed revised build produced `Please ask Aakash to review the report.` with Faithful enabled, the Akash heard-as alias removed, and preferred spelling updated to Aakash. Record this as PASS for that user-reported live end-to-end case; repeat the isolated preferred-only tests above for future changes. Raw ASR and final output were not independently captured for the live sentence. See the current results for the evidence limits. [Certain]
+
 ## Scope and setup
 
 1. Record repository path, `git rev-parse HEAD`, working-tree status, PR head, macOS/Swift versions, and the executable hash if testing the installed app. Verify that `ba5f5e2` is an ancestor and the request builder omits dictionary prompts. Stop and explain any mismatch before calling a result a candidate result.
