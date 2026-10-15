@@ -237,11 +237,15 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Picker("Microphone", selection: $controller.inputDeviceUID) {
                 Text("System default").tag("")
+                Text("Automatic").tag(MicrophoneChoice.automatic)
                 ForEach(devices, id: \.uid) { device in Text(device.name).tag(device.uid) }
-                if !saved.isEmpty && !devices.contains(where: { $0.uid == saved }) { Text("Chosen microphone (not connected)").tag(saved) }
+                if !saved.isEmpty && saved != MicrophoneChoice.automatic && !devices.contains(where: { $0.uid == saved }) { Text("Chosen microphone (not connected)").tag(saved) }
             }
             .labelsHidden()
-            help("Used for the next dictation. If the chosen microphone is not connected, Murmur uses the system default.")
+            help(saved == MicrophoneChoice.automatic
+                 ? "Uses the Mac’s built-in microphone instead of a Bluetooth headset’s while the built-in one is available, so AirPods and other headsets keep full playback quality. Otherwise the system default."
+                 : "Used for the next dictation. If the chosen microphone is not connected, Murmur uses the system default.")
+            help("If the microphone changes while you dictate, recording continues on the new one and keeps what was already recorded.")
         }
     }
 
@@ -434,10 +438,17 @@ struct SettingsView: View {
             eyebrow("Shortcut").padding(.top, 20)
             VStack(alignment: .leading, spacing: 12) {
                 segmented([("right-option", "Right Option"), ("fn", "Fn / Globe"), ("ctrl-option-space", "Control–Option–Space")], $controller.shortcut)
+                ShortcutRecorder(controller: controller)
                 help(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop, or hold it and release. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
             }
             .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
             toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
+            toggleRow("Start and stop sounds", "A short sound when recording starts and when it stops or is canceled. No sound when text is inserted.", isOn: $controller.recordingSounds)
+            toggleRow(LiveWordsFacts.displayName, LiveWordsFacts.explanation, isOn: $controller.liveWords)
+            if controller.liveWords {
+                liveWordsModel.padding(.vertical, 12).overlay(alignment: .bottom) { softRule }
+                toggleRow("Show live words on cloud routes", "Off: when transcription runs in the cloud, the bubble shows only the level meter and the extra model does not start. The preview always runs on this Mac.", isOn: $controller.liveWordsOnCloud)
+            }
             toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. Press ⌃⌘V to paste the last dictation again if it is missing; check the field first to avoid a duplicate. The previous clipboard is restored unless you copy something newer. Automatic paste is marked transient; other software may still read or retain it. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
@@ -783,6 +794,30 @@ struct SettingsView: View {
                 controller.writingModes.removeAll { $0.id == m.id }; editingModeID = nil
             }
             .buttonStyle(InkButtonStyle(kind: .outline)).fixedSize().padding(.top, 20)
+        }
+    }
+
+    /// Download row for live words (gap #13), shown while the setting is on.
+    private var liveWordsModel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(controller.liveWordsSummary).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                    if controller.liveWordsRow.isReady { mono("Ready ✓", color: Palette.accentInk) }
+                    else { Text(controller.liveWordsRow.statusText).font(.system(size: 13)).foregroundStyle(Palette.ink70).fixedSize(horizontal: false, vertical: true) }
+                }
+                Spacer()
+                let row = controller.liveWordsRow
+                if row.actions.contains(.download) { Button("Download…", action: controller.downloadLiveWords).buttonStyle(InkButtonStyle()).fixedSize() }
+                if row.actions.contains(.retry) { Button("Retry…", action: controller.downloadLiveWords).buttonStyle(InkButtonStyle()).fixedSize() }
+                if row.actions.contains(.cancel) { Button("Cancel", action: controller.cancelLiveWordsDownload).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+                if row.actions.contains(.remove) { Button("Remove…", role: .destructive, action: controller.removeLiveWords).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+            }
+            if let progress = controller.liveWordsRow.progress { progressBar(progress) }
+            if !controller.liveWordsMessage.isEmpty { help(controller.liveWordsMessage) }
+            if let license = controller.liveWordsLicense, let declaration = license.declarations.first {
+                help("License: \(declaration.name) (\(declaration.url.absoluteString))", color: Palette.ink64)
+            }
         }
     }
 
@@ -1232,9 +1267,7 @@ struct SettingsView: View {
 
     // MARK: First run
 
-    private var shortcutName: String {
-        ["right-option": "Right Option", "fn": "Fn / Globe", "ctrl-option-space": "Control–Option–Space"][controller.shortcut] ?? "your shortcut"
-    }
+    private var shortcutName: String { controller.shortcutName }
 
     /// The PRD's first-run test dictation and the faithful-transcription choice.
     private var tryIt: some View {
@@ -1358,6 +1391,58 @@ private struct SettingInfoButton: View {
     }
 }
 
+/// Records a custom shortcut (gap #14). While it waits, the global tap is off so the current
+/// shortcut can't start a dictation or be swallowed. Escape stops waiting; a refused key says why.
+private struct ShortcutRecorder: View {
+    @ObservedObject var controller: AppController
+    @State private var monitor: Any?
+    @State private var refusal: String?
+    private var custom: CustomShortcut? { if case .custom(let shortcut) = ShortcutBinding(stored: controller.shortcut) { return shortcut }; return nil }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(monitor != nil ? "Press the keys…" : custom.map { "Custom: \($0.label)" } ?? "Or record your own")
+                    .font(.system(size: 14, weight: .medium)).accessibilityAddTraits(.updatesFrequently)
+                Spacer(minLength: 8)
+                Button(monitor != nil ? "Stop" : "Record Shortcut…") { monitor != nil ? stop() : start() }.buttonStyle(InkButtonStyle(kind: .outline))
+                if custom != nil && monitor == nil {
+                    Button("Reset") { refusal = nil; controller.shortcut = "right-option" }.buttonStyle(InkButtonStyle(kind: .outline))
+                }
+            }
+            if let refusal { Text(refusal).font(.system(size: 13)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            else if monitor != nil {
+                Text("Use ⌘, ⌥ or ⌃ with a key, or an F-key. Built-in F1–F12 work only with fn held or with “Use F1, F2, etc. keys as standard function keys” on. Escape stops.")
+                    .font(.system(size: 13)).foregroundStyle(Palette.ink70).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onDisappear { stop() }
+    }
+    private func start() {
+        guard monitor == nil, controller.pauseShortcutForRecorder() else { return }
+        refusal = nil
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = (event.cgEvent?.flags ?? []).intersection(CustomShortcut.relevant)
+            let code = Int64(event.keyCode)
+            if code == 53 && flags.isEmpty { stop(); return nil }
+            if let reason = CustomShortcut.refusal(keyCode: code, modifiers: flags) { refusal = reason; return nil }
+            controller.shortcut = CustomShortcut(keyCode: code, modifiers: flags, key: Self.keyName(event)).stored
+            refusal = nil; stop(); return nil
+        }
+    }
+    private func stop() {
+        guard let monitor else { return }
+        NSEvent.removeMonitor(monitor); self.monitor = nil
+        controller.resumeShortcutAfterRecorder()
+    }
+    private static let named: [UInt16: String] = [49: "Space", 36: "Return", 48: "Tab", 51: "Delete", 117: "Forward Delete", 123: "←", 124: "→", 125: "↓", 126: "↑",
+        115: "Home", 119: "End", 116: "Page Up", 121: "Page Down", 122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6", 98: "F7", 100: "F8",
+        101: "F9", 109: "F10", 103: "F11", 111: "F12", 105: "F13", 107: "F14", 113: "F15", 106: "F16", 64: "F17", 79: "F18", 80: "F19", 90: "F20"]
+    static func keyName(_ event: NSEvent) -> String {
+        // Control characters (keypad Enter, Clear) have no printable name; CustomShortcut falls back to the key code.
+        named[event.keyCode] ?? (event.charactersIgnoringModifiers ?? "").uppercased().filter { !$0.isWhitespace && !($0.asciiValue.map { $0 < 32 || $0 == 127 } ?? false) }
+    }
+}
+
 private struct AutoApplyGeneral: ViewModifier {
     @ObservedObject var controller: AppController
     func body(content: Content) -> some View {
@@ -1365,6 +1450,9 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.shortcut) { controller.settingsChanged() }
             .onChange(of: controller.automaticInsertion) { controller.settingsChanged() }
             .onChange(of: controller.pressToToggle) { controller.settingsChanged() }
+            .onChange(of: controller.recordingSounds) { controller.settingsChanged() }
+            .onChange(of: controller.liveWords) { controller.settingsChanged() }
+            .onChange(of: controller.liveWordsOnCloud) { controller.settingsChanged() }
             .onChange(of: controller.intelligentLeadingSpace) { controller.settingsChanged() }
             .onChange(of: controller.showMenuBar) { controller.settingsChanged() }
             .onChange(of: controller.inputDeviceUID) { controller.settingsChanged() }
@@ -1519,6 +1607,72 @@ private struct BubbleView: View {
     }
 }
 
+/// Gap #17: the dictation could not be pasted, so the bubble shows it with Copy. History and ⌃⌘V
+/// still work. The panel never becomes key, so clicking leaves the user's app in front.
+private struct PasteFailureCard: View {
+    @ObservedObject var controller: AppController
+    let failure: AppController.PasteFailure
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.on.clipboard").font(.system(size: 12)).foregroundStyle(.orange).accessibilityHidden(true)
+                Text(failure.title).font(.system(size: 12, weight: .semibold))
+                Spacer(minLength: 4)
+                Button { controller.dismissStatus() } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Dismiss")
+            }
+            Text(failure.text).font(.system(size: 12)).lineLimit(3).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading).accessibilityLabel("Dictation: \(failure.text)")
+            HStack {
+                Text("⌃⌘V pastes it too").font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Button("Copy") { controller.copyPasteFailure() }.buttonStyle(.borderedProminent).controlSize(.small)
+            }
+        }
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .modifier(UtilityGlass(radius: 18))
+    }
+}
+
+/// Gap #13: the level meter plus the words heard so far, at most two lines (the newest tail).
+/// Settled words are bright; the last word, which can still grow, is dimmed. Display only.
+private struct LiveWordsBubble: View {
+    @ObservedObject var controller: AppController
+    var body: some View {
+        let parts = LiveWordsFacts.split(controller.liveText)
+        HStack(spacing: 6) {
+            VoiceBubbles(controller: controller, phase: "Listening")
+            Group {
+                if parts.settled.isEmpty && parts.guess.isEmpty { Text("Listening…").foregroundStyle(.secondary) }
+                else { Text(parts.settled).foregroundStyle(.primary) + Text(parts.guess).foregroundStyle(.secondary) }
+            }
+            .font(.system(size: 13, weight: .medium)).lineLimit(2).truncationMode(.head)
+            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+            .accessibilityHidden(true)
+        }
+        .padding(.trailing, 12).padding(.vertical, 2)
+        .modifier(UtilityGlass(radius: 22))
+    }
+}
+
+/// Gap #18: shown for a few seconds after Escape cancels a recording. Undo processes it as normal.
+private struct UndoCancelCard: View {
+    @ObservedObject var controller: AppController
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "xmark.circle").font(.system(size: 12)).foregroundStyle(.secondary).accessibilityHidden(true)
+            Text("Recording canceled").font(.system(size: 12, weight: .medium)).lineLimit(1)
+            Spacer(minLength: 4)
+            Button("Undo") { controller.undoCancel() }.buttonStyle(.borderedProminent).controlSize(.small)
+                .accessibilityHint("Transcribes and inserts the canceled recording.")
+        }
+        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .modifier(UtilityGlass(radius: 18))
+    }
+}
+
 /// A short, buttonless notice; learned entries can be removed in Settings → Dictionary.
 private struct LearnedNotice: View {
     let word: String
@@ -1558,13 +1712,18 @@ final class BubblePresenter {
 
     func show(phase: String, message: String, screen: NSScreen? = nil) {
         // An idle status change leaves a learned-word notice up; anything shown replaces it.
-        guard showsFloatingIndicator(phase: phase) else { if notice == nil { hide() }; return }
+        // A card holding text not pasted shows in any phase (Saved included).
+        guard showsFloatingIndicator(phase: phase) || controller.pasteFailure != nil else { if notice == nil { hide() }; return }
         notice = nil
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-        let minimal = phase != "Error"
+        let minimal = phase != "Error" && controller.pasteFailure == nil
         panel.hasShadow = !minimal
-        let width = minimal ? 80 : min(240, max(180, frame.width - 32))
-        let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase)) : AnyView(BubbleView(controller: controller, message: message))
+        let card = controller.pasteFailure
+        let live = phase == "Listening" && controller.liveWordsActive
+        let width = live ? min(420, max(240, frame.width - 32)) : minimal ? 80 : card != nil ? min(320, max(200, frame.width - 32)) : min(240, max(180, frame.width - 32))
+        let content = live ? AnyView(LiveWordsBubble(controller: controller))
+            : minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase))
+            : card.map { AnyView(PasteFailureCard(controller: controller, failure: $0)) } ?? AnyView(BubbleView(controller: controller, message: message))
         let host = NSHostingView(rootView: content.frame(width: width))
         panel.contentView = host
         let height = host.fittingSize.height
@@ -1575,6 +1734,17 @@ final class BubblePresenter {
     func hide() { notice = nil; panel.orderOut(nil) }
 
     private var notice: UUID?
+    /// The Undo card; it leaves with the "Recording canceled" status (5 s) or when anything else is shown.
+    func showUndo(screen: NSScreen?) {
+        let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        let width = min(260, max(200, frame.width - 32))
+        let host = NSHostingView(rootView: UndoCancelCard(controller: controller).frame(width: width))
+        panel.contentView = host
+        panel.hasShadow = true
+        panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.minY + 24, width: width, height: host.fittingSize.height), display: true)
+        panel.orderFrontRegardless()
+        notice = UUID()
+    }
     /// The learned-word notice; leaves after 5 s unless something else took the panel first.
     func showLearned(_ word: String, screen: NSScreen?) {
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)

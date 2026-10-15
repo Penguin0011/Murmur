@@ -1,5 +1,6 @@
 import Foundation
 import ApplicationServices
+import Carbon.HIToolbox
 import os
 
 private let timingLog = Logger(subsystem: "cc.clouddev.dictation", category: "timing")
@@ -84,6 +85,12 @@ struct ShortcutMachine {
 
     mutating func processingFinished() { if state == .processing { state = .idle } }
 
+    /// Processing that no press started (Undo of a canceled recording): presses wait it out.
+    mutating func beginProcessing() -> Bool {
+        guard state == .idle else { return false }
+        state = .processing; return true
+    }
+
     mutating func eventStreamLost() -> Action? {
         let action = cancel()
         pressedAt = nil
@@ -92,25 +99,97 @@ struct ShortcutMachine {
     }
 }
 
-enum ShortcutBinding {
+enum ShortcutBinding: Equatable {
     case rightOption, fn, controlOptionSpace
+    /// A recorded key (gap #14); see `CustomShortcut.refusal` for what can be recorded.
+    case custom(CustomShortcut)
+    /// The stored `shortcut` setting: a preset name or `CustomShortcut.stored`. Anything else is
+    /// the default, Right Option.
+    init(stored: String) {
+        switch stored {
+        case "fn": self = .fn
+        case "ctrl-option-space": self = .controlOptionSpace
+        default: self = CustomShortcut(stored: stored).map { .custom($0) } ?? .rightOption
+        }
+    }
     var keyCode: Int64 {
-        switch self { case .rightOption: return 61; case .fn: return 63; case .controlOptionSpace: return 49 }
+        switch self {
+        case .rightOption: return 61; case .fn: return 63; case .controlOptionSpace: return 49
+        case .custom(let shortcut): return shortcut.keyCode
+        }
     }
     func isDown(_ event: CGEvent) -> Bool {
         switch self {
         // NX_DEVICERALTKEYMASK distinguishes right Option when left Option is held.
         case .rightOption: return event.flags.rawValue & 0x40 != 0
         case .fn: return event.flags.contains(.maskSecondaryFn)
-        case .controlOptionSpace:
-            let relevant: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand, .maskShift]
-            return event.flags.intersection(relevant) == [.maskControl, .maskAlternate]
+        case .controlOptionSpace: return event.flags.intersection(CustomShortcut.relevant) == [.maskControl, .maskAlternate]
+        // Only ⌘⌥⌃⇧ count: F-key and arrow events also carry the Fn and keypad flags.
+        case .custom(let shortcut): return event.flags.intersection(CustomShortcut.relevant) == shortcut.modifiers
         }
     }
-    /// Only the chord's Space types a character; swallow it so the shortcut never inserts a space.
+    /// Only a chord's key types a character; swallow it so the shortcut never inserts one.
     func consumes(_ type: CGEventType, _ event: CGEvent) -> Bool {
-        self == .controlOptionSpace && (type == .keyDown || type == .keyUp)
-            && event.getIntegerValueField(.keyboardEventKeycode) == keyCode && isDown(event)
+        guard self != .rightOption && self != .fn else { return false }
+        return (type == .keyDown || type == .keyUp) && event.getIntegerValueField(.keyboardEventKeycode) == keyCode && isDown(event)
+    }
+}
+
+/// A recorded shortcut: one key with ⌘, ⌥ or ⌃ (⇧ may be added), or an F-key alone or with
+/// modifiers. Hold, double-press and toggle work as with the presets.
+struct CustomShortcut: Equatable {
+    static let relevant: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand, .maskShift]
+    let keyCode: Int64
+    /// Only flags in `relevant`.
+    let modifiers: CGEventFlags
+    /// The key's name as typed when recorded ("D", "F5", "Space"), for display only.
+    let key: String
+
+    init(keyCode: Int64, modifiers: CGEventFlags, key: String) {
+        self.keyCode = keyCode; self.modifiers = modifiers.intersection(Self.relevant)
+        self.key = key.isEmpty ? "Key \(keyCode)" : key
+    }
+    /// "custom:KEYCODE:FLAGS:KEY".
+    var stored: String { "custom:\(keyCode):\(modifiers.rawValue):\(key)" }
+    init?(stored: String) {
+        let parts = stored.split(separator: ":", maxSplits: 3, omittingEmptySubsequences: false)
+        guard parts.count == 4, parts[0] == "custom", let code = Int64(parts[1]), let flags = UInt64(parts[2]),
+              Self.refusal(keyCode: code, modifiers: CGEventFlags(rawValue: flags)) == nil else { return nil }
+        self.init(keyCode: code, modifiers: CGEventFlags(rawValue: flags), key: String(parts[3]))
+    }
+    /// "⌃⌥D", in the order macOS menus use.
+    var label: String { Self.symbols(modifiers) + key }
+    static func symbols(_ flags: CGEventFlags) -> String {
+        [(CGEventFlags.maskControl, "⌃"), (.maskAlternate, "⌥"), (.maskShift, "⇧"), (.maskCommand, "⌘")]
+            .filter { flags.contains($0.0) }.map(\.1).joined()
+    }
+    static let functionKeys: Set<Int64> = Set([kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
+        kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20].map(Int64.init))
+    static let modifierKeys: Set<Int64> = Set([kVK_Command, kVK_RightCommand, kVK_Shift, kVK_RightShift, kVK_Option, kVK_RightOption,
+        kVK_Control, kVK_RightControl, kVK_CapsLock, kVK_Function].map(Int64.init))
+    /// Chords macOS itself keeps: emoji, lock screen, full screen, input sources, Mission Control.
+    private static let systemChords: [(Int64, CGEventFlags)] = [
+        (Int64(kVK_Space), [.maskControl, .maskCommand]), (Int64(kVK_ANSI_Q), [.maskControl, .maskCommand]), (Int64(kVK_ANSI_F), [.maskControl, .maskCommand]),
+        (Int64(kVK_Space), .maskControl), (Int64(kVK_Space), [.maskControl, .maskAlternate, .maskCommand]),
+        (Int64(kVK_LeftArrow), .maskControl), (Int64(kVK_RightArrow), .maskControl), (Int64(kVK_UpArrow), .maskControl), (Int64(kVK_DownArrow), .maskControl)]
+
+    /// Why this key can't be the dictation shortcut, or nil when it can.
+    static func refusal(keyCode: Int64, modifiers: CGEventFlags) -> String? {
+        let flags = modifiers.intersection(relevant)
+        if modifierKeys.contains(keyCode) { return "A modifier key on its own can’t be recorded. Pick Right Option or Fn above, or add another key." }
+        if keyCode == Int64(kVK_Escape) { return "Escape cancels a dictation, so it can’t start one." }
+        if (keyCode == Int64(kVK_ANSI_C) || keyCode == Int64(kVK_ANSI_V)) && flags == [.maskControl, .maskCommand] {
+            return "⌃⌘C and ⌃⌘V copy and paste your last dictation."
+        }
+        if flags.intersection([.maskCommand, .maskAlternate, .maskControl]).isEmpty && !functionKeys.contains(keyCode) {
+            return "Add ⌘, ⌥ or ⌃, or use an F-key, so the shortcut doesn’t type a character."
+        }
+        // ⌘Q, ⌘Tab, ⌘Space, ⌘⇧4… belong to macOS and apps.
+        if flags.subtracting(.maskShift) == .maskCommand && !functionKeys.contains(keyCode) {
+            return "⌘ with a key is an app or macOS shortcut. Add ⌥ or ⌃."
+        }
+        if systemChords.contains(where: { $0.0 == keyCode && $0.1 == flags }) { return "macOS uses \(symbols(flags)) with this key." }
+        return nil
     }
 }
 
@@ -186,6 +265,18 @@ final class ShortcutListener {
             }
         }
     }
+    /// True while a cancel the user asked for (Escape, the menu) is being handled, as opposed to a
+    /// lone tap expiring or a lost event stream.
+    private(set) var cancelIsExplicit = false
+    /// Runs `work` as processing outside the gesture (Undo). A press meanwhile is ignored, as after
+    /// an automatic stop. False when a dictation is already under way.
+    func runAsProcessing(_ work: (@escaping () -> Void) -> Void) -> Bool {
+        guard queued.isEmpty, machine.beginProcessing() else { return false }
+        userFinished = false; publishState()
+        work { [self] in machine.processingFinished(); publishState() }
+        return true
+    }
+    func cancelByUser() { cancelIsExplicit = true; defer { cancelIsExplicit = false }; emit(machine.cancel()) }
     func replayQueued() {
         guard machine.state == .idle, !queued.isEmpty else { return }
         let events = queued; queued.removeAll()
@@ -297,7 +388,7 @@ final class ShortcutListener {
         if type == .keyDown && key == 53 {
             if !queued.isEmpty { cancelQueued(); return } // Cancels only the queued recording.
             if machine.state == .processing && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { onEscapeWhileProcessing?() }
-            emit(machine.cancel()); return
+            cancelByUser(); return
         }
         guard key == binding.keyCode else { return }
         let time = Double(event.timestamp) / 1_000_000_000

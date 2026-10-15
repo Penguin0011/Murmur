@@ -64,8 +64,16 @@ final class WarmRunner: @unchecked Sendable {
     func prepare(helper: URL, launch: HelperLaunch) { queue.async { [self] in _ = start(helper, launch) } }
     /// `boundary`: a clip spanning a chunk cut; the answer lists dictionary replacements, not text.
     func transcribe(_ audio: URL, helper: URL, launch: HelperLaunch, boundary: Bool = false, completion: @escaping (Data?) -> Void) {
+        send(boundary ? (try? JSONSerialization.data(withJSONObject: ["boundary": audio.path])).map { String(decoding: $0, as: UTF8.self) } : audio.path,
+             helper: helper, launch: launch, completion: completion)
+    }
+    /// 16 kHz mono samples held in memory (an undone cancel); the answer is like an audio path's.
+    func transcribe(samples: [Float], helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
+        let encoded = samples.withUnsafeBytes { Data($0).base64EncodedString() }
+        send(#"{"samples":""# + encoded + #""}"#, helper: helper, launch: launch, completion: completion)
+    }
+    private func send(_ line: String?, helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
         queue.async { [self] in
-            let line = boundary ? (try? JSONSerialization.data(withJSONObject: ["boundary": audio.path])).map { String(decoding: $0, as: UTF8.self) } : audio.path
             guard let line, !line.contains("\n"), start(helper, launch), let input,
                   (try? input.write(contentsOf: Data((line + "\n").utf8))) != nil,
                   let line = readLine(timeout: 300) else { stopLocked(); completion(nil); return }
@@ -208,6 +216,71 @@ final class ChunkJob: @unchecked Sendable {
     }
 }
 
+/// Live words (gap #13): a second helper, `ModelBench LIVE_FOLDER --stream RATE`, that lives only
+/// while one recording lasts, so its memory (about 0.5–1 GB wired) is held only then. Audio goes over
+/// its stdin pipe from this object's own queue, never to disk; when the helper falls behind, buffers
+/// are dropped rather than queued, so capture never waits. The text is display only.
+final class LiveStream: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "murmur.live-words", qos: .userInitiated)
+    private let task = Process()
+    private let input: FileHandle
+    private let lock = NSLock()
+    private var backlog = 0
+    /// Buffers waiting for the pipe (about 2 s of 1024-frame buffers at 48 kHz).
+    private static let maxBacklog = 96
+
+    /// `onText` runs on the main thread with the running transcript.
+    init?(helper: URL, folder: URL, sampleRate: Double, onText: @escaping (String) -> Void) {
+        let toChild = Pipe(), fromChild = Pipe()
+        task.executableURL = helper; task.arguments = [folder.path, "--stream", String(Int(sampleRate))]
+        task.standardInput = toChild; task.standardOutput = fromChild; task.standardError = FileHandle.nullDevice
+        do { try task.run() } catch { return nil }
+        input = toChild.fileHandleForWriting
+        let output = fromChild.fileHandleForReading
+        DispatchQueue.global(qos: .userInitiated).async {
+            var buffered = Data()
+            while true {
+                let chunk = output.availableData
+                if chunk.isEmpty { return }
+                buffered.append(chunk)
+                while let newline = buffered.firstIndex(of: 0x0A) {
+                    let line = buffered[buffered.startIndex..<newline]; buffered = Data(buffered[(newline + 1)...])
+                    if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any], let text = object["partial"] as? String {
+                        DispatchQueue.main.async { onText(text) }
+                    }
+                }
+                if buffered.count > 1 << 20 { return }
+            }
+        }
+    }
+
+    /// Any thread: copies the first channel and sends it, or drops it when the helper is behind.
+    func feed(_ buffer: AVAudioPCMBuffer) {
+        guard let samples = buffer.floatChannelData, buffer.frameLength > 0 else { return }
+        let data = Data(bytes: samples[0], count: Int(buffer.frameLength) * MemoryLayout<Float>.size)
+        let accepted: Bool = lock.withLock {
+            guard !closed, backlog < Self.maxBacklog else { return false }
+            backlog += 1; return true
+        }
+        guard accepted else { return }
+        queue.async { [self] in
+            if !lock.withLock({ closed }) { _ = try? input.write(contentsOf: data) }
+            lock.withLock { backlog -= 1 }
+        }
+    }
+    /// Lock-guarded.
+    private var closed = false
+
+    /// Ends the helper: closing its stdin makes it exit. The terminate watchdog is armed here, not
+    /// behind the writes: a helper that stopped reading blocks the queue on a full pipe, and
+    /// terminating it fails that write (EPIPE), so its memory is never held past the recording.
+    func stop() {
+        guard lock.withLock({ defer { closed = true }; return !closed }) else { return }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [task] in if task.isRunning { task.terminate() } }
+        queue.async { [input] in try? input.close() }
+    }
+}
+
 /// Starts capture on a dedicated queue as soon as the tap thread sees a shortcut press, so a slow
 /// main thread does not delay the microphone. The session adopts it; anything unclaimed is deleted.
 final class PreStart: @unchecked Sendable {
@@ -259,6 +332,24 @@ final class PreStart: @unchecked Sendable {
     @Published var automaticInsertion: Bool
     /// One press starts recording and the next press stops it, instead of hold-to-record.
     @Published var pressToToggle: Bool
+    /// Short system sounds when recording starts and stops (gap #15); none on insertion.
+    @Published var recordingSounds: Bool
+    /// Live words in the bubble while recording (gap #13); needs the optional download.
+    @Published var liveWords: Bool
+    /// Live words also while transcription runs in the cloud; off by default (user, Oct 15, 2026).
+    @Published var liveWordsOnCloud: Bool
+    /// The running preview transcript. Display only: never saved, logged, learned from or cleaned.
+    @Published private(set) var liveText = ""
+    @Published var liveWordsStatus: ModelStatus = .notDownloaded
+    @Published var liveWordsMessage = ""
+    var liveWordsRow: ModelRowPresentation { ModelRowPresentation.make(liveWordsDownloader == nil ? nil : liveWordsStatus) }
+    var liveWordsSummary: String { liveWordsDownloader.map { LiveWordsFacts.summary(downloadSize: $0.downloadSize) } ?? "" }
+    var liveWordsLicense: ModelLicenseInfo? { liveWordsDownloader?.license }
+    /// Whether this recording's bubble shows live words.
+    var liveWordsActive: Bool { live != nil || liveWordsFixture }
+    /// The UI fixture's synthetic preview; never set in the app.
+    private var liveWordsFixture = false
+    func showLiveWordsFixture(_ text: String) { liveWordsFixture = true; liveText = text }
     @Published var retention: String
     // Cleanup and learning settings, applied as soon as they change like the others.
     @Published var cleanupFillers: Bool
@@ -359,6 +450,11 @@ final class PreStart: @unchecked Sendable {
     /// Dictionary support for on-device transcription (the pinned CTC model) and the private
     /// vocabulary file the helper reads; see DictionaryModelFacts.
     private let dictionaryDownloader: ModelDownloader?
+    private let liveWordsDownloader: ModelDownloader?
+    private var liveWordsDownloadInFlight = false
+    /// Set once the live folder's hashes were checked this launch (and the model compiled).
+    private var liveWordsVerified = false
+    private var live: LiveStream?
     private var dictionaryDownloadInFlight = false
     private var vocabularyFile: URL?
     /// Set by start(); until then dictionary refreshes do not pre-warm, so launch hashes the model once.
@@ -447,6 +543,10 @@ final class PreStart: @unchecked Sendable {
            let manifest = try? ModelManifest(contentsOf: pins, repository: dictionaryModelRepository) {
             dictionaryDownloader = ModelDownloader(manifest: manifest, target: dictionaryModelDirectory)
         } else { dictionaryDownloader = nil }
+        if let pins = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"),
+           let manifest = try? ModelManifest(contentsOf: pins, list: liveWordsFileList) {
+            liveWordsDownloader = ModelDownloader(manifest: manifest, target: LiveWordsFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser))
+        } else { liveWordsDownloader = nil }
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
         let inputDevice = defaults.string(forKey: "inputDeviceUID") ?? ""
@@ -454,6 +554,9 @@ final class PreStart: @unchecked Sendable {
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         pressToToggle = defaults.bool(forKey: "pressToToggle")
+        recordingSounds = defaults.object(forKey: "recordingSounds") as? Bool ?? true
+        liveWords = defaults.object(forKey: "liveWords") as? Bool ?? true
+        liveWordsOnCloud = defaults.bool(forKey: "liveWordsOnCloud")
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
         let processingSettings = ProcessingSettings.load(from: defaults)
@@ -508,6 +611,7 @@ final class PreStart: @unchecked Sendable {
         } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
         modelStatus = downloader?.status() ?? .notDownloaded
         dictionaryModelStatus = dictionaryDownloader?.status() ?? .notDownloaded
+        liveWordsStatus = liveWordsDownloader?.status() ?? .notDownloaded
         warm.onDictionaryStatus = { [weak self] failed in DispatchQueue.main.async { self?.dictionarySupportFailed = failed } }
         if !preview {
             do { try RouteSettings.migrateCustomAPI(in: defaults, credentials: credentials) }
@@ -527,7 +631,7 @@ final class PreStart: @unchecked Sendable {
         signal(SIGPIPE, SIG_IGN)
         // App Nap would delay the shortcut; idle system sleep stays allowed.
         // Verify the model now so the first dictation does not hash 1.8 GB.
-        started = true; prewarm()
+        started = true; prewarm(); if liveWords { prepareLiveWords() }
         noNap = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Respond to the dictation shortcut without delay")
         refreshPermissions()
         if !preview { configureShortcut() }
@@ -552,8 +656,11 @@ final class PreStart: @unchecked Sendable {
                 // Download progress and the verifying phase are sampled here, on the main thread.
                 if self.modelDownloadInFlight, let status = self.downloader?.status(), status != self.modelStatus { self.modelStatus = status }
                 if self.dictionaryDownloadInFlight, let status = self.dictionaryDownloader?.status(), status != self.dictionaryModelStatus { self.dictionaryModelStatus = status }
+                if self.liveWordsDownloadInFlight, let status = self.liveWordsDownloader?.status(), status != self.liveWordsStatus { self.liveWordsStatus = status }
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
-                   !capture.engine.isRunning || capture.queue.sync(execute: { capture.writeError != nil }) {
+                   // A device change stops the engine; it restarts on the current device (gap #16) and only
+                   // an engine that cannot restart counts as an interruption.
+                   (!capture.engine.isRunning && !capture.restart()) || capture.queue.sync(execute: { capture.writeError != nil }) {
                     let running = capture.engine.isRunning, writeFailed = capture.queue.sync { capture.writeError != nil }
                     timingLog.notice("capture-interrupted engine-running=\(running, privacy: .public) write-error=\(writeFailed, privacy: .public)")
                     self.recordingFailed = true; self.stopRecording()
@@ -644,6 +751,9 @@ final class PreStart: @unchecked Sendable {
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
+        defaults.set(recordingSounds, forKey: "recordingSounds")
+        defaults.set(liveWordsOnCloud, forKey: "liveWordsOnCloud")
+        defaults.set(liveWords, forKey: "liveWords"); if liveWords { prepareLiveWords() }
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(inputDeviceUID, forKey: "inputDeviceUID"); Capture.preferredInputUID = inputDeviceUID.isEmpty ? nil : inputDeviceUID
         defaults.set(retention, forKey: "retention")
@@ -696,7 +806,7 @@ final class PreStart: @unchecked Sendable {
         removeShortcut()
         guard sessionAvailable else { return }
         guard CGPreflightListenEventAccess() else { message = "Allow Input Monitoring, then click Refresh Permissions to enable the shortcut."; return }
-        let binding: ShortcutBinding = shortcut == "fn" ? .fn : shortcut == "ctrl-option-space" ? .controlOptionSpace : .rightOption
+        let binding = ShortcutBinding(stored: shortcut)
         let token = shortcutGeneration
         let next = ShortcutListener(binding: binding, processingSeconds: 0, onAction: { [weak self] action, done in
             guard let self, self.shortcutGeneration == token else { done(); return }
@@ -713,7 +823,7 @@ final class PreStart: @unchecked Sendable {
             guard let self, self.sessionAvailable, !IsSecureEventInputEnabled() else { return false }
             let shown = (self.phase, self.message)
             guard self.session.startEarly() else { return false }
-            self.phaseBeforeEarly = shown; return true
+            self.phaseBeforeEarly = shown; self.cue(.start); return true
         }
         next.onQueuedCancel = { [weak self] in
             guard let self else { return }
@@ -736,6 +846,7 @@ final class PreStart: @unchecked Sendable {
             self.capture = capture; return url
         }
         session.resumeCapture = { [weak self] in guard let self else { return }; self.setPhase("Listening", self.listeningMessage) }
+        session.willDeleteCanceled = { [weak self] url in self?.holdForUndo(url) }
         session.finishRecording = { [weak self] in timingLog.notice("capture-cap reached"); guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
@@ -744,6 +855,22 @@ final class PreStart: @unchecked Sendable {
     /// False only for the plain idle hint; failures that leave the phase at Ready still show.
     var hasStatusToShow: Bool { phase != "Ready" || !Self.idleMessages.contains(message) }
     private var listeningMessage: String { "Listening… \(listener?.pressToToggle == true ? "Release or press the shortcut again" : "Release") to finish, or press Escape to cancel." }
+    /// The shortcut recorder needs the keys itself: the tap would swallow the current chord, and
+    /// pressing it would start a dictation. `resume` restores the tap with whatever is saved.
+    func pauseShortcutForRecorder() -> Bool {
+        guard !isBusy else { message = "Finish the current dictation before recording a shortcut."; return false }
+        removeShortcut(); return true
+    }
+    func resumeShortcutAfterRecorder() { if !preview && listener == nil { configureShortcut() } }
+    /// What Settings and the setup screen call the shortcut.
+    var shortcutName: String {
+        switch ShortcutBinding(stored: shortcut) {
+        case .rightOption: return "Right Option"
+        case .fn: return "Fn / Globe"
+        case .controlOptionSpace: return "Control–Option–Space"
+        case .custom(let custom): return custom.label
+        }
+    }
     private func removeShortcut() {
         shortcutGeneration = UUID()
         tapThread?.stop(); tapThread = nil
@@ -755,6 +882,7 @@ final class PreStart: @unchecked Sendable {
         defer { if action == .start, let retry { prestart.discard(store: retry) } }
         guard sessionAvailable else { done(); return }
         if action == .start {
+            undo.discard()
             guard !IsSecureEventInputEnabled() else { session.resetShortcut?(); setPhase("Error", "Dictation is unavailable while Secure Input is active."); done(); return }
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
             // An unconfigured cloud route refuses; it never falls back to local.
@@ -777,9 +905,23 @@ final class PreStart: @unchecked Sendable {
             destinationScreen = screenForDestination(destination)
             captureModeAndContext(aiCleanup: plan.cleaner != nil)
         }
+        let wasListening = session.state == .listening
+        // An early capture already played its start sound when it began (onQueuedPress).
+        let adoptsEarly = session.early != nil
         session.receive(action, completed: done)
+        if action == .start, session.state == .listening, !adoptsEarly { cue(.start) }
+        if action == .start, session.state == .listening { startLiveWords() }
+        if session.state != .listening { stopLiveWords() }
+        if wasListening, action == .finish || (action == .cancel && listener?.cancelIsExplicit == true) { cue(.stop) }
         if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
-        if action == .cancel { destination = nil; setPhase("Ready", "Recording canceled."); bubble.hide() }
+        if action == .cancel {
+            destination = nil
+            if undo.isOpen {
+                setPhase("Ready", "Recording canceled. Undo is available for \(Int(undo.lifetime)) seconds.")
+                bubble.showUndo(screen: destinationScreen)
+                DispatchQueue.main.asyncAfter(deadline: .now() + undo.lifetime) { [weak self] in if self?.undo.isOpen == false { self?.undo.discard() } }
+            } else { setPhase("Ready", "Recording canceled."); bubble.hide() }
+        }
         else if action == .start && session.state == .idle { setPhase("Error", "The microphone could not start. Check the selected input device.") }
         else if action == .finish && session.state == .idle && phase == "Listening" {
             destination = nil; setPhase("Error", "No audio was captured. Check your microphone and try again.")
@@ -873,8 +1015,60 @@ final class PreStart: @unchecked Sendable {
     func stopRecording() { guard let listener else { return }; listener.emit(listener.machine.finish()) }
     func cancelRecording() {
         if cloudRequest.isActive { cancelCloudRequest(); return }
-        guard let listener else { return }; listener.emit(listener.machine.cancel())
+        guard let listener else { return }; listener.cancelByUser()
     }
+    /// A canceled recording kept for Undo (gap #18): 16 kHz mono samples in memory, never on disk,
+    /// plus what its start captured, so Undo processes it as if it had finished normally.
+    private struct Canceled {
+        let samples: [Float]
+        let destination: FocusSnapshot?, mode: WritingMode?, context: ScreenContext?, screen: NSScreen?
+        let transcriber: TranscriptionProvider?, cleaner: CleanupProvider?
+        let insert: Bool, leadingSpace: Bool, modelDirectory: String, started: Date
+    }
+    private let undo = UndoWindow<Canceled>()
+    /// Only a cancel the user asked for (Escape, the menu) can be undone; a lone tap records nothing.
+    private func holdForUndo(_ url: URL) {
+        guard listener?.cancelIsExplicit == true, let samples = Self.samples16k(url), !samples.isEmpty else { return }
+        undo.hold(Canceled(samples: samples, destination: destination, mode: sessionMode, context: sessionContext, screen: destinationScreen,
+                           transcriber: sessionTranscriber, cleaner: processing?.cloudCleaner, insert: insertThisSession,
+                           leadingSpace: leadingSpaceThisSession, modelDirectory: activeModelDirectory, started: listeningStarted))
+    }
+    /// The recording as 16 kHz mono floats, the helper's input rate (a five-minute recording is about 19 MB).
+    static func samples16k(_ url: URL) -> [Float]? {
+        guard let file = try? AVAudioFile(forReading: url), file.length > 0,
+              let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
+              let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              (try? file.read(into: input)) != nil, let converter = AVAudioConverter(from: file.processingFormat, to: target) else { return nil }
+        // One call with a buffer for the whole clip returned only part of it; drain in blocks.
+        var samples: [Float] = [], fed = false
+        while let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 16_384) {
+            let status = converter.convert(to: output, error: nil) { _, state in
+                if fed { state.pointee = .endOfStream; return nil }
+                fed = true; state.pointee = .haveData; return input
+            }
+            guard status != .error, let data = output.floatChannelData else { return nil }
+            samples.append(contentsOf: UnsafeBufferPointer(start: data[0], count: Int(output.frameLength)))
+            if status != .haveData { return samples }
+        }
+        return nil
+    }
+    /// The Undo button: the held recording is transcribed, cleaned and inserted like any dictation.
+    func undoCancel() {
+        guard let listener, listener.machine.state == .idle, sessionAvailable, !isBusy, let item = undo.take() else { bubble.hide(); return }
+        _ = listener.runAsProcessing { [weak self] done in
+            guard let self else { done(); return }
+            self.destination = item.destination; self.sessionMode = item.mode; self.sessionContext = item.context
+            self.destinationScreen = item.screen; self.sessionTranscriber = item.transcriber; self.processing?.cloudCleaner = item.cleaner
+            self.insertThisSession = item.insert; self.leadingSpaceThisSession = item.leadingSpace
+            self.activeModelDirectory = item.modelDirectory; self.listeningStarted = item.started
+            self.generation = UUID(); self.recoveryEntryID = nil
+            self.transcribe(nil, held: item.samples, done: done)
+        }
+    }
+    private enum Cue: String { case start = "Tink", stop = "Pop" }
+    /// Measured October 15, 2026: both cues mixed at full level into a recording added no words,
+    /// and a recording of only the cues transcribed as empty, so the stop cue can play at release.
+    private func cue(_ cue: Cue) { if recordingSounds && !preview { NSSound(named: cue.rawValue)?.play() } }
     /// Escape or Cancel during a cloud request cancels its Task (and HTTP request); nothing from
     /// this session is inserted. Audio is deleted, as for a canceled recording; a transcript that
     /// was already saved stays in History.
@@ -887,13 +1081,18 @@ final class PreStart: @unchecked Sendable {
         setPhase("Ready", stage == .transcription ? CloudTranscription.message(.cancelled) ?? "Canceled." : "Canceled. The raw transcript is saved in History and was not inserted.")
         bubble.hide(); historySaved(); done()
     }
-    func setPhase(_ phase: String, _ message: String, announcement: String? = nil) {
-        self.phase = phase; self.message = message
+    /// A dictation that could not be pasted, shown in the bubble with Copy (gap #17). Any other status replaces it.
+    /// `title` names why: a failed paste, or a paste Murmur did not attempt.
+    struct PasteFailure: Equatable { let entryID: String?; let text: String; var title = "Couldn’t paste here" }
+    @Published private(set) var pasteFailure: PasteFailure?
+    func setPhase(_ phase: String, _ message: String, announcement: String? = nil, pasteFailure: PasteFailure? = nil) {
+        self.phase = phase; self.message = message; self.pasteFailure = pasteFailure
         // Every finished status leaves on its own unless replaced: text stays in History and retry audio
-        // stays on disk. "No speech" needs no action (2 s); errors get longer to read (8 s); the rest 5 s.
+        // stays on disk. "No speech" needs no action (2 s); errors get longer to read (8 s); a text to
+        // copy 30 s; the rest 5 s.
         let shown = UUID(); statusShown = shown
         let dismissAfter: TimeInterval? = phase == "Listening" || phase == "Processing" || !hasStatusToShow ? nil :
-            phase != "Error" ? 5 : message.hasPrefix("No speech was detected") ? 2 : 8
+            pasteFailure != nil ? 30 : phase != "Error" ? 5 : message.hasPrefix("No speech was detected") ? 2 : 8
         if let dismissAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + dismissAfter) { [weak self] in
                 guard let self, self.statusShown == shown else { return }
@@ -908,8 +1107,10 @@ final class PreStart: @unchecked Sendable {
         bubble.show(phase: phase, message: message, screen: destinationScreen)
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: announcement ?? message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
-    private func transcribe(_ audio: URL, done: @escaping () -> Void) {
-        if let provider = sessionTranscriber { transcribeInCloud(audio, with: provider, done: done); return }
+    /// `held`: an undone cancel's samples (gap #18), in memory only. There is then no file: no chunks,
+    /// no one-shot fallback and no retry audio.
+    private func transcribe(_ audio: URL?, held: [Float]? = nil, done: @escaping () -> Void) {
+        if let provider = sessionTranscriber { transcribeInCloud(audio, held: held, with: provider, done: done); return }
         setPhase("Processing", "Transcribing on this Mac…")
         let token = generation; let models = URL(fileURLWithPath: activeModelDirectory)
         guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let store = records else { setPhase("Error", "The model runtime is unavailable. Audio is saved for retry."); done(); return }
@@ -920,10 +1121,13 @@ final class PreStart: @unchecked Sendable {
             defer { timingLog.notice("model-verify took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3))") }
             guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
                   let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel)
-            else { DispatchQueue.main.async { guard let self, self.generation == token else { return }; self.setPhase("Error", "Model verification failed. Choose the pinned model folder. Audio is saved for retry."); done() }; return }
+            else { DispatchQueue.main.async { guard let self, self.generation == token else { return }; self.setPhase("Error", "Model verification failed. Choose the pinned model folder. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry.")"); done() }; return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
-                self.runTranscription(helper, launch: launch, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+                if let audio { self.runTranscription(helper, launch: launch, audio: audio, store: store, timestamp: timestamp, token: token, done: done); return }
+                self.warm.transcribe(samples: held ?? [], helper: helper, launch: launch) { [weak self] line in
+                    self?.handleTranscript(line.map { .success($0) } ?? .failure(CaptureError("Transcription failed")), audio: nil, store: store, timestamp: timestamp, token: token, done: done)
+                }
             }
         }
     }
@@ -985,7 +1189,8 @@ final class PreStart: @unchecked Sendable {
         }
     }
     /// Shared by the warm and one-shot helpers: parse the last JSON line, save, then deliver. Runs off main.
-    nonisolated private func handleTranscript(_ result: Result<Data, Error>, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
+    nonisolated static let heldDiscarded = "The canceled recording was discarded."
+    nonisolated private func handleTranscript(_ result: Result<Data, Error>, audio: URL?, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
         do {
             let data = try result.get()
             guard let last = String(data: data, encoding: .utf8)?.split(separator: "\n").last,
@@ -995,25 +1200,30 @@ final class PreStart: @unchecked Sendable {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NoSpeech() }
             let savedEntry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: text, insertionStatus: "saved-not-inserted")
             try store.save(savedEntry)
-            try? FileManager.default.removeItem(at: audio)
+            if let audio { try? FileManager.default.removeItem(at: audio) }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
                 self.runner = nil
                 self.deliver(savedEntry, store: store, token: token, done: done)
             }
         } catch {
-            let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
+            let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again."
+                : audio == nil ? "Transcription failed. \(Self.heldDiscarded)" : "Transcription failed. Audio is saved for retry for up to 24 hours."
             DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.setPhase("Error", message); done() }
         }
     }
     /// Cloud transcription (R4): one provider call in a cancellable Task, never the local model.
     /// The result then follows the local path: history save, processing, insertion.
-    private func transcribeInCloud(_ audio: URL, with provider: TranscriptionProvider, done: @escaping () -> Void) {
-        guard let store = records else { setPhase("Error", "Private storage is unavailable. Audio is saved for retry."); done(); return }
+    private func transcribeInCloud(_ audio: URL?, held: [Float]?, with provider: TranscriptionProvider, done: @escaping () -> Void) {
+        guard let store = records else { setPhase("Error", "Private storage is unavailable. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry.")"); done(); return }
         let token = generation; let timestamp = listeningStarted
         cloudStage = .transcription; cloudDone = done
         let vocabulary = processing?.dictionary.vocabularyTerms ?? []
-        cloudRequest.start({ await CloudTranscription.run(provider: provider, audioFile: audio, vocabulary: vocabulary) }) { [weak self] outcome in
+        let heldWAV = held.map { WAVAudio.encodePCM16($0, sampleRate: 16_000) }
+        cloudRequest.start({
+            if let heldWAV { return await CloudTranscription.run(provider: provider, audioData: heldWAV, vocabulary: vocabulary) }
+            return await CloudTranscription.run(provider: provider, audioFile: audio ?? URL(fileURLWithPath: "/dev/null"), vocabulary: vocabulary)
+        }) { [weak self] outcome in
             guard let self, self.generation == token else { return }
             self.cloudStage = nil; self.cloudDone = nil
             let text: String, held: Bool
@@ -1022,13 +1232,16 @@ final class PreStart: @unchecked Sendable {
             case .heldAnswerSuspected(let value): text = value; held = true
             case .noSpeech, .failed, .cancelled:
                 // Audio stays for retry (until the 24-hour purge) unless the provider error discards it.
-                if case .failed(_, false) = outcome { try? FileManager.default.removeItem(at: audio) }
-                self.setPhase("Error", CloudTranscription.message(outcome) ?? CloudTranscription.unknownFailure); done(); return
+                if case .failed(_, false) = outcome, let audio { try? FileManager.default.removeItem(at: audio) }
+                var message = CloudTranscription.message(outcome) ?? CloudTranscription.unknownFailure
+                // Held audio has no file to keep for retry.
+                if audio == nil, case .failed(let reason, _) = outcome { message = reason + " " + Self.heldDiscarded }
+                self.setPhase("Error", message); done(); return
             }
             // An answer-shaped LLM transcript is held like a failed cleanup: raw text only, never inserted.
             let entry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: held ? "" : text, insertionStatus: held ? "held-transcript" : "saved-not-inserted")
-            do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the transcript. Audio is saved for retry for up to 24 hours."); done(); return }
-            try? FileManager.default.removeItem(at: audio)
+            do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the transcript. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry for up to 24 hours.")"); done(); return }
+            if let audio { try? FileManager.default.removeItem(at: audio) }
             guard !held else {
                 self.recoveryEntryID = entry.id
                 self.setPhase("Error", CloudTranscription.message(outcome) ?? ""); self.destination = nil; self.historySaved(); done(); return
@@ -1121,18 +1334,18 @@ final class PreStart: @unchecked Sendable {
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
                 watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
-                showInsertionResult(insertion)
+                showInsertionResult(insertion, entryID: entry.id, text: entry.finalText)
                 // A provider failure is not silent: a bad key or quota would otherwise degrade every dictation.
                 if insertion.status != .failed, let error = processing?.lastProviderError {
                     setPhase("Ready", "Inserted with local cleanup. \(error.userMessage)")
                 }
             } catch {
-                setPhase("Error", attempted
-                    ? "\(saved) Delivery status could not be saved. Check the destination before pasting again."
-                    : "\(saved) Could not save the text for insertion, so nothing was pasted. Copy it from History.")
+                // After an attempt the paste may have landed, so no card offers the text again.
+                if attempted { setPhase("Error", "\(saved) Delivery status could not be saved. Check the destination before pasting again.") }
+                else { showNotPasted(.unsaved, saved: saved, entryID: entry.id, text: processed) }
             }
         } else {
-            setPhase("Saved", "\(saved) Press ⌃⌘V to paste it where your cursor is.")
+            showNotPasted(.insertionOff, saved: saved, entryID: entry.id, text: processed)
         }
         destination = nil; historySaved(); done()
     }
@@ -1145,14 +1358,35 @@ final class PreStart: @unchecked Sendable {
         watchTick(ending: true)
         let result = pasteIntoFrontmostApp(text)
         timingLog.notice("paste-chord status=\(result.status.rawValue, privacy: .public) detail=\(result.detail, privacy: .public)")
-        showInsertionResult(result)
+        showInsertionResult(result, entryID: nil, text: text)
     }
     /// Read-back is diagnostic evidence, not a reason to warn or paste twice.
-    func showInsertionResult(_ result: InsertionResult) {
+    func showInsertionResult(_ result: InsertionResult, entryID: String?, text: String) {
         switch result.status {
         case .verified, .unverified: setPhase("Ready", idleMessage, announcement: "Dictation finished.")
-        case .failed: setPhase("Error", "Could not paste the dictation. Select a text field and press ⌃⌘V, or copy it from History. Check the field first to avoid a duplicate.")
+        case .failed: setPhase("Error", "Could not paste the dictation. Copy it here, select a text field and press ⌃⌘V, or copy it from History. Check the field first to avoid a duplicate.",
+                               pasteFailure: PasteFailure(entryID: entryID, text: text))
         }
+    }
+    enum NotPasted { case insertionOff, unsaved }
+    /// Murmur deliberately did not paste: the card shows the text with Copy (gap #17, Oct 15 follow-up).
+    /// Failed pastes go through `showInsertionResult`; a posted but unconfirmed paste stays quiet.
+    func showNotPasted(_ why: NotPasted, saved: String, entryID: String?, text: String) {
+        switch why {
+        case .insertionOff:
+            setPhase("Saved", "\(saved) Press ⌃⌘V to paste it where your cursor is.", pasteFailure: PasteFailure(entryID: entryID, text: text, title: "Saved, not pasted"))
+        case .unsaved:
+            setPhase("Error", "\(saved) Could not save the text for insertion, so nothing was pasted. Copy it here or from History.", pasteFailure: PasteFailure(entryID: entryID, text: text))
+        }
+    }
+    /// The card's Copy button: the text goes to the clipboard and its History entry is marked copied.
+    func copyPasteFailure() {
+        guard let failure = pasteFailure else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(failure.text, forType: .string)
+        if let id = failure.entryID, var entry = history.first(where: { $0.id == id }) {
+            entry.insertionStatus = "copied"; try? records?.save(entry); refreshHistory()
+        }
+        setPhase("Ready", "Copied. Press ⌘V to paste it.", announcement: "Dictation copied.")
     }
     // Explicit developer check of the production pipeline, using a synthetic file
     // and an exact disposable destination. Never enabled during ordinary launch.
@@ -1569,6 +1803,80 @@ final class PreStart: @unchecked Sendable {
         dictionaryModelStatus = dictionaryDownloader.status(); dictionarySupportFailed = false
         prewarm()
     }
+    // MARK: Live words (gap #13)
+
+    /// Checks the live folder's hashes once per launch, then loads the model once with no audio, so
+    /// its first compile (about 10 s) happens now rather than in a recording. Off the main thread.
+    private var preparingLiveWords = false
+    private func prepareLiveWords() {
+        guard !preview, !liveWordsVerified, !preparingLiveWords, liveWordsRow.isReady, let folder = liveWordsDownloader?.target,
+              let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"),
+              let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
+        preparingLiveWords = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard (try? ModelVerificationCache.shared.verify(folder, manifest: manifest, list: liveWordsFileList)) != nil else {
+                DispatchQueue.main.async { self?.preparingLiveWords = false; self?.liveWordsMessage = "Live words failed verification. Remove them and download again." }
+                return
+            }
+            let compile = Process(); compile.executableURL = helper; compile.arguments = [folder.path, "--stream", "16000"]
+            compile.standardInput = FileHandle.nullDevice; compile.standardOutput = FileHandle.nullDevice; compile.standardError = FileHandle.nullDevice
+            if (try? compile.run()) != nil { compile.waitUntilExit() }
+            DispatchQueue.main.async { self?.preparingLiveWords = false; self?.liveWordsVerified = true }
+        }
+    }
+    private func startLiveWords() {
+        stopLiveWords()
+        guard LiveWordsFacts.starts(enabled: liveWords, ready: liveWordsVerified, cloudTranscription: sessionTranscriber != nil, onCloud: liveWordsOnCloud),
+              !preview, let capture, let rate = capture.recordingFormat?.sampleRate,
+              let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let folder = liveWordsDownloader?.target else { return }
+        let token = generation
+        liveText = ""
+        guard let stream = LiveStream(helper: helper, folder: folder, sampleRate: rate, onText: { [weak self] text in
+            guard let self, self.generation == token, self.live != nil else { return }
+            self.liveText = text
+        }) else { return }
+        live = stream
+        capture.setTee { stream.feed($0) }
+        bubble.show(phase: phase, message: message, screen: destinationScreen)
+    }
+    /// Keeps the last text up until the Processing bubble replaces it; the next start clears it.
+    private func stopLiveWords() {
+        capture?.setTee(nil)
+        live?.stop(); live = nil
+    }
+    func downloadLiveWords() {
+        guard let liveWordsDownloader else { liveWordsMessage = ModelDownloadError.invalidManifest.userMessage; return }
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: liveWordsDownloadInFlight) { liveWordsMessage = refusal; return }
+        let text = LiveWordsFacts.confirmation(downloadSize: liveWordsDownloader.downloadSize, license: liveWordsDownloader.license, folder: liveWordsDownloader.target)
+        let alert = NSAlert(); alert.messageText = text.title; alert.informativeText = text.body
+        alert.addButton(withTitle: "Download"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: liveWordsDownloadInFlight) { liveWordsMessage = refusal; return }
+        liveWordsDownloadInFlight = true; liveWordsMessage = ""; liveWordsVerified = false
+        liveWordsStatus = .downloading(ModelDownloadProgress(bytesDone: 0, totalBytes: liveWordsDownloader.downloadSize))
+        liveWordsDownloader.start { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.liveWordsDownloadInFlight = false
+                self.liveWordsStatus = liveWordsDownloader.status()
+                self.liveWordsMessage = LiveWordsFacts.completionMessage(result)
+                self.prepareLiveWords()
+            }
+        }
+    }
+    func cancelLiveWordsDownload() { liveWordsDownloader?.cancel() }
+    func removeLiveWords() {
+        guard let liveWordsDownloader else { return }
+        if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: liveWordsDownloadInFlight) { liveWordsMessage = refusal; return }
+        let alert = NSAlert(); alert.messageText = LiveWordsFacts.removeTitle
+        alert.informativeText = LiveWordsFacts.removeBody(folder: liveWordsDownloader.target)
+        alert.addButton(withTitle: "Remove"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: liveWordsDownloadInFlight) { liveWordsMessage = refusal; return }
+        do { try liveWordsDownloader.remove(); liveWordsMessage = "Live words were removed." }
+        catch { liveWordsMessage = (error as? ModelDownloadError)?.userMessage ?? ModelDownloadError.fileSystem.userMessage }
+        liveWordsStatus = liveWordsDownloader.status(); liveWordsVerified = false
+    }
     func useDefaultModelDirectory() { if let downloader { modelDirectory = downloader.target.path } }
     func openLink(_ url: URL) { NSWorkspace.shared.open(url) }
 
@@ -1714,6 +2022,7 @@ final class PreStart: @unchecked Sendable {
     func openReleasePage() { if let url = availableRelease?.pageURL { NSWorkspace.shared.open(url) } }
 
     func shutdown() {
+        undo.discard(); stopLiveWords(); liveWordsDownloader?.cancel()
         generation = UUID(); cloudRequest.cancel(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
         watchTick(ending: true)
         downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.

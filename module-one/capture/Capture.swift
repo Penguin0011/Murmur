@@ -34,10 +34,16 @@ final class Capture {
     static var current: Capture? { currentLock.withLock { _current } }
 
     nonisolated(unsafe) private static var _preferredInputUID: String?
-    /// CoreAudio UID of the chosen microphone. Nil, or a device that is not connected, means the system default input.
+    /// CoreAudio UID of the chosen microphone, or `MicrophoneChoice.automatic`. Nil, or a device that
+    /// is not connected, means the system default input.
     static var preferredInputUID: String? {
         get { currentLock.withLock { _preferredInputUID } }
         set { currentLock.withLock { _preferredInputUID = newValue } }
+    }
+    /// The device to pin now: the chosen one, Automatic's pick, or nil for the system default.
+    static func resolvedInputUID() -> String? {
+        guard let choice = preferredInputUID, choice == MicrophoneChoice.automatic else { return preferredInputUID }
+        return MicrophoneChoice.automaticUID(defaultInput: defaultInputUID(), devices: inputDeviceInfo())
     }
     /// Connected microphones as (CoreAudio UID, name); AVCaptureDevice's uniqueID is the CoreAudio UID on macOS.
     static func inputDevices() -> [(uid: String, name: String)] {
@@ -53,6 +59,37 @@ final class Capture {
         }
         return status == noErr && device != kAudioObjectUnknown ? device : nil
     }
+    private static func property<T>(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal, _ initial: T) -> T? {
+        var address = AudioObjectPropertyAddress(mSelector: selector, mScope: scope, mElement: kAudioObjectPropertyElementMain)
+        var value = initial, size = UInt32(MemoryLayout<T>.size)
+        return AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value) == noErr ? value : nil
+    }
+    private static func uid(_ device: AudioDeviceID) -> String? {
+        property(device, kAudioDevicePropertyDeviceUID, Unmanaged<CFString>?.none)??.takeRetainedValue() as String?
+    }
+    static func defaultInputUID() -> String? {
+        property(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyDefaultInputDevice, AudioDeviceID(kAudioObjectUnknown)).flatMap(uid)
+    }
+    /// Every device with an input stream, with its transport and whether it is alive.
+    static func inputDeviceInfo() -> [MicrophoneChoice.Device] {
+        var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size) == noErr else { return [] }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids.compactMap { id in
+            var streams = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+            var streamSize: UInt32 = 0
+            guard AudioObjectGetPropertyDataSize(id, &streams, 0, nil, &streamSize) == noErr, streamSize > 0, let uid = uid(id) else { return nil }
+            let transport: MicrophoneChoice.Transport
+            switch property(id, kAudioDevicePropertyTransportType, UInt32(0)) {
+            case kAudioDeviceTransportTypeBuiltIn: transport = .builtIn
+            case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: transport = .bluetooth
+            default: transport = .other
+            }
+            return MicrophoneChoice.Device(uid: uid, transport: transport, alive: property(id, kAudioDevicePropertyDeviceIsAlive, UInt32(0)) == 1)
+        }
+    }
 
     func cut(after uptime: TimeInterval) {
         queue.async { [self] in
@@ -67,22 +104,52 @@ final class Capture {
         queue.sync { guard let chunker else { return false }; chunker.attach(handler); return true }
     }
 
+    /// Queue-owned: also receives each kept buffer, in the file's format (live words, gap #13).
+    private var tee: ((AVAudioPCMBuffer) -> Void)?
+    func setTee(_ handler: ((AVAudioPCMBuffer) -> Void)?) { queue.async { [self] in tee = handler } }
+    /// The file's format, fixed at start. After a device change, buffers are converted to it.
+    var recordingFormat: AVAudioFormat? { format }
+    private var format: AVAudioFormat?
+    /// Serializes `restart` with itself and with `stop`.
+    private let restartLock = NSLock()
+    private var observer: NSObjectProtocol?
+
+    /// Pins the chosen (or Automatic's) microphone; an unplugged one falls back to the system default.
+    private func pinInput() {
+        guard let uid = Self.resolvedInputUID(), var device = Self.deviceID(uid: uid), let unit = engine.inputNode.audioUnit else { return }
+        let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, UInt32(MemoryLayout<AudioDeviceID>.size))
+        if status != noErr { timingLog.notice("input-device-set failed status=\(status)") }
+    }
+
     func start(url: URL) throws {
         let input = engine.inputNode
-        // Pin the chosen microphone before reading the format; an unplugged one falls back to the system default.
-        if let uid = Self.preferredInputUID, var device = Self.deviceID(uid: uid), let unit = input.audioUnit {
-            let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, UInt32(MemoryLayout<AudioDeviceID>.size))
-            if status != noErr { timingLog.notice("input-device-set failed status=\(status)") }
-        }
+        pinInput()
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw CaptureError("No usable system microphone format")
         }
+        self.format = format
         file = try AVAudioFile(forWriting: url, settings: format.settings)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         if Chunker.directory != nil { chunker = Chunker(format: format) }
         // Install before start: capture does not wait for tap/hold classification.
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [self] buffer, _ in
+        installTap(format)
+        started = ProcessInfo.processInfo.systemUptime
+        do { try engine.start() }
+        catch { engine.inputNode.removeTap(onBus: 0); queue.sync { file = nil }; throw error }
+        let running = ProcessInfo.processInfo.systemUptime
+        Self.currentLock.withLock { Self._current = self }
+        // A device change (a headset connecting, the chosen mic unplugged) stops the engine; follow it.
+        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+            _ = self?.restart()
+        }
+        timingLog.notice("engine-start called=\(self.started, format: .fixed(precision: 3)) took=\(running - self.started, format: .fixed(precision: 3)) rate=\(format.sampleRate, format: .fixed(precision: 0))")
+    }
+
+    /// Taps the input in `tapFormat`, converting to the file's format when they differ.
+    private func installTap(_ tapFormat: AVAudioFormat) {
+        let converter = format.flatMap { tapFormat == $0 ? nil : AVAudioConverter(from: tapFormat, to: $0) }
+        engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { [self] buffer, _ in
             // AVAudioEngine owns the callback buffer, so copy before returning.
             guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else { return }
             copy.frameLength = buffer.frameLength
@@ -96,6 +163,8 @@ final class Capture {
             let received = ProcessInfo.processInfo.systemUptime
             queue.async { [self] in
                 guard received <= cutoff else { return }
+                // The converter keeps resampler state, so it runs only here, in order.
+                guard let copy = converter.map({ Self.convert(copy, with: $0) }) ?? copy else { return }
                 if let samples = copy.floatChannelData, copy.frameLength > 0 {
                     var energy = 0.0
                     for index in 0..<Int(copy.frameLength) { energy += Double(samples[0][index]) * Double(samples[0][index]) }
@@ -108,28 +177,69 @@ final class Capture {
                 do { try file?.write(from: copy); frames += AVAudioFramePosition(copy.frameLength) }
                 catch { writeError = error }
                 chunker?.append(copy)
+                tee?(copy)
             }
         }
-        started = ProcessInfo.processInfo.systemUptime
-        do { try engine.start() }
-        catch { engine.inputNode.removeTap(onBus: 0); queue.sync { file = nil }; throw error }
-        let running = ProcessInfo.processInfo.systemUptime
-        Self.currentLock.withLock { Self._current = self }
-        timingLog.notice("engine-start called=\(self.started, format: .fixed(precision: 3)) took=\(running - self.started, format: .fixed(precision: 3)) rate=\(format.sampleRate, format: .fixed(precision: 0))")
+    }
+
+    /// Converts one tap buffer, keeping the converter's state for the next (nil on failure).
+    static func convert(_ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter) -> AVAudioPCMBuffer? {
+        let ratio = converter.outputFormat.sampleRate / converter.inputFormat.sampleRate
+        guard let output = AVAudioPCMBuffer(pcmFormat: converter.outputFormat, frameCapacity: AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64) else { return nil }
+        var given = false
+        let status = converter.convert(to: output, error: nil) { _, state in
+            if given { state.pointee = .noDataNow; return nil }
+            given = true; state.pointee = .haveData; return buffer
+        }
+        return status == .error ? nil : output
+    }
+
+    /// Restarts on the device the microphone choice resolves to now, keeping the same file, so audio
+    /// already captured stays. True when recording is running again. Safe to call from any thread;
+    /// the monitor also calls it when it finds the engine stopped.
+    func restart() -> Bool {
+        restartLock.withLock {
+            guard !stopped else { return false }
+            if engine.isRunning { return true }
+            engine.inputNode.removeTap(onBus: 0)
+            pinInput()
+            let tapFormat = engine.inputNode.outputFormat(forBus: 0)
+            guard tapFormat.sampleRate > 0, tapFormat.channelCount > 0 else { return false }
+            installTap(tapFormat)
+            do { try engine.start() } catch { engine.inputNode.removeTap(onBus: 0); return false }
+            timingLog.notice("capture-restarted rate=\(tapFormat.sampleRate, format: .fixed(precision: 0))")
+            return true
+        }
     }
 
     func stop() {
-        guard !stopped else { return }
-        stopped = true
+        guard restartLock.withLock({ defer { stopped = true }; return !stopped }) else { return }
+        if let observer { NotificationCenter.default.removeObserver(observer) }
         Self.currentLock.withLock { if Self._current === self { Self._current = nil } }
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         // The last chunk is cut here; chunks nobody attached to (a cloud route) are deleted.
-        queue.sync { file = nil; chunker?.finish(); chunker?.discardUnclaimed() }
+        queue.sync { file = nil; tee = nil; chunker?.finish(); chunker?.discardUnclaimed() }
         let now = ProcessInfo.processInfo.systemUptime
-        let rate = engine.inputNode.outputFormat(forBus: 0).sampleRate
+        let rate = format?.sampleRate ?? 0
         let recorded = rate > 0 ? Double(frames) / rate : 0
         timingLog.notice("capture-stop at=\(now, format: .fixed(precision: 3)) wall=\(now - self.started, format: .fixed(precision: 3)) recorded=\(recorded, format: .fixed(precision: 3))")
+    }
+}
+
+/// The "Automatic" microphone (gap #16). A Bluetooth headset's microphone forces it into its low-
+/// quality call mode, so while one is the default input and the built-in microphone is available,
+/// Automatic records from the built-in one and the headset keeps full playback quality.
+enum MicrophoneChoice {
+    static let automatic = "automatic"
+    enum Transport { case builtIn, bluetooth, other }
+    struct Device: Equatable { let uid: String; let transport: Transport; let alive: Bool }
+    /// The built-in microphone's UID when the default input is Bluetooth and a live built-in one exists;
+    /// otherwise nil, meaning the system default.
+    static func automaticUID(defaultInput: String?, devices: [Device]) -> String? {
+        guard let current = devices.first(where: { $0.uid == defaultInput }), current.transport == .bluetooth,
+              let builtIn = devices.first(where: { $0.transport == .builtIn && $0.alive }) else { return nil }
+        return builtIn.uid
     }
 }
 

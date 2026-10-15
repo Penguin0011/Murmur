@@ -236,6 +236,13 @@ private func read(_ url: URL) -> Data? { try? Data(contentsOf: url) }
         check(ctc.revision == "accdafd8cf8a2ff1cabe3c11e54416b405d409aa" && ctc.files.count == 12 && ctc.totalBytes == 102_802_455, "CTC pins: revision, 12 files, 102,802,455 bytes")
         check(ctc.license.isPinned && ctc.license.declarations.map(\.name) == ["CC-BY-4.0"], "CTC license pinned")
         check(Set(ctc.files.map(\.rfilename)).isSuperset(of: ["tokenizer.json", "vocab.json", "AudioEncoder.mlmodelc/weights/weight.bin", "MelSpectrogram.mlmodelc/weights/weight.bin"]), "CTC files FluidAudio loads are pinned")
+        // Live words (gap #13): the int8 [70,13,13] streaming encoder plus what it loads with, in their own list.
+        let live = try ModelManifest(contentsOf: url, list: "live_files")
+        check(live.revision == manifest.revision && live.files.count == 13 && live.totalBytes == 609_438_170, "live pins: same revision, 13 files, 609,438,170 bytes")
+        check(live.files.contains { $0.rfilename == "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/weights/weight.bin" && $0.checksum == "259e5818cf4acee1155409a048ec408eecd8cfc27ade04ba18bca243398cc9b6" }, "streaming int8 encoder pinned by hash")
+        check(Set(live.files.map(\.rfilename)).isSuperset(of: ["vocab.json", "parakeet_unified_decoder.mlmodelc/weights/weight.bin", "parakeet_unified_joint_decision_single_step.mlmodelc/weights/weight.bin"]), "decoder, joint and vocabulary it loads are pinned")
+        check(!live.files.contains { $0.rfilename.hasPrefix("parakeet_unified_encoder.mlmodelc") || $0.rfilename.hasPrefix("parakeet_unified_encoder_int8.mlmodelc") }, "no batch encoder in the live set")
+        check(live.license == license, "live words show the same license declarations")
     }
 
     static func installChecks(_ dir: URL) throws {

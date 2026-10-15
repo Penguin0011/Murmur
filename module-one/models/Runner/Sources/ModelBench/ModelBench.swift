@@ -5,7 +5,7 @@ import Foundation
 
 // Explicit local directory: no mutable-main download or implicit network access.
 @main struct ModelBench {
-    static let usage = "Usage: ModelBench MODEL_DIRECTORY (AUDIO_FILE [--single] | --serve) [--ctc CTC_DIRECTORY --vocabulary VOCABULARY_JSON]"
+    static let usage = "Usage: ModelBench MODEL_DIRECTORY (AUDIO_FILE [--single] | --serve | --stream SAMPLE_RATE) [--ctc CTC_DIRECTORY --vocabulary VOCABULARY_JSON]"
 
     static func main() async throws {
         var arguments = Array(CommandLine.arguments.dropFirst())
@@ -18,6 +18,9 @@ import Foundation
         }
         guard arguments.contains("--ctc") == false, arguments.contains("--vocabulary") == false else {
             throw NSError(domain: usage, code: 1)
+        }
+        if arguments.count == 3 && arguments[1] == "--stream", let rate = Double(arguments[2]), rate >= 8_000, rate <= 192_000, ctc == nil {
+            try await stream(models: URL(fileURLWithPath: arguments[0]), sampleRate: rate); return
         }
         if arguments.count == 2 && arguments[1] == "--serve" {
             try await serve(models: URL(fileURLWithPath: arguments[0]), ctc: ctc, vocabulary: vocabulary); return
@@ -50,6 +53,8 @@ import Foundation
     /// A line `{"boundary": PATH}` (a clip spanning a cut between two recording chunks) answers
     /// {"replacements":[{"from":…,"to":…}]}: the dictionary replacements kept in that clip, so the
     /// app can repair a term the cut split. Without dictionary support it answers none.
+    /// A line `{"samples": BASE64}` (16 kHz mono little-endian Float32, from memory: an undone
+    /// cancel, which is never written to disk) answers like an audio path.
     static func serve(models: URL, ctc: URL?, vocabulary: URL?) async throws {
         let manager = UnifiedAsrManager()
         let start = Date()
@@ -59,6 +64,12 @@ import Foundation
         while let line = readLine() {
             if line.hasPrefix("{") {
                 let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
+                if let encoded = request?["samples"] as? String {
+                    guard let data = Data(base64Encoded: encoded), !data.isEmpty, data.count % 4 == 0,
+                          let text = try? await transcribe(floats(data), manager, dictionary)
+                    else { try emit(["error": "transcription failed"]); continue }
+                    try emit(["text": text]); continue
+                }
                 guard let clip = request?["boundary"] as? String else { try emit(["error": "unknown request"]); continue }
                 let found = (try? await boundaryReplacements(clip, manager, dictionary)) ?? []
                 try emit(["replacements": found.map { ["from": $0.from, "to": $0.to] }])
@@ -75,6 +86,32 @@ import Foundation
             } catch {
                 try emit(["error": "transcription failed"])
             }
+        }
+    }
+
+    /// Live words (gap #13), display only: loads the streaming encoder folder, prints {"ready":true},
+    /// then reads raw mono little-endian Float32 samples at `sampleRate` from stdin and prints
+    /// {"partial": TEXT} whenever the running transcript changes. Audio stays in memory; the
+    /// process exits when stdin closes. No vocabulary boosting: emitted words are never revised.
+    static func stream(models: URL, sampleRate: Double) async throws {
+        let manager = StreamingUnifiedAsrManager()
+        try await manager.loadModels(from: models)
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { throw NSError(domain: usage, code: 1) }
+        try emit(["ready": true])
+        var carry = Data(), last = ""
+        while true {
+            let chunk = FileHandle.standardInput.availableData
+            if chunk.isEmpty { break }
+            carry.append(chunk)
+            let count = carry.count / 4
+            guard count > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else { continue }
+            buffer.frameLength = AVAudioFrameCount(count)
+            carry.copyBytes(to: UnsafeMutableRawBufferPointer(start: buffer.floatChannelData![0], count: count * 4), count: count * 4)
+            carry = Data(carry.suffix(from: carry.startIndex + count * 4))
+            try await manager.appendAudio(buffer)
+            try await manager.processBufferedAudio()
+            let text = await manager.getPartialTranscript()
+            if text != last { last = text; try emit(["partial": text]) }
         }
     }
 
@@ -152,6 +189,13 @@ import Foundation
         }
         try file.read(into: buffer)
         return try AudioConverter().resampleBuffer(buffer)
+    }
+
+    /// Copies rather than rebinds: Data's storage need not be Float-aligned.
+    static func floats(_ data: Data) -> [Float] {
+        var samples = [Float](repeating: 0, count: data.count / 4)
+        _ = samples.withUnsafeMutableBytes { data.copyBytes(to: $0) }
+        return samples
     }
 
     static func emit(_ object: [String: Any]) throws {

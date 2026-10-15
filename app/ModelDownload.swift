@@ -294,26 +294,26 @@ struct ModelManifest: Equatable {
     let repository: String
     /// Immutable 40-hex commit; branch or tag names are rejected so the source cannot drift.
     let revision: String
-    /// Exactly the pinned `batch_files`, in manifest order.
+    /// Exactly the pinned file list (`batch_files`, or `live_files` for live words), in manifest order.
     let files: [ModelManifestFile]
     let license: ModelLicenseInfo
 
     /// Sum of pinned file sizes: the download size to show before downloading.
     var totalBytes: Int64 { files.reduce(0) { $0 + $1.size } }
 
-    init(contentsOf url: URL, repository: String = ModelManifest.defaultRepository) throws {
+    init(contentsOf url: URL, repository: String = ModelManifest.defaultRepository, list: String = "batch_files") throws {
         guard let data = try? Data(contentsOf: url) else { throw ModelDownloadError.invalidManifest }
-        try self.init(data: data, repository: repository)
+        try self.init(data: data, repository: repository, list: list)
     }
 
     /// Parses artifact-pins.json. Throws `.unsafePath` for traversal-like names, otherwise `.invalidManifest`.
-    init(data: Data, repository: String = ModelManifest.defaultRepository) throws {
+    init(data: Data, repository: String = ModelManifest.defaultRepository, list: String = "batch_files") throws {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let models = object["models"] as? [String: Any],
               let model = models[repository] as? [String: Any],
               let revision = model["revision"] as? String,
               let entries = model["files"] as? [[String: Any]],
-              let batch = model["batch_files"] as? [String], !batch.isEmpty,
+              let batch = model[list] as? [String], !batch.isEmpty,
               ModelManifest.isSafeRepository(repository), ModelManifest.isHex(revision, length: 40)
         else { throw ModelDownloadError.invalidManifest }
         var byName: [String: [String: Any]] = [:]

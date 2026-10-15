@@ -36,7 +36,8 @@ App, history and controller (macOS):
 ```sh
 swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-check && /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check && /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check && /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check && /tmp/dictation-controller-check
+swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/check_recording.swift -o /tmp/murmur-recording-check && /tmp/murmur-recording-check
 ```
 
 Foundation-only modules (macOS or Linux):
@@ -44,6 +45,8 @@ Foundation-only modules (macOS or Linux):
 ```sh
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_modes.swift -o /tmp/murmur-modes-check && /tmp/murmur-modes-check
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/check_apple_cleanup.swift -o /tmp/murmur-apple-check && /tmp/murmur-apple-check
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift app/check_routes.swift -o /tmp/murmur-routes-check && /tmp/murmur-routes-check
 swiftc app/Cleanup.swift app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check && /tmp/murmur-providers-check
 python3 app/check_http.py
 swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check && /tmp/murmur-updates-check
@@ -57,6 +60,8 @@ Visual fixture (macOS, temporary storage, no capture or insertion):
 ```sh
 app/check_ui.sh
 app/check_ui.sh --light --compact --opaque
+app/check_ui.sh --paste-failed --bubble-only
+app/check_ui.sh --undo --bubble-only
 ```
 
 These commands come from [app/README.md](app/README.md), which lists every fixture flag and is the source of truth if they drift. Spike and model checks are in `spike/README.md` and `module-one/*/README.md`. [Certain]

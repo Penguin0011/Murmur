@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import AppKit
 import ApplicationServices
+import AVFoundation
 
 @main struct ControllerChecks {
     static func main() throws {
@@ -65,6 +66,20 @@ import ApplicationServices
         precondition(!AppController.settlesEarly(pending: true, changedAt: 10, now: 11.9))
         precondition(AppController.settlesEarly(pending: true, changedAt: 10, now: 12))
         precondition(!AppController.settlesEarly(pending: false, changedAt: 10, now: 30), "rejected or already settled reading waits for the window")
+        // Undo (gap #18) keeps a canceled recording as 16 kHz mono samples.
+        let undoAudio = FileManager.default.temporaryDirectory.appendingPathComponent("murmur-undo-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: undoAudio) }
+        do {
+            let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+            let file = try AVAudioFile(forWriting: undoAudio, settings: format.settings)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000)!; buffer.frameLength = 48_000
+            for i in 0..<48_000 { buffer.floatChannelData![0][i] = sin(Float(i) * 0.05) * 0.5 }
+            try file.write(from: buffer)
+        }
+        let held = AppController.samples16k(undoAudio) ?? []
+        // The resampler drops under 20 ms at the edges, well inside the 0.4 s release tail.
+        precondition(abs(held.count - 16_000) < 500 && held.contains { abs($0) > 0.3 }, "a second at 48 kHz becomes about 16,000 samples")
+        precondition(AppController.samples16k(URL(fileURLWithPath: "/nonexistent.wav")) == nil, "an unreadable file holds nothing")
         print("Controller probe ownership checks passed (multi-buffer copy, private mode, original preserved, failed-copy cleanup).")
     }
     @MainActor static func checkDismissal() throws {
@@ -104,14 +119,26 @@ import ApplicationServices
         controller.lastDictationText = entry.finalText
         for status in [InsertionResult.Status.verified, .unverified] {
             controller.setPhase("Processing", "Processing synthetic dictation")
-            controller.showInsertionResult(InsertionResult(status: status, detail: "synthetic", snapshot: nil))
+            controller.showInsertionResult(InsertionResult(status: status, detail: "synthetic", snapshot: nil), entryID: entry.id, text: entry.finalText)
+            precondition(controller.pasteFailure == nil, "a posted paste shows no card")
             precondition(controller.phase == "Ready" && !controller.hasStatusToShow, "posted pastes finish quietly regardless of read-back")
             precondition(controller.lastDictationText == entry.finalText, "paste-last remains available after delivery")
             precondition(SettingsView.statusLabel(status.rawValue) == nil && SettingsView.statusNote(status.rawValue) == nil)
             precondition(!SettingsView.needsAttention(status.rawValue), "unreadable fields do not trigger the attention filter")
         }
-        controller.showInsertionResult(InsertionResult(status: .failed, detail: "synthetic", snapshot: nil))
+        controller.showInsertionResult(InsertionResult(status: .failed, detail: "synthetic", snapshot: nil), entryID: entry.id, text: entry.finalText)
         precondition(controller.phase == "Error" && controller.message.contains("⌃⌘V") && controller.lastDictationText == entry.finalText)
+        precondition(controller.pasteFailure == AppController.PasteFailure(entryID: entry.id, text: entry.finalText), "a failed paste shows the text card (gap #17)")
+        precondition(controller.pasteFailure?.title == "Couldn’t paste here", "a failed paste (app quit, focus moved, secure field, Secure Input) is titled as a failure")
+        controller.setPhase("Error", "Another failure")
+        precondition(controller.pasteFailure == nil, "any later status replaces the card")
+        // Paths where Murmur deliberately did not paste also show the card (follow-up, Oct 15, 2026).
+        controller.showNotPasted(.insertionOff, saved: "Saved.", entryID: entry.id, text: entry.finalText)
+        precondition(controller.phase == "Saved" && controller.message.contains("⌃⌘V") && controller.pasteFailure == AppController.PasteFailure(entryID: entry.id, text: entry.finalText, title: "Saved, not pasted"), "insertion off: Saved, with the card")
+        controller.showNotPasted(.unsaved, saved: "Saved.", entryID: entry.id, text: entry.finalText)
+        precondition(controller.phase == "Error" && controller.pasteFailure?.text == entry.finalText && controller.message.contains("nothing was pasted"), "text that could not be saved first: not pasted, with the card")
+        controller.showInsertionResult(InsertionResult(status: .unverified, detail: "clipboard paste into an unreadable field", snapshot: nil), entryID: entry.id, text: entry.finalText)
+        precondition(controller.pasteFailure == nil && controller.phase == "Ready", "an unconfirmed paste (Electron, no readable field) stays quiet")
         precondition(SettingsView.needsAttention("failed") && SettingsView.statusLabel("failed") == "Not inserted")
         precondition(SettingsView.needsAttention("insertion-pending") && SettingsView.statusLabel("insertion-pending") == "Saved")
         precondition(SettingsView.statusNote("insertion-pending")?.contains("avoid a duplicate") == true)
@@ -211,6 +238,50 @@ import ApplicationServices
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
         try warmRunnerChecks()
         try chunkChecks()
+        try liveStreamChecks()
+    }
+
+    /// Live words (gap #13) with fake helpers: text reaches the app, closing stdin ends a helper,
+    /// and one that never reads neither blocks capture nor outlives stop() by more than its watchdog.
+    @MainActor static func liveStreamChecks() throws {
+        signal(SIGPIPE, SIG_IGN)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("live-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func script(_ name: String, _ body: String) throws -> URL {
+            let url = dir.appendingPathComponent(name)
+            try ("#!/bin/sh\n" + body).write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+            return url
+        }
+        func helpers() -> Int32 {
+            let ps = Process(); ps.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep"); ps.arguments = ["-f", dir.path]
+            ps.standardOutput = FileHandle.nullDevice; try? ps.run(); ps.waitUntilExit(); return ps.terminationStatus
+        }
+        func pump(_ seconds: Double, until: () -> Bool = { false }) {
+            let end = Date().addingTimeInterval(seconds)
+            while Date() < end && !until() { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        }
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!; buffer.frameLength = 1024
+        var text = ""
+        let reader = try script("reader", "echo '{\"partial\":\"Synthetic words\"}'\ncat > /dev/null\n")
+        guard let stream = LiveStream(helper: reader, folder: dir, sampleRate: 48_000, onText: { text = $0 }) else { preconditionFailure("live helper starts") }
+        for _ in 0..<20 { stream.feed(buffer) }
+        pump(3) { text == "Synthetic words" }
+        precondition(text == "Synthetic words", "the helper's partial text reaches the app")
+        stream.stop(); stream.stop()
+        pump(1.5) { helpers() != 0 }
+        precondition(helpers() != 0, "closing stdin ends a reading helper")
+        let stuck = try script("stuck", "sleep 30\n")
+        guard let blocked = LiveStream(helper: stuck, folder: dir, sampleRate: 48_000, onText: { _ in }) else { preconditionFailure("stuck helper starts") }
+        let fed = Date()
+        for _ in 0..<2_000 { blocked.feed(buffer) }
+        precondition(Date().timeIntervalSince(fed) < 0.5, "feeding a helper that never reads does not block capture")
+        blocked.stop()
+        pump(3) { helpers() != 0 }
+        precondition(helpers() != 0, "a helper that never reads is terminated within the watchdog")
+        print("Live words checks passed (text, exit on stdin close, no blocking, watchdog).")
     }
 
     /// A fake helper speaks the --serve protocol: ready line, one answer per path, "die" exits.

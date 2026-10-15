@@ -62,12 +62,12 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 
 | # | Gap | BetterWispr | Murmur today | Plan | PRD impact | Size | W |
 |---|---|---|---|---|---|---|---|
-| 13 | Live words while speaking | Parakeet preview in the capsule (confirmed words bright, guess dimmed) | Waveform only; streaming is researched in `STREAMING_TRANSCRIPTION.md` | Use FluidAudio's `StreamingUnifiedAsrManager` for display only; the final text stays a whole-clip transcription | None | M | W5 |
-| 14 | Custom shortcut | Records any combination with ⌘, ⌥ or ⌃, or an F-key | Three presets | Shortcut recorder with validation; keep the presets as defaults | None | S | W5 |
-| 15 | Start/stop sounds | Local system sounds, on by default, with a toggle | None | Two `NSSound` cues plus a toggle | None | S | W5 |
-| 16 | Bluetooth headset mic | Automatic uses the built-in mic while the lid is open, so AirPods keep full playback quality | Uses the system default | "Automatic" device option with that rule; follows device changes mid-recording | None | S | W5 |
-| 17 | Paste-failure card | Card with the text and a Copy button when the target app is gone | History recovery plus ⌃⌘V | Bubble card with Copy | None | S | W5 |
-| 18 | Cancel with Undo | A cancelled dictation can be restored for a few seconds | Escape discards | Keep the audio for 5 s after cancel; Undo transcribes it | None (audio is in memory only) | S | W5 |
+| 13 | ✅ Done (W5, Oct 15) — Live words while speaking | Parakeet preview in the capsule (confirmed words bright, guess dimmed) | Waveform only; streaming is researched in `STREAMING_TRANSCRIPTION.md` | Approved by the user, Oct 15. A short-lived `ModelBench --stream` helper runs only while recording, fed over a pipe, never disk; two lines in the bubble, last word dimmed; display only. Optional 609 MB pinned download; adds about 0.3–0.6 GB wired memory while recording (up to 1.2 GB measured in one process), released when the helper exits | None | M | W5 |
+| 14 | ✅ Done (W5, Oct 15) — Custom shortcut | Records any combination with ⌘, ⌥ or ⌃, or an F-key | Three presets | Settings → General recorder: one key with ⌘, ⌥ or ⌃, or an F-key; refuses Escape, modifier keys, plain typing keys, ⌘ chords, ⌃⌘C/⌃⌘V and macOS chords with a reason; presets stay; Reset returns to Right Option | None | S | W5 |
+| 15 | ✅ Done (W5, Oct 15) — Start/stop sounds | Local system sounds, on by default, with a toggle | None | Tink at start, Pop at stop or a user cancel, none on insertion; toggle on by default | None | S | W5 |
+| 16 | ✅ Done (W5, Oct 15) — Bluetooth headset mic | Automatic uses the built-in mic while the lid is open, so AirPods keep full playback quality | Uses the system default | "Automatic" microphone option; a device change mid-recording restarts capture on the new device into the same file | Amends the PRD §3 disconnection rule (decision, Oct 15) | S | W5 |
+| 17 | ✅ Done (W5, Oct 15) — Paste-failure card | Card with the text and a Copy button when the target app is gone | History recovery plus ⌃⌘V | Bubble card with the text and Copy for 30 s; History and ⌃⌘V unchanged | None | S | W5 |
+| 18 | ✅ Done (W5, Oct 15) — Cancel with Undo | A cancelled dictation can be restored for a few seconds | Escape discards | After Escape or Cancel Recording, 16 kHz samples stay in memory for 5 s; Undo transcribes and inserts them as normal | Amends PRD §3 "do not insert canceled speech" (decision, Oct 15) | S | W5 |
 
 ### Product surfaces
 
@@ -95,7 +95,7 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 1. **W1, cleanup rules (#2–5), done October 14, 2026:** the "Spoken commands and numbers" option (`RuleCleaner.spokenCommands`, the `CleanupGuard` second pass, prompt lines). See the PRD decision of the same date. Was pure `Cleanup.swift` work, so it has the fewest dependencies. Ship it first so W2 and W3 build on the new guard rules.
 2. **W2, Apple Intelligence cleanup (#1)** and **W4, learning (#9, #10, #12):** #11 waits for a decision. These run in parallel with W1. W2 adds a new cleaner file and its route. W4 touches `Learning.swift`, `Controller.swift` (watch loop) and the History UI.
 3. **W3, modes, tone and screen context (#6–8), done October 14, 2026:** `WritingMode` and `DictationStyle` in `Processing.swift`, `Tone` and `ScreenContext` in `Cleanup.swift`, Settings → Modes. See the three PRD decisions of the same date. Built alongside W2 rather than after it; see the PR for the integration points.
-4. **W5, recording experience (#13–18)** and **W6, Home/Insights (#19–21):** independent of the cleanup work, but they share `UI.swift` and `Controller.swift`, so run them one after the other or carefully split by file.
+4. **W5, recording experience (#13–18)**, done October 15, 2026 (see the PRD decision of the same date). **W6, Home/Insights (#19–21):** independent of the cleanup work, but they share `UI.swift` and `Controller.swift`, so run them one after the other or carefully split by file.
 5. **W7, meetings (#22–24):** PRD section first, then the build. It is the largest piece; start it once the dictation gaps are closed or have their own owners.
 
 Every workstream keeps the PRD's evidence rules: `check_*.swift` coverage, corpus thresholds for cleanup changes, and a documented decision for any rule it amends.
