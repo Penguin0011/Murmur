@@ -75,6 +75,8 @@ final class Source {
     private var index = 0, samples: [Float] = [], offset = 0
     private(set) var produced = 0.0
     private(set) var reference: [String] = []
+    /// The clips used, in order, for the whole-clip baseline.
+    private(set) var used: [Clip] = []
     init(_ clips: [Clip], bench: URL, minutes: Double) { self.clips = clips; self.bench = bench; limit = minutes * 60 }
     func next() -> AVAudioPCMBuffer? {
         while offset >= samples.count {
@@ -83,7 +85,7 @@ final class Source {
             guard let file = try? AVAudioFile(forReading: bench.appendingPathComponent(clip.audio), commonFormat: .pcmFormatFloat32, interleaved: false),
                   let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)), (try? file.read(into: buffer)) != nil else { continue }
             samples = Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength))) + [Float](repeating: 0, count: 12_800)
-            offset = 0; reference += words(clip.reference); produced += Double(samples.count) / 16_000
+            offset = 0; reference += words(clip.reference); used.append(clip); produced += Double(samples.count) / 16_000
         }
         let n = min(1600, samples.count - offset)
         let buffer = AVAudioPCMBuffer(pcmFormat: SystemAudioTap.format, frameCapacity: 1600)!; buffer.frameLength = AVAudioFrameCount(n)
@@ -139,10 +141,14 @@ final class Source {
         let cpuStart = (cpuSeconds(getpid()), cpuSeconds(helper.pid))
         var i = 0
         while true {
-            let a = me.next(), b = them.next()
-            if a == nil && b == nil { break }
-            if let a { meChunker.append(a) }
-            if let b { themChunker.append(b) }
+            // The app's capture runs on dispatch queues, which drain autorelease pools; this loop must too.
+            let more: Bool = autoreleasepool {
+                let a = me.next(), b = them.next()
+                if let a { meChunker.append(a) }
+                if let b { themChunker.append(b) }
+                return a != nil || b != nil
+            }
+            if !more { break }
             i += 1
             let audio = Double(i) * 0.1
             if audio.truncatingRemainder(dividingBy: 60) < 0.05 {
@@ -166,12 +172,23 @@ final class Source {
             let hypothesis = meeting.lines.filter { $0.stream == stream }.flatMap { words($0.text) }
             return Double(editDistance(reference, hypothesis)) / Double(max(1, reference.count)) * 100
         }
+        // Baseline: the same clips, each transcribed whole by the same helper.
+        var whole: [String: [String]] = [:]
+        for clip in Set((me.used + them.used).map(\.id)).compactMap({ id in clips.first { $0.id == id } }) {
+            let done = DispatchSemaphore(value: 0)
+            helper.transcribe(bench.appendingPathComponent(clip.audio)) { text in whole[clip.id] = words(text ?? ""); done.signal() }
+            done.wait()
+        }
+        func baselineWER(_ source: Source) -> Double {
+            Double(editDistance(source.reference, source.used.flatMap { whole[$0.id] ?? [] })) / Double(max(1, source.reference.count)) * 100
+        }
         let sortedLags = lags.sorted()
         func pct(_ values: [Double], _ p: Double) -> Double { values.isEmpty ? 0 : values[min(values.count - 1, Int(Double(values.count) * p))] }
         print(String(format: "audio: %.1f min per stream, speed %.0fx, wall %.1f s, lines %d, failed chunks %d", minutes, speed, wall, meeting.lines.count, failed))
-        print(String(format: "WER chunked: Me %.2f%%, Them %.2f%% (LibriSpeech test-clean references)", wer(.me, me.reference), wer(.them, them.reference)))
+        print(String(format: "WER chunked: Me %.2f%%, Them %.2f%%; same clips whole: Me %.2f%%, Them %.2f%% (LibriSpeech test-clean, %d reference words per stream)",
+                     wer(.me, me.reference), wer(.them, them.reference), baselineWER(me), baselineWER(them), me.reference.count))
         print(String(format: "CPU: harness %.1f s, helper %.1f s for %.1f min of two-stream meeting (%.1f%% of one core at 1x)",
-                     cpu.0, cpu.1, minutes, cpu.0 + cpu.1, (cpu.0 + cpu.1) / (minutes * 60) * 100))
+                     cpu.0, cpu.1, minutes, (cpu.0 + cpu.1) / (minutes * 60) * 100))
         if speed == 1 { print(String(format: "lag after chunk end: median %.1f s, p90 %.1f s, max %.1f s", pct(sortedLags, 0.5), pct(sortedLags, 0.9), sortedLags.last ?? 0)) }
         print(String(format: "max backlog %.1f s of audio", maxBacklog))
         print(String(format: "dictation alone: median %.3f s; during meeting: median %.3f s, max %.3f s (n=%d)",

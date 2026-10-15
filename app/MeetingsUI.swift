@@ -141,7 +141,7 @@ struct MeetingsPage: View {
                 mono("\(MeetingExport.clock(meeting.seconds)) · \(meeting.source.micOnly ? "My microphone only" : "Me and \(meeting.source.name)")", size: 11, color: Palette.ink70)
                 HStack(spacing: 12) {
                     Button("Copy Transcript") { recorder.copyTranscript(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
-                    Button("Save as Markdown…") { recorder.saveMarkdown(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
+                    Button("Save Markdown…") { recorder.saveMarkdown(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
                     Spacer()
                     Button("Delete…") { confirmDelete = meeting }.buttonStyle(InkButtonStyle(kind: .plain))
                 }
@@ -167,8 +167,10 @@ struct MeetingsPage: View {
                 }
                 .padding(.top, 6)
                 if meeting.lines.isEmpty { lede("No words were transcribed.") }
-                ForEach(meeting.lines.filter { showEcho || !$0.isHidden }) { line in
-                    MeetingLineRow(line: line, showEcho: showEcho)
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(meeting.lines.filter { showEcho || !$0.isHidden }) { line in
+                        MeetingLineRow(line: line, showEcho: showEcho)
+                    }
                 }
             }
             .padding(24).frame(maxWidth: .infinity, alignment: .leading)
@@ -326,6 +328,8 @@ private final class MeetingPanel: NSPanel {
     private var collapsed = false
 
     init(recorder: MeetingRecorder) { self.recorder = recorder }
+    /// The panel's content, for the UI fixture's snapshot.
+    var view: NSView? { panel?.contentView }
 
     func update() {
         guard recorder.live != nil else {

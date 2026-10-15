@@ -344,25 +344,26 @@ struct SettingsView: View {
 
     // MARK: Header
 
-    /// Four tabs leave no room for the route label at the 760-point minimum width; it drops first.
+    /// Five tabs leave no room for the route label at the 760-point minimum width; it drops first,
+    /// then the tabs tighten. Labels never wrap, so ViewThatFits can tell when a row does not fit.
     private var header: some View {
-        ViewThatFits(in: .horizontal) { headerRow(showRoute: true); headerRow(showRoute: false) }
+        ViewThatFits(in: .horizontal) { headerRow(showRoute: true); headerRow(showRoute: false); headerRow(showRoute: false, tight: true) }
             .padding(.horizontal, 24).frame(height: 64)
             .overlay(alignment: .bottom) { rule }
     }
 
-    private func headerRow(showRoute: Bool) -> some View {
-        HStack(spacing: 32) {
+    private func headerRow(showRoute: Bool, tight: Bool = false) -> some View {
+        HStack(spacing: tight ? 16 : 32) {
             HStack(spacing: 12) {
                 Logo.mark(size: 32)
                 wordmark("Murmur", size: 24)
             }
-            HStack(spacing: 4) {
-                tab("Home", .home, count: nil)
-                tab("Insights", .insights, count: nil)
-                tab("Meetings", .meetings, count: nil)
-                tab("History", .history, count: controller.history.count)
-                tab("Settings", .settings, count: nil)
+            HStack(spacing: tight ? 0 : 4) {
+                tab("Home", .home, count: nil, tight: tight)
+                tab("Insights", .insights, count: nil, tight: tight)
+                tab("Meetings", .meetings, count: nil, tight: tight)
+                tab("History", .history, count: controller.history.count, tight: tight)
+                tab("Settings", .settings, count: nil, tight: tight)
             }
             Spacer()
             HStack(spacing: 16) {
@@ -376,13 +377,14 @@ struct SettingsView: View {
         }
     }
 
-    private func tab(_ title: String, _ target: Screen, count: Int?) -> some View {
+    private func tab(_ title: String, _ target: Screen, count: Int?, tight: Bool = false) -> some View {
         Button { screen = target } label: {
             HStack(spacing: 6) {
-                mono(title, size: 13)
-                if let count { mono("\(count)", size: 13, color: Palette.ink64) }
+                mono(title, size: tight ? 12 : 13)
+                if let count { mono("\(count)", size: tight ? 12 : 13, color: Palette.ink64) }
             }
-            .padding(.horizontal, 14).frame(height: 44)
+            .lineLimit(1).fixedSize()
+            .padding(.horizontal, tight ? 9 : 14).frame(height: 44)
             .overlay(alignment: .bottom) { Rectangle().fill(screen == target ? Palette.accent : Color.clear).frame(height: 2) }
             .contentShape(Rectangle())
         }

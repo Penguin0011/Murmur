@@ -153,7 +153,7 @@ import SwiftUI
             // --snapshot PATH renders the window offscreen to a PNG and quits; works with the screen locked.
             if let flag = args.firstIndex(of: "--snapshot"), args.indices.contains(flag + 1) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    if let view = window.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    if let view = args.contains("--meeting-live") ? fixtureMeetingPanel?.view : window.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                         view.cacheDisplay(in: view.bounds, to: image)
                         try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: args[flag + 1]))
                     }
