@@ -696,7 +696,7 @@ final class PreStart: @unchecked Sendable {
         removeShortcut()
         guard sessionAvailable else { return }
         guard CGPreflightListenEventAccess() else { message = "Allow Input Monitoring, then click Refresh Permissions to enable the shortcut."; return }
-        let binding: ShortcutBinding = shortcut == "fn" ? .fn : shortcut == "ctrl-option-space" ? .controlOptionSpace : .rightOption
+        let binding = ShortcutBinding(stored: shortcut)
         let token = shortcutGeneration
         let next = ShortcutListener(binding: binding, processingSeconds: 0, onAction: { [weak self] action, done in
             guard let self, self.shortcutGeneration == token else { done(); return }
@@ -744,6 +744,22 @@ final class PreStart: @unchecked Sendable {
     /// False only for the plain idle hint; failures that leave the phase at Ready still show.
     var hasStatusToShow: Bool { phase != "Ready" || !Self.idleMessages.contains(message) }
     private var listeningMessage: String { "Listening… \(listener?.pressToToggle == true ? "Release or press the shortcut again" : "Release") to finish, or press Escape to cancel." }
+    /// The shortcut recorder needs the keys itself: the tap would swallow the current chord, and
+    /// pressing it would start a dictation. `resume` restores the tap with whatever is saved.
+    func pauseShortcutForRecorder() -> Bool {
+        guard !isBusy else { message = "Finish the current dictation before recording a shortcut."; return false }
+        removeShortcut(); return true
+    }
+    func resumeShortcutAfterRecorder() { if !preview && listener == nil { configureShortcut() } }
+    /// What Settings and the setup screen call the shortcut.
+    var shortcutName: String {
+        switch ShortcutBinding(stored: shortcut) {
+        case .rightOption: return "Right Option"
+        case .fn: return "Fn / Globe"
+        case .controlOptionSpace: return "Control–Option–Space"
+        case .custom(let custom): return custom.label
+        }
+    }
     private func removeShortcut() {
         shortcutGeneration = UUID()
         tapThread?.stop(); tapThread = nil

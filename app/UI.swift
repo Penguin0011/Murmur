@@ -434,6 +434,7 @@ struct SettingsView: View {
             eyebrow("Shortcut").padding(.top, 20)
             VStack(alignment: .leading, spacing: 12) {
                 segmented([("right-option", "Right Option"), ("fn", "Fn / Globe"), ("ctrl-option-space", "Control–Option–Space")], $controller.shortcut)
+                ShortcutRecorder(controller: controller)
                 help(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop, or hold it and release. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
             }
             .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
@@ -1232,9 +1233,7 @@ struct SettingsView: View {
 
     // MARK: First run
 
-    private var shortcutName: String {
-        ["right-option": "Right Option", "fn": "Fn / Globe", "ctrl-option-space": "Control–Option–Space"][controller.shortcut] ?? "your shortcut"
-    }
+    private var shortcutName: String { controller.shortcutName }
 
     /// The PRD's first-run test dictation and the faithful-transcription choice.
     private var tryIt: some View {
@@ -1355,6 +1354,58 @@ private struct SettingInfoButton: View {
             Text(text).font(.system(size: 14)).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 .padding(16).frame(width: 300, alignment: .leading)
         }
+    }
+}
+
+/// Records a custom shortcut (gap #14). While it waits, the global tap is off so the current
+/// shortcut can't start a dictation or be swallowed. Escape stops waiting; a refused key says why.
+private struct ShortcutRecorder: View {
+    @ObservedObject var controller: AppController
+    @State private var monitor: Any?
+    @State private var refusal: String?
+    private var custom: CustomShortcut? { if case .custom(let shortcut) = ShortcutBinding(stored: controller.shortcut) { return shortcut }; return nil }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text(monitor != nil ? "Press the keys…" : custom.map { "Custom: \($0.label)" } ?? "Or record your own")
+                    .font(.system(size: 14, weight: .medium)).accessibilityAddTraits(.updatesFrequently)
+                Spacer(minLength: 8)
+                Button(monitor != nil ? "Stop" : "Record Shortcut…") { monitor != nil ? stop() : start() }.buttonStyle(InkButtonStyle(kind: .outline))
+                if custom != nil && monitor == nil {
+                    Button("Reset") { refusal = nil; controller.shortcut = "right-option" }.buttonStyle(InkButtonStyle(kind: .outline))
+                }
+            }
+            if let refusal { Text(refusal).font(.system(size: 13)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            else if monitor != nil {
+                Text("Use ⌘, ⌥ or ⌃ with a key, or an F-key. Built-in F1–F12 work only with fn held or with “Use F1, F2, etc. keys as standard function keys” on. Escape stops.")
+                    .font(.system(size: 13)).foregroundStyle(Palette.ink70).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onDisappear { stop() }
+    }
+    private func start() {
+        guard monitor == nil, controller.pauseShortcutForRecorder() else { return }
+        refusal = nil
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = (event.cgEvent?.flags ?? []).intersection(CustomShortcut.relevant)
+            let code = Int64(event.keyCode)
+            if code == 53 && flags.isEmpty { stop(); return nil }
+            if let reason = CustomShortcut.refusal(keyCode: code, modifiers: flags) { refusal = reason; return nil }
+            controller.shortcut = CustomShortcut(keyCode: code, modifiers: flags, key: Self.keyName(event)).stored
+            refusal = nil; stop(); return nil
+        }
+    }
+    private func stop() {
+        guard let monitor else { return }
+        NSEvent.removeMonitor(monitor); self.monitor = nil
+        controller.resumeShortcutAfterRecorder()
+    }
+    private static let named: [UInt16: String] = [49: "Space", 36: "Return", 48: "Tab", 51: "Delete", 117: "Forward Delete", 123: "←", 124: "→", 125: "↓", 126: "↑",
+        115: "Home", 119: "End", 116: "Page Up", 121: "Page Down", 122: "F1", 120: "F2", 99: "F3", 118: "F4", 96: "F5", 97: "F6", 98: "F7", 100: "F8",
+        101: "F9", 109: "F10", 103: "F11", 111: "F12", 105: "F13", 107: "F14", 113: "F15", 106: "F16", 64: "F17", 79: "F18", 80: "F19", 90: "F20"]
+    static func keyName(_ event: NSEvent) -> String {
+        // Control characters (keypad Enter, Clear) have no printable name; CustomShortcut falls back to the key code.
+        named[event.keyCode] ?? (event.charactersIgnoringModifiers ?? "").uppercased().filter { !$0.isWhitespace && !($0.asciiValue.map { $0 < 32 || $0 == 127 } ?? false) }
     }
 }
 
