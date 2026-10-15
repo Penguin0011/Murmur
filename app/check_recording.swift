@@ -12,9 +12,28 @@ import AVFoundation
 
     static func main() {
         shortcutChecks()
+        buttonStartChecks()
         undoChecks()
         microphoneChecks()
         print("Recording checks passed (shortcut validation and custom binding; cancel-undo window, discard and session hook; Automatic microphone rule).")
+    }
+
+    /// Home's Start button (gap #19): a latched start the next shortcut press finishes.
+    static func buttonStartChecks() {
+        var machine = ShortcutMachine()
+        check(machine.startToggled() == .start && machine.state == .listening, "button start listens")
+        check(machine.startToggled() == nil, "a second button start does nothing")
+        check(machine.release(at: 1) == nil, "a stray release does not finish it")
+        check(machine.press(at: 2) == .finish && machine.state == .processing, "the next press finishes it")
+        check(machine.release(at: 2.1) == nil, "that press's release does nothing")
+        check(machine.startToggled() == nil, "no start while processing")
+        machine.processingFinished()
+        check(machine.startToggled() == .start && machine.finish() == .finish, "Finish ends a button start")
+        machine.processingFinished()
+        _ = machine.press(at: 5)
+        check(machine.startToggled() == nil, "no button start while a key is down")
+        var cancelled = ShortcutMachine(); _ = cancelled.startToggled()
+        check(cancelled.cancel() == .cancel && cancelled.state == .idle, "Escape cancels a button start")
     }
 
     static func shortcutChecks() {

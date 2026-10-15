@@ -12,9 +12,11 @@ import SwiftUI
     var window: NSWindow?
     var statusItem: NSStatusItem?
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(controller.showInDock ? .regular : .accessory)
         let mainMenu = NSMenu()
         let appItem = NSMenuItem(); let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Welcome Guide…", action: #selector(openGuide), keyEquivalent: "").target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Murmur", action: #selector(quit), keyEquivalent: "q").target = self
         appItem.submenu = appMenu; mainMenu.addItem(appItem); mainMenu.addItem(standardEditMenuItem()); NSApp.mainMenu = mainMenu
         controller.openSettings = { [weak self] in self?.showWindow() }
@@ -46,12 +48,19 @@ import SwiftUI
         NSApp.activate(ignoringOtherApps: true); window?.makeKeyAndOrderFront(nil); controller.refreshPermissions(); controller.refreshHistory()
     }
     func refreshMenu() {
+        // Show in Dock (gap #20) applies at once. Leaving the Dock can drop the window behind others.
+        let policy: NSApplication.ActivationPolicy = controller.showInDock ? .regular : .accessory
+        if NSApp.activationPolicy() != policy {
+            NSApp.setActivationPolicy(policy)
+            if window?.isVisible == true { NSApp.activate(ignoringOtherApps: true); window?.makeKeyAndOrderFront(nil) }
+        }
         if !controller.showMenuBar { if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }; statusItem = nil; return }
         if statusItem == nil { statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength); statusItem?.button?.image = Logo.menuBarImage }
         let menu = NSMenu()
         let state = NSMenuItem(title: controller.phase, action: nil, keyEquivalent: ""); state.isEnabled = false; menu.addItem(state)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings and History…", action: #selector(openSettings), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Welcome Guide…", action: #selector(openGuide), keyEquivalent: "").target = self
         menu.addItem(withTitle: UpdateText.menuTitle(controller.availableRelease), action: #selector(checkForUpdates), keyEquivalent: "").target = self
         if controller.phase == "Listening" {
             menu.addItem(withTitle: "Finish Dictation", action: #selector(finish), keyEquivalent: "").target = self
@@ -64,6 +73,8 @@ import SwiftUI
         statusItem?.menu = menu
     }
     @objc func openSettings() { showWindow() }
+    /// Replays the welcome guide from its first step (gap #21).
+    @objc func openGuide() { controller.screenRequest = "guide"; showWindow() }
     /// Results appear quietly in Settings; a known release is shown there with its page link.
     @objc func checkForUpdates() { if controller.availableRelease == nil { controller.checkForUpdates() }; showWindow() }
     @objc func finish() { controller.stopRecording() }

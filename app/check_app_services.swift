@@ -274,10 +274,40 @@ func checkLiveWordsSplit() {
     check(!LiveWordsFacts.explanation.isEmpty && LiveWordsFacts.directory(home: URL(fileURLWithPath: "/Users/x")).path.hasSuffix("unified-d32e972-live"), "live folder beside the batch model, not inside it")
 }
 
+/// Welcome guide (gap #21): resume at the saved step, version-stamped completion.
+func checkWelcomeGuide() {
+    let defaults = UserDefaults(suiteName: "murmur-guide-check-\(UUID())")!
+    check(WelcomeGuide.opensAtLaunch(defaults, alreadySetUp: false) && WelcomeGuide.resumeStep(defaults) == .microphone, "a new install opens the guide at the start")
+    WelcomeGuide.save(.model, defaults)
+    check(WelcomeGuide.resumeStep(defaults) == .model, "quitting mid-guide resumes at the same step")
+    check(WelcomeGuide.opensAtLaunch(defaults, alreadySetUp: true), "permissions granted mid-guide still reopen it until it is finished")
+    defaults.set(42, forKey: WelcomeGuide.stepKey)
+    check(WelcomeGuide.resumeStep(defaults) == .tryIt, "a step past the end clamps to the last")
+    defaults.set(-3, forKey: WelcomeGuide.stepKey)
+    check(WelcomeGuide.resumeStep(defaults) == .microphone, "a negative step clamps to the first")
+    WelcomeGuide.complete(defaults)
+    check(!WelcomeGuide.opensAtLaunch(defaults, alreadySetUp: false) && defaults.integer(forKey: WelcomeGuide.completedKey) == WelcomeGuide.version, "finishing records the version")
+    check(WelcomeGuide.resumeStep(defaults) == .microphone, "finishing clears the step")
+    // A later guide version shows it again to everyone who finished an older one.
+    defaults.set(WelcomeGuide.version - 1, forKey: WelcomeGuide.completedKey)
+    check(WelcomeGuide.opensAtLaunch(defaults, alreadySetUp: true), "a newer guide version reopens it")
+    WelcomeGuide.complete(defaults)
+    WelcomeGuide.save(.inputMonitoring, defaults); WelcomeGuide.replay(defaults)
+    check(WelcomeGuide.resumeStep(defaults) == .microphone && !WelcomeGuide.opensAtLaunch(defaults, alreadySetUp: false), "replay starts over and keeps completion")
+    // Installs from before the guide: set up already means version 1 was seen.
+    let upgraded = UserDefaults(suiteName: "murmur-guide-upgrade-\(UUID())")!
+    check(!WelcomeGuide.opensAtLaunch(upgraded, alreadySetUp: true), "an existing set-up install skips the guide")
+    WelcomeGuide.save(.microphone, upgraded)
+    check(!WelcomeGuide.opensAtLaunch(upgraded, alreadySetUp: true), "the upgrade default survives a saved step")
+    let notSetUp = UserDefaults(suiteName: "murmur-guide-new-\(UUID())")!
+    check(WelcomeGuide.opensAtLaunch(notSetUp, alreadySetUp: false), "an existing install that is not set up sees it")
+}
+
 @main struct AppServicesChecks {
     static func main() async throws {
         checkModelRow()
         checkLiveWordsSplit()
+        checkWelcomeGuide()
         try checkHistoryRouter()
         checkExpiryAndText()
         try checkWipe()

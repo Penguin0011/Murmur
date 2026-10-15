@@ -315,6 +315,11 @@ final class PreStart: @unchecked Sendable {
     @Published var shortcut: String
     @Published var voiceLevel = 0.0
     @Published var showMenuBar: Bool
+    /// A Dock icon (gap #20); off by default, as in PRD R6. Applies as soon as it changes.
+    @Published var showInDock: Bool
+    /// A screen the window should switch to ("guide", "insights", "settings"), set from a menu item or
+    /// the UI fixture. The window clears it once shown.
+    @Published var screenRequest: String?
     /// CoreAudio UID of the chosen microphone; empty means the system default.
     @Published var inputDeviceUID: String
     /// Connected microphones, cached: Settings re-renders with every voice-level tick.
@@ -397,6 +402,8 @@ final class PreStart: @unchecked Sendable {
     var setupShowing = false
     @Published var setupTestTranscript = ""
     @Published var sessionOnlyIDs: Set<String> = []
+    /// Home and Insights (gap #19), from the History kept on disk only.
+    @Published private(set) var insights: Insights = .empty
     var historySummary: String { HistoryText.summary(mode: appliedHistoryMode, count: history.count, sessionOnly: sessionOnlyIDs.count) }
     // Update checks (R12). Results are shown quietly in Settings only.
     @Published var updateChecksEnabled: Bool
@@ -549,6 +556,7 @@ final class PreStart: @unchecked Sendable {
         } else { liveWordsDownloader = nil }
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
+        showInDock = defaults.bool(forKey: "showInDock")
         let inputDevice = defaults.string(forKey: "inputDeviceUID") ?? ""
         inputDeviceUID = inputDevice; Capture.preferredInputUID = inputDevice.isEmpty ? nil : inputDevice
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
@@ -750,7 +758,7 @@ final class PreStart: @unchecked Sendable {
         appliedHistoryMode = historyMode; records?.persistsTranscripts = historyMode.persistsTranscripts
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
-        defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
+        defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(showInDock, forKey: "showInDock"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
         defaults.set(recordingSounds, forKey: "recordingSounds")
         defaults.set(liveWordsOnCloud, forKey: "liveWordsOnCloud")
         defaults.set(liveWords, forKey: "liveWords"); if liveWords { prepareLiveWords() }
@@ -1012,6 +1020,16 @@ final class PreStart: @unchecked Sendable {
         guard let capture else { return 0 }
         return capture.queue.sync { capture.level }
     }
+    /// Home's Start button (gap #19). Murmur hides first, so focus returns to the app you were in and
+    /// the text pastes at its cursor on release, as with the shortcut; the next press or Finish ends it.
+    func startDictationFromHome() {
+        guard let listener, listener.machine.state == .idle, !isBusy else { return }
+        NSApp.hide(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let listener = self?.listener else { return }
+            listener.emit(listener.machine.startToggled())
+        }
+    }
     func stopRecording() { guard let listener else { return }; listener.emit(listener.machine.finish()) }
     func cancelRecording() {
         if cloudRequest.isActive { cancelCloudRequest(); return }
@@ -1107,9 +1125,16 @@ final class PreStart: @unchecked Sendable {
         bubble.show(phase: phase, message: message, screen: destinationScreen)
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: announcement ?? message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
+    /// This dictation's recording length, kept with its History entry for Insights (gap #19).
+    private var sessionSeconds: Double?
+    nonisolated static func audioSeconds(_ url: URL) -> Double? {
+        guard let file = try? AVAudioFile(forReading: url), file.fileFormat.sampleRate > 0 else { return nil }
+        return Double(file.length) / file.fileFormat.sampleRate
+    }
     /// `held`: an undone cancel's samples (gap #18), in memory only. There is then no file: no chunks,
     /// no one-shot fallback and no retry audio.
     private func transcribe(_ audio: URL?, held: [Float]? = nil, done: @escaping () -> Void) {
+        sessionSeconds = held.map { Double($0.count) / 16_000 } ?? audio.flatMap(Self.audioSeconds)
         if let provider = sessionTranscriber { transcribeInCloud(audio, held: held, with: provider, done: done); return }
         setPhase("Processing", "Transcribing on this Mac…")
         let token = generation; let models = URL(fileURLWithPath: activeModelDirectory)
@@ -1253,6 +1278,8 @@ final class PreStart: @unchecked Sendable {
     /// Dictionary, then cleanup, for a transcript already saved to History. Local rules run here;
     /// any other cleanup route makes one provider call in a cancellable Task (no local fallback).
     private func deliver(_ savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, token: UUID, done: @escaping () -> Void) {
+        // Saved with the next write of this entry; no extra disk write before insertion.
+        var savedEntry = savedEntry; savedEntry.seconds = sessionSeconds
         recoveryEntryID = savedEntry.id
         // A trigger word beats the app or website matched at start; it is cut from the text, not from History's raw transcript.
         let trigger = WritingModes.trigger(writingModes, in: savedEntry.rawText)
@@ -1281,7 +1308,7 @@ final class PreStart: @unchecked Sendable {
             if case .heldForRecovery(_, let why) = outcome {
                 timingLog.notice("cleanup-held reason=\(why.rawValue, privacy: .public) provider-error=\(self.processing?.lastProviderError.map { Mirror(reflecting: $0).children.first?.label ?? "\($0)" } ?? "none", privacy: .public)")
             }
-            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "held-cleanup")
+            entry = entry.with(finalText: "", status: "held-cleanup")
             do { try store.save(entry); setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History. Press ⌃⌘C to copy it.") }
             catch { setPhase("Error", "Cleanup was held for review.\(reason) The raw transcript is in History; its status could not be saved.") }
             destination = nil; historySaved(); done(); return
@@ -1293,13 +1320,13 @@ final class PreStart: @unchecked Sendable {
         }
         // Only filler words were heard: keep the raw transcript, insert nothing, show no error.
         if processed.isEmpty {
-            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: "", insertionStatus: "saved-not-inserted", cleanupFallback: fallback, cleanupRejectedOutput: rejected)
+            entry = entry.with(finalText: "", status: "saved-not-inserted", fallback: fallback, rejected: rejected)
             try? store.save(entry)
             setPhase("Ready", "Only filler words were heard, so nothing was inserted.")
             destination = nil; historySaved(); done(); return
         }
         if processed != text || fallback != nil {
-            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: processed, insertionStatus: entry.insertionStatus, cleanupFallback: fallback, cleanupRejectedOutput: rejected)
+            entry = entry.with(finalText: processed, status: entry.insertionStatus, fallback: fallback, rejected: rejected)
             do { try store.save(entry) } catch { setPhase("Error", "Could not save the processed transcript. The raw transcript is in History."); destination = nil; historySaved(); done(); return }
         }
         // First-run test dictation: Murmur never types into itself, so show the result on the setup screen.
@@ -1315,7 +1342,7 @@ final class PreStart: @unchecked Sendable {
             let target = (try? captureFocus()).flatMap { $0.pid == getpid() ? nil : $0 }
             // Persist uncertainty before the one permitted delivery attempt.
             let insertionText = textWithLeadingSpace(processed, value: target?.value, selection: target?.selection, enabled: leadingSpaceThisSession)
-            entry = HistoryEntry(id: entry.id, recordedAt: entry.recordedAt, rawText: entry.rawText, finalText: insertionText, insertionStatus: "insertion-pending", cleanupFallback: fallback, cleanupRejectedOutput: rejected)
+            entry = entry.with(finalText: insertionText, status: "insertion-pending", fallback: fallback, rejected: rejected)
             var attempted = false
             do {
                 try store.save(entry)
@@ -1332,6 +1359,7 @@ final class PreStart: @unchecked Sendable {
                 if let app = target?.bundleID, !app.isEmpty { recentApps = [app] + recentApps.filter { $0 != app }.prefix(9) }
                 lastDictationText = entry.finalText
                 entry.insertionStatus = insertion.status.rawValue
+                if insertion.status != .failed { entry.app = target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
                 try store.save(entry)
                 watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
                 showInsertionResult(insertion, entryID: entry.id, text: entry.finalText)
@@ -1345,6 +1373,7 @@ final class PreStart: @unchecked Sendable {
                 else { showNotPasted(.unsaved, saved: saved, entryID: entry.id, text: processed) }
             }
         } else {
+            try? store.save(entry) // Records the recording length, which only later saves would carry.
             showNotPasted(.insertionOff, saved: saved, entryID: entry.id, text: processed)
         }
         destination = nil; historySaved(); done()
@@ -1431,6 +1460,10 @@ final class PreStart: @unchecked Sendable {
     func refreshHistory() {
         do { history = try records?.entries() ?? []; sessionOnlyIDs = records?.sessionOnlyIDs ?? [] }
         catch { message = "Could not read saved history." }
+        // Once per change, not per render: Settings re-renders with every voice-level tick.
+        insights = Insights.compute(history.filter { !sessionOnlyIDs.contains($0.id) }.map {
+            InsightsItem(recordedAt: $0.recordedAt, rawText: $0.rawText, finalText: $0.finalText, seconds: $0.seconds, app: $0.app)
+        }, historyOn: appliedHistoryMode == .on, now: Date(), calendar: .current)
     }
     func copyEntry(_ entry: HistoryEntry) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(entry.finalText, forType: .string) }
     /// The explicit raw-text action for held cleanup (and any entry whose final text differs).

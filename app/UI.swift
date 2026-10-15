@@ -118,20 +118,22 @@ private struct SquareToggleStyle: ToggleStyle {
     }
 }
 
+/// Light or Dark for this window only; nil follows the system.
 private struct WindowAppearance: NSViewRepresentable {
-    let dark: Bool
+    let name: NSAppearance.Name?
     func makeNSView(context: Context) -> NSView { NSView() }
     func updateNSView(_ view: NSView, context: Context) {
-        let name: NSAppearance.Name = dark ? .darkAqua : .aqua
         // The view joins its window after the first update.
-        DispatchQueue.main.async { view.window?.appearance = NSAppearance(named: name) }
+        DispatchQueue.main.async { view.window?.appearance = name.flatMap { NSAppearance(named: $0) } }
     }
 }
 
 struct SettingsView: View {
     @ObservedObject var controller: AppController
-    private enum Screen { case settings, history, setup }
-    @State private var screen = Screen.settings
+    private enum Screen { case home, insights, settings, history, setup }
+    @State private var screen = Screen.home
+    /// The welcome guide's current step (gap #21), saved as it changes so the guide resumes there.
+    @State private var guideStep = WelcomeGuide.Step.microphone
     @State private var section = 0
     @State private var showAdvanced = false
     /// The expanded History row.
@@ -154,8 +156,9 @@ struct SettingsView: View {
     /// The writing mode whose editor is open.
     @State private var editingModeID: UUID?
     @AppStorage("showDetailedSettingsInfo") private var showDetailedSettingsInfo = false
-    /// A window preference only; the floating indicator keeps following the system appearance.
-    @AppStorage("appearance") private var appearance = "light"
+    /// System, light or dark (gap #20). A window preference only; the floating indicator keeps following
+    /// the system appearance.
+    @AppStorage("appearance") private var appearance = "system"
     /// API address and model apply when editing ends (Return or leaving the field), not per keystroke.
     @FocusState private var apiFieldFocused: Bool
 
@@ -176,28 +179,53 @@ struct SettingsView: View {
             if screen == .setup { setup } else {
                 header
                 banners
-                if screen == .settings { settings } else { history }
+                switch screen {
+                case .home: home
+                case .insights: insightsView
+                case .settings: settings
+                default: history
+                }
             }
         }
         .foregroundStyle(Palette.ink)
         .background(Palette.paper)
-        .environment(\.colorScheme, appearance == "dark" ? .dark : .light)
+        // System leaves the window's appearance alone, so SwiftUI follows macOS.
+        .transformEnvironment(\.colorScheme) { if appearance == "dark" { $0 = .dark } else if appearance == "light" { $0 = .light } }
         // preferredColorScheme leaks app-wide and darkened the floating bubble; set only this window.
-        .background(WindowAppearance(dark: appearance == "dark"))
+        .background(WindowAppearance(name: appearance == "dark" ? .darkAqua : appearance == "light" ? .aqua : nil))
         .frame(minWidth: 760, minHeight: 560)
         // Every setting applies as soon as it changes; attached here so hidden sections still apply.
         .modifier(AutoApplyGeneral(controller: controller))
         .modifier(AutoApplyRoutes(controller: controller, apiFieldFocused: apiFieldFocused))
         .onAppear {
             controller.refreshPermissions(); controller.refreshHistory(); controller.refreshInputDevices()
-            if !checkedSetup { checkedSetup = true; if !setupComplete { screen = .setup } }
+            if !checkedSetup {
+                checkedSetup = true
+                guideStep = WelcomeGuide.resumeStep(.standard)
+                if WelcomeGuide.opensAtLaunch(.standard, alreadySetUp: setupComplete) { screen = .setup }
+            }
+            showRequestedScreen()
         }
+        .onChange(of: controller.screenRequest) { showRequestedScreen() }
+        .onChange(of: guideStep) { WelcomeGuide.save(guideStep, .standard) }
         // Permissions are granted in System Settings; re-read them on return.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in controller.refreshPermissions() }
         .onReceive(NotificationCenter.default.publisher(for: .dictationShowError)) { _ in screen = .settings }
         .onReceive(NotificationCenter.default.publisher(for: .dictationShowHistory)) { _ in
             searchText = ""; attentionOnly = false; screen = .history
             selectedID = controller.history.first(where: { $0.id == controller.recoveryEntryID })?.id ?? controller.history.first?.id
+        }
+    }
+
+    /// A menu item (Welcome Guide…) or the UI fixture asked for a screen.
+    private func showRequestedScreen() {
+        guard let request = controller.screenRequest else { return }
+        controller.screenRequest = nil
+        switch request {
+        case "guide": WelcomeGuide.replay(.standard); guideStep = .microphone; screen = .setup
+        case "insights": screen = .insights
+        case "settings": screen = .settings
+        default: screen = .home
         }
     }
 
@@ -314,19 +342,28 @@ struct SettingsView: View {
 
     // MARK: Header
 
+    /// Four tabs leave no room for the route label at the 760-point minimum width; it drops first.
     private var header: some View {
+        ViewThatFits(in: .horizontal) { headerRow(showRoute: true); headerRow(showRoute: false) }
+            .padding(.horizontal, 24).frame(height: 64)
+            .overlay(alignment: .bottom) { rule }
+    }
+
+    private func headerRow(showRoute: Bool) -> some View {
         HStack(spacing: 32) {
             HStack(spacing: 12) {
                 Logo.mark(size: 32)
                 wordmark("Murmur", size: 24)
             }
             HStack(spacing: 4) {
-                tab("Settings", .settings, count: nil)
+                tab("Home", .home, count: nil)
+                tab("Insights", .insights, count: nil)
                 tab("History", .history, count: controller.history.count)
+                tab("Settings", .settings, count: nil)
             }
             Spacer()
             HStack(spacing: 16) {
-                mono(controller.appliedTranscriptionIsLocal ? "Local transcription" : "Cloud transcription", color: Palette.ink70)
+                if showRoute { mono(controller.appliedTranscriptionIsLocal ? "Local transcription" : "Cloud transcription", color: Palette.ink70) }
                 HStack(spacing: 7) {
                     Rectangle().fill(controller.phase == "Error" ? Palette.ink : Palette.accent).frame(width: 9, height: 9)
                     mono(controller.phase)
@@ -334,8 +371,6 @@ struct SettingsView: View {
                 .accessibilityElement(children: .combine)
             }
         }
-        .padding(.horizontal, 24).frame(height: 64)
-        .overlay(alignment: .bottom) { rule }
     }
 
     private func tab(_ title: String, _ target: Screen, count: Int?) -> some View {
@@ -452,6 +487,7 @@ struct SettingsView: View {
             toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. Press ⌃⌘V to paste the last dictation again if it is missing; check the field first to avoid a duplicate. The previous clipboard is restored unless you copy something newer. Automatic paste is marked transient; other software may still read or retain it. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
+            toggleRow("Show in Dock", "Adds Murmur to the Dock and the app switcher. With both icons hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showInDock)
             toggleRow("Open at login", "Starts Murmur in the background when you log in, so the shortcut is ready.", isOn: Binding(get: { controller.openAtLogin }, set: controller.setOpenAtLogin))
 
             eyebrow("Microphone").padding(.top, 28)
@@ -468,7 +504,8 @@ struct SettingsView: View {
                 .buttonStyle(InkButtonStyle(kind: .outline)).padding(.top, 16)
 
             eyebrow("Appearance").padding(.top, 28)
-            segmented([("light", "Light"), ("dark", "Dark")], $appearance).padding(.top, 8)
+            segmented([("system", "System"), ("light", "Light"), ("dark", "Dark")], $appearance).padding(.top, 8)
+            help("Murmur’s windows only. The dictation bubble always follows macOS.").padding(.top, 8)
         }
     }
 
@@ -1265,20 +1302,37 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: First run
+    // MARK: Welcome guide (gap #21)
 
     private var shortcutName: String { controller.shortcutName }
 
-    /// The PRD's first-run test dictation and the faithful-transcription choice.
+    /// The guide's permission and model steps; the last step is the test dictation.
+    private var guideSteps: [(title: String, detail: String, done: Bool, action: String, run: () -> Void)] {
+        [
+            ("Microphone", "So Murmur can hear you while the shortcut is held. Audio stays on this Mac unless you choose a cloud route.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
+            ("Accessibility", "So Murmur can paste into the field you are using. It never presses Return or sends a message.", controller.accessibilityAuthorized, "Open Settings…", { controller.openPermissionSettings("accessibility") }),
+            ("Input Monitoring", "So the shortcut works in every app. Murmur listens only for the shortcut, Escape and its two ⌃⌘ chords.", controller.inputMonitoringAuthorized, "Open Settings…", { controller.openPermissionSettings("input-monitoring") }),
+            ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed while transcription runs in the cloud." : ModelFacts.displayName + (controller.modelSummary.isEmpty ? "" : " · " + controller.modelSummary), modelSatisfied,
+             controller.modelRow.actions.contains(.retry) ? "Retry…" : "Download…", controller.downloadModel),
+            ("Try it", "Press \(controller.shortcutName) and say a sentence. With this window in front, your words land in the field below instead of another app.", !controller.setupTestTranscript.isEmpty, "", {})
+        ]
+    }
+
+    /// The first-run test dictation, into a field inside the guide, and the faithful-transcription choice.
     private var tryIt: some View {
         VStack(alignment: .leading, spacing: 0) {
-            eyebrow("Try it")
-            help("Press \(shortcutName) and say a sentence. With this window in front, your words appear here instead of being typed.").padding(.top, 8)
-            Text(controller.setupTestTranscript.isEmpty ? "Waiting for your voice…" : controller.setupTestTranscript)
-                .font(.system(size: 16)).foregroundStyle(controller.setupTestTranscript.isEmpty ? Palette.ink70 : Palette.ink)
-                .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading).padding(12)
-                .overlay(Rectangle().strokeBorder(Palette.ink45, lineWidth: 1)).padding(.top, 12)
-                .accessibilityLabel(controller.setupTestTranscript.isEmpty ? "Test dictation: waiting" : "Test dictation: \(controller.setupTestTranscript)")
+            if !setupComplete { help("Finish the earlier steps first; dictation needs all of them.", color: Palette.ink).padding(.bottom, 12) }
+            TextEditor(text: $controller.setupTestTranscript)
+                .font(.system(size: 16)).scrollContentBackground(.hidden)
+                .frame(minHeight: 96).padding(8)
+                .overlay(alignment: .topLeading) {
+                    if controller.setupTestTranscript.isEmpty {
+                        Text("Waiting for your voice…").font(.system(size: 16)).foregroundStyle(Palette.ink64)
+                            .padding(.top, 8).padding(.leading, 13).allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+                .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+                .accessibilityLabel("Test dictation")
             toggleRow("Clean up my dictation", "Removes filler words, applies spoken corrections and formats spoken lists. Off is faithful transcription: exactly what was heard, with dictionary spellings.", isOn: Binding(
                 get: { controller.cleanupFillers || controller.cleanupCorrections || controller.cleanupLists },
                 set: { on in if on { controller.cleanupFillers = true; controller.cleanupCorrections = true; controller.cleanupLists = true } else { controller.useFaithfulTranscription() } }))
@@ -1288,27 +1342,41 @@ struct SettingsView: View {
         .onDisappear { controller.setupShowing = false }
     }
 
+    private func finishGuide() {
+        WelcomeGuide.complete(.standard); guideStep = .microphone; screen = .home
+    }
+
     private var setup: some View {
-        let steps: [(title: String, detail: String, done: Bool, action: String, run: () -> Void)] = [
-            ("Microphone", "So Murmur can hear you while the shortcut is held.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
-            ("Accessibility", "So Murmur can type into the field you are using.", controller.accessibilityAuthorized, "Open Settings…", { controller.openPermissionSettings("accessibility") }),
-            ("Input Monitoring", "So the global shortcut works in every app.", controller.inputMonitoringAuthorized, "Open Settings…", { controller.openPermissionSettings("input-monitoring") }),
-            ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed while transcription runs in the cloud." : ModelFacts.displayName + (controller.modelSummary.isEmpty ? "" : " · " + controller.modelSummary), modelSatisfied,
-             controller.modelRow.actions.contains(.retry) ? "Retry…" : "Download…", controller.downloadModel)
-        ]
-        let done = steps.filter(\.done).count
+        let steps = guideSteps
+        let index = guideStep.rawValue, step = steps[index]
+        let last = guideStep == .tryIt
         return GeometryReader { geometry in
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
-                    eyebrow("First run · \(done) / 4")
-                    VStack(alignment: .leading, spacing: -10) {
-                        Text("Set up").font(.system(size: 56, weight: .bold)).tracking(-2.8)
-                        wordmark("Murmur", size: 56)
+                    eyebrow("Welcome guide · Step \(index + 1) of \(steps.count)")
+                    VStack(alignment: .leading, spacing: -8) {
+                        Text("Set up").font(.system(size: 48, weight: .bold)).tracking(-2.4)
+                        wordmark("Murmur", size: 48)
                     }
                     .accessibilityElement(children: .combine).padding(.top, 16)
-                    Text("Your voice, on your Mac.").font(.system(size: 18)).foregroundStyle(Palette.ink80).padding(.top, 20)
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(steps.indices, id: \.self) { i in
+                            let on = i == index
+                            Button { guideStep = WelcomeGuide.Step(rawValue: i)! } label: {
+                                HStack(spacing: 12) {
+                                    mono(String(format: "%02d", i + 1), size: 12, color: on ? Palette.paper : Palette.ink70)
+                                    mono(steps[i].title, size: 12, color: on ? Palette.paper : Palette.ink)
+                                    Spacer()
+                                    if steps[i].done { mono("✓", size: 12, color: on ? Palette.paper : Palette.accentInk) }
+                                }
+                                .padding(.horizontal, 12).frame(height: 40).background(on ? Palette.ink : Color.clear).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
+                        }
+                    }
+                    .padding(.top, 28)
                     Spacer()
-                    Logo.mark(size: 140).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 2)).rotationEffect(.degrees(-1.5))
+                    Logo.mark(size: 96).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 2)).rotationEffect(.degrees(-1.5))
                 }
                 .padding(40).frame(width: geometry.size.width * 5 / 12, alignment: .leading).frame(maxHeight: .infinity, alignment: .top)
                 .background(Palette.accent16)
@@ -1316,39 +1384,258 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(steps.indices, id: \.self) { index in
-                                let step = steps[index]
-                                let working = index == 3 && controller.modelRow.isWorking
-                                HStack(spacing: 16) {
-                                    mono(String(format: "%02d", index + 1), size: 13, color: step.done ? Palette.accentInk : Palette.ink70).frame(width: 40, alignment: .leading)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(step.title).font(.system(size: 18, weight: .semibold))
-                                        help(working ? controller.modelRow.statusText : step.detail)
-                                        if working, let progress = controller.modelRow.progress { progressBar(progress).padding(.top, 7) }
+                        VStack(alignment: .leading, spacing: 0) {
+                            mono(String(format: "%02d", index + 1), size: 13, color: Palette.accentInk)
+                            Text(step.title).font(.system(size: 36, weight: .bold)).tracking(-1.4).padding(.top, 8)
+                            help(step.detail).padding(.top, 10)
+                            Group {
+                                if last { tryIt }
+                                else {
+                                    let working = guideStep == .model && controller.modelRow.isWorking
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        HStack(spacing: 14) {
+                                            if step.done { mono("Done ✓", color: Palette.accentInk) }
+                                            else if working { Button("Cancel", action: controller.cancelModelDownload).buttonStyle(InkButtonStyle(kind: .outline)) }
+                                            else { Button(step.action, action: step.run).buttonStyle(InkButtonStyle()) }
+                                            Spacer()
+                                        }
+                                        if working {
+                                            help(controller.modelRow.statusText)
+                                            if let progress = controller.modelRow.progress { progressBar(progress) }
+                                        }
+                                        if guideStep == .model && !controller.modelMessage.isEmpty { help(controller.modelMessage) }
+                                        if guideStep == .inputMonitoring || guideStep == .accessibility {
+                                            help("After you allow Murmur in System Settings, come back here; this page updates on its own.", color: Palette.ink64)
+                                        }
                                     }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    if step.done { mono("Done ✓", color: Palette.accentInk) }
-                                    else if working { Button("Cancel", action: controller.cancelModelDownload).buttonStyle(InkButtonStyle(kind: .outline)) }
-                                    else { Button(step.action, action: step.run).buttonStyle(InkButtonStyle()) }
                                 }
-                                .padding(.vertical, 18).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink45).frame(height: 1) }
                             }
-                            if !controller.modelMessage.isEmpty { help(controller.modelMessage).padding(.top, 12).frame(maxWidth: .infinity, alignment: .leading) }
-                            if done == 4 { tryIt.padding(.top, 28) }
+                            .padding(.top, 24)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    HStack {
-                        Button("Not Now") { screen = .settings }.buttonStyle(InkButtonStyle(kind: .plain))
+                    HStack(spacing: 8) {
+                        if index > 0 { Button("← Back") { guideStep = WelcomeGuide.Step(rawValue: index - 1)! }.buttonStyle(InkButtonStyle(kind: .outline)) }
+                        Button("Not Now") { screen = .home }.buttonStyle(InkButtonStyle(kind: .plain))
                         Spacer()
-                        Button("Start Dictating →") { screen = .settings }
-                            .buttonStyle(InkButtonStyle(kind: done == 4 ? .filled : .outline)).disabled(done < 4)
+                        if last {
+                            Button("Finish") { finishGuide() }.buttonStyle(InkButtonStyle(kind: .filled))
+                        } else {
+                            Button(step.done ? "Continue →" : "Skip for Now →") { guideStep = WelcomeGuide.Step(rawValue: index + 1)! }
+                                .buttonStyle(InkButtonStyle(kind: step.done ? .filled : .outline))
+                        }
                     }
                     .padding(.top, 24)
                 }
                 .padding(40)
             }
         }
+    }
+}
+
+// MARK: - Home and Insights (gap #19)
+
+extension SettingsView {
+    private func page<Content: View>(_ title: String, _ lede: String, @ViewBuilder _ content: () -> Content) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.system(size: 36, weight: .bold)).tracking(-1.4)
+                Text(lede).font(.system(size: 16)).foregroundStyle(Palette.ink70).padding(.top, 10)
+                content()
+            }
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(EdgeInsets(top: 32, leading: 40, bottom: 40, trailing: 40))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    var home: some View {
+        page("Home", "Dictate anywhere the cursor is. Everything below is on this Mac.") {
+            eyebrow("Shortcut").padding(.top, 28)
+            HStack(alignment: .center, spacing: 20) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(controller.shortcutName).font(.system(size: 28, weight: .bold)).tracking(-0.8)
+                    help(controller.pressToToggle ? "Press to start, press again to stop. Escape cancels." : "Hold to record, or double-press to keep recording until you press again. Escape cancels.")
+                }
+                Spacer()
+                if controller.phase == "Listening" {
+                    Button("Finish Dictation", action: controller.stopRecording).buttonStyle(InkButtonStyle(kind: .filled))
+                } else {
+                    Button("Start Dictation", action: controller.startDictationFromHome).buttonStyle(InkButtonStyle(kind: .filled))
+                        .disabled(!setupComplete || controller.isBusy)
+                        .help("Murmur steps aside so your words go to the app you were using. Press the shortcut to finish.")
+                }
+            }
+            .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 8)
+            help("Start Dictation hides this window so your words go to the app you were using; press the shortcut to finish.", color: Palette.ink64).padding(.top, 8)
+
+            HStack(alignment: .firstTextBaseline) {
+                eyebrow("Ready to dictate")
+                Spacer()
+                if !setupComplete { Button("Open Welcome Guide") { screen = .setup }.buttonStyle(InkButtonStyle(kind: .plain)) }
+            }
+            .padding(.top, 28)
+            VStack(spacing: 0) {
+                permissionRow("Microphone", allowed: controller.microphoneAuthorized, actionTitle: "Allow", action: controller.requestMicrophone)
+                permissionRow("Accessibility", allowed: controller.accessibilityAuthorized, actionTitle: "Open Settings…") { controller.openPermissionSettings("accessibility") }
+                permissionRow("Input Monitoring", allowed: controller.inputMonitoringAuthorized, actionTitle: "Open Settings…") { controller.openPermissionSettings("input-monitoring") }
+                permissionRow("Speech model", allowed: modelSatisfied, actionTitle: "Open Transcription") { section = 1; screen = .settings }
+            }
+            .overlay(alignment: .top) { rule }.padding(.top, 8)
+
+            HStack(alignment: .firstTextBaseline) {
+                eyebrow("Recent dictations")
+                Spacer()
+                if !controller.history.isEmpty { Button("Show All in History →") { screen = .history }.buttonStyle(InkButtonStyle(kind: .plain)) }
+            }
+            .padding(.top, 28)
+            VStack(spacing: 0) {
+                if controller.history.isEmpty {
+                    help(controller.historyMode == .on ? "Nothing yet. Your dictations appear here and in History." : "History is off, so dictations are kept only until Murmur quits.")
+                        .padding(.vertical, 16).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                ForEach(controller.history.prefix(5)) { entry in
+                    Button { selectedID = entry.id; searchText = ""; attentionOnly = false; screen = .history } label: {
+                        HStack(alignment: .top, spacing: 16) {
+                            Text(entry.recordedAt, format: .relative(presentation: .named))
+                                .font(.system(size: 13, design: .monospaced)).foregroundStyle(Palette.ink70).lineLimit(1).frame(width: 120, alignment: .leading)
+                            Text((entry.finalText.isEmpty ? entry.rawText : entry.finalText).replacingOccurrences(of: "\n", with: " "))
+                                .font(.system(size: 15)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                            if let label = Self.statusLabel(entry.insertionStatus) { mono(label, size: 11, color: Palette.accentDeep) }
+                        }
+                        .padding(.vertical, 12).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).overlay(alignment: .bottom) { softRule }
+                }
+            }
+            .overlay(alignment: .top) { rule }.padding(.top, 8)
+            Button("Replay Welcome Guide") { WelcomeGuide.replay(.standard); guideStep = .microphone; screen = .setup }
+                .buttonStyle(InkButtonStyle(kind: .outline)).padding(.top, 28)
+        }
+    }
+
+    private func stat(_ label: String, _ value: String, _ note: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            mono(label, size: 11, color: Palette.ink70)
+            Text(value).font(.system(size: 30, weight: .bold)).tracking(-1).lineLimit(1).minimumScaleFactor(0.6)
+            Text(note).font(.system(size: 13)).foregroundStyle(Palette.ink70).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16).frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var keptFor: String {
+        switch controller.retention {
+        case "six-months": return "six months"
+        case "forever": return "until you delete them"
+        default: return "30 days"
+        }
+    }
+
+    var insightsView: some View {
+        page("Insights", "Counted on this Mac from the dictations History keeps. Nothing is sent anywhere.") {
+            switch controller.insights {
+            case .historyOff:
+                insightsNotice("History is off", "Insights counts only what History keeps on this Mac, so there is nothing to count. Turn History on in History & Privacy to see your words, pace and streaks.")
+            case .empty:
+                insightsNotice("Nothing to count", "History keeps dictations for \(keptFor). It has none right now: either you have not dictated yet, or older dictations have expired. Insights counts only what History still has.")
+            case .stats(let stats):
+                insightsStats(stats)
+            }
+        }
+    }
+
+    private func insightsNotice(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.system(size: 22, weight: .semibold))
+            help(detail)
+            Button("Open History & Privacy") { section = 5; screen = .settings }.buttonStyle(InkButtonStyle(kind: .outline))
+        }
+        .padding(24).frame(maxWidth: .infinity, alignment: .leading).background(Palette.accent16).padding(.top, 28)
+    }
+
+    private func insightsStats(_ s: Insights.Stats) -> some View {
+        let untimed = "Counted from dictations made after this update."
+        return VStack(alignment: .leading, spacing: 0) {
+            Grid(horizontalSpacing: 12, verticalSpacing: 12) {
+                GridRow {
+                    stat("Words dictated", s.words.formatted(), s.dictations == 1 ? "In 1 dictation" : "In \(s.dictations.formatted()) dictations")
+                    stat("Speaking pace", s.wordsPerMinute.map { "\(Int($0.rounded())) WPM" } ?? "—",
+                         s.wordsPerMinute == nil ? untimed : "Typing averages \(Int(Insights.typingWPM.rounded())) WPM")
+                }
+                GridRow {
+                    stat("Time saved", s.secondsSaved.map(Insights.duration) ?? "—",
+                         s.secondsSaved == nil ? untimed : "Against typing the same text at \(Int(Insights.typingWPM.rounded())) WPM")
+                    stat("Words changed", s.wordsChanged.formatted(), "By cleanup and dictionary spellings, and your edits in History")
+                }
+            }
+            .padding(.top, 28)
+
+            eyebrow("Streak").padding(.top, 28)
+            HStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(s.currentStreak == 1 ? "1 day" : "\(s.currentStreak) days").font(.system(size: 22, weight: .bold))
+                    mono("Current", size: 11, color: Palette.ink70)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(s.longestStreak == 1 ? "1 day" : "\(s.longestStreak) days").font(.system(size: 22, weight: .bold))
+                    mono("Longest in History", size: 11, color: Palette.ink70)
+                }
+            }
+            .padding(.top, 10)
+            StreakCalendar(days: s.days, weeks: controller.retention == "30-days" ? 5 : 26,
+                           cutoff: HistoryExpiry.cutoff(HistoryRetention(rawValue: controller.retention) ?? .thirtyDays))
+                .padding(.top, 14)
+            help("A day counts when you dictated at least once, in this Mac’s time zone. History keeps \(keptFor), so older days are not shown.", color: Palette.ink64).padding(.top, 8)
+
+            eyebrow("Apps").padding(.top, 28)
+            VStack(spacing: 0) {
+                ForEach(s.apps.prefix(8), id: \.app) { item in
+                    HStack {
+                        Text(appName(item.app)).font(.system(size: 15))
+                        Spacer()
+                        mono(item.count == 1 ? "1 dictation" : "\(item.count) dictations", size: 12, color: Palette.ink70)
+                    }
+                    .padding(.vertical, 10).overlay(alignment: .bottom) { softRule }
+                }
+                if s.withoutApp > 0 {
+                    help("\(s.withoutApp) \(s.withoutApp == 1 ? "dictation has" : "dictations have") no app recorded: made before this update, saved without pasting, or not pasted.", color: Palette.ink64)
+                        .padding(.top, 10).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .overlay(alignment: .top) { rule }.padding(.top, 8)
+        }
+    }
+}
+
+/// Weeks as columns, Monday to Sunday down, today last; days before History's cutoff are hatched
+/// out, since their dictations have expired.
+private struct StreakCalendar: View {
+    let days: Set<Date>
+    let weeks: Int
+    let cutoff: Date?
+    var body: some View {
+        var calendar = Calendar.current; calendar.firstWeekday = 2
+        let today = calendar.startOfDay(for: Date())
+        let thisWeek = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
+        let first = calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: thisWeek) ?? thisWeek
+        return HStack(alignment: .top, spacing: 3) {
+            ForEach(0..<weeks, id: \.self) { week in
+                VStack(spacing: 3) {
+                    ForEach(0..<7, id: \.self) { weekday in
+                        let day = calendar.date(byAdding: .day, value: week * 7 + weekday, to: first) ?? first
+                        let on = days.contains(day)
+                        Rectangle()
+                            .fill(on ? Palette.accent : day > today ? Color.clear : Palette.ink.opacity(cutoff.map { day < calendar.startOfDay(for: $0) } == true ? 0.03 : 0.1))
+                            .frame(width: 14, height: 14)
+                            .overlay(Rectangle().strokeBorder(day == today ? Palette.ink : Color.clear, lineWidth: 1.5))
+                    }
+                }
+            }
+        }
+        .accessibilityElement().accessibilityLabel("Dictation days")
+        .accessibilityValue("\(days.count) days with dictation in the last \(weeks) weeks")
     }
 }
 
@@ -1455,6 +1742,7 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.liveWordsOnCloud) { controller.settingsChanged() }
             .onChange(of: controller.intelligentLeadingSpace) { controller.settingsChanged() }
             .onChange(of: controller.showMenuBar) { controller.settingsChanged() }
+            .onChange(of: controller.showInDock) { controller.settingsChanged() }
             .onChange(of: controller.inputDeviceUID) { controller.settingsChanged() }
             .onChange(of: controller.retention) { controller.settingsChanged() }
             .onChange(of: controller.historyMode) { controller.settingsChanged() }
