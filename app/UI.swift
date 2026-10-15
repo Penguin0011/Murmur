@@ -1572,6 +1572,34 @@ private struct BubbleView: View {
     }
 }
 
+/// Gap #17: the dictation could not be pasted, so the bubble shows it with Copy. History and ⌃⌘V
+/// still work. The panel never becomes key, so clicking leaves the user's app in front.
+private struct PasteFailureCard: View {
+    @ObservedObject var controller: AppController
+    let failure: AppController.PasteFailure
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.on.clipboard").font(.system(size: 12)).foregroundStyle(.orange).accessibilityHidden(true)
+                Text("Couldn’t paste here").font(.system(size: 12, weight: .semibold))
+                Spacer(minLength: 4)
+                Button { controller.dismissStatus() } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Dismiss")
+            }
+            Text(failure.text).font(.system(size: 12)).lineLimit(3).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading).accessibilityLabel("Dictation: \(failure.text)")
+            HStack {
+                Text("⌃⌘V pastes it too").font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer(minLength: 4)
+                Button("Copy") { controller.copyPasteFailure() }.buttonStyle(.borderedProminent).controlSize(.small)
+            }
+        }
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .modifier(UtilityGlass(radius: 18))
+    }
+}
+
 /// A short, buttonless notice; learned entries can be removed in Settings → Dictionary.
 private struct LearnedNotice: View {
     let word: String
@@ -1616,8 +1644,10 @@ final class BubblePresenter {
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let minimal = phase != "Error"
         panel.hasShadow = !minimal
-        let width = minimal ? 80 : min(240, max(180, frame.width - 32))
-        let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase)) : AnyView(BubbleView(controller: controller, message: message))
+        let card = phase == "Error" ? controller.pasteFailure : nil
+        let width = minimal ? 80 : card != nil ? min(320, max(200, frame.width - 32)) : min(240, max(180, frame.width - 32))
+        let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase))
+            : card.map { AnyView(PasteFailureCard(controller: controller, failure: $0)) } ?? AnyView(BubbleView(controller: controller, message: message))
         let host = NSHostingView(rootView: content.frame(width: width))
         panel.contentView = host
         let height = host.fittingSize.height

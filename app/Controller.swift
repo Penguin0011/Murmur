@@ -914,13 +914,17 @@ final class PreStart: @unchecked Sendable {
         setPhase("Ready", stage == .transcription ? CloudTranscription.message(.cancelled) ?? "Canceled." : "Canceled. The raw transcript is saved in History and was not inserted.")
         bubble.hide(); historySaved(); done()
     }
-    func setPhase(_ phase: String, _ message: String, announcement: String? = nil) {
-        self.phase = phase; self.message = message
+    /// A dictation that could not be pasted, shown in the bubble with Copy (gap #17). Any other status replaces it.
+    struct PasteFailure: Equatable { let entryID: String?; let text: String }
+    @Published private(set) var pasteFailure: PasteFailure?
+    func setPhase(_ phase: String, _ message: String, announcement: String? = nil, pasteFailure: PasteFailure? = nil) {
+        self.phase = phase; self.message = message; self.pasteFailure = pasteFailure
         // Every finished status leaves on its own unless replaced: text stays in History and retry audio
-        // stays on disk. "No speech" needs no action (2 s); errors get longer to read (8 s); the rest 5 s.
+        // stays on disk. "No speech" needs no action (2 s); errors get longer to read (8 s); a text to
+        // copy 30 s; the rest 5 s.
         let shown = UUID(); statusShown = shown
         let dismissAfter: TimeInterval? = phase == "Listening" || phase == "Processing" || !hasStatusToShow ? nil :
-            phase != "Error" ? 5 : message.hasPrefix("No speech was detected") ? 2 : 8
+            pasteFailure != nil ? 30 : phase != "Error" ? 5 : message.hasPrefix("No speech was detected") ? 2 : 8
         if let dismissAfter {
             DispatchQueue.main.asyncAfter(deadline: .now() + dismissAfter) { [weak self] in
                 guard let self, self.statusShown == shown else { return }
@@ -1148,7 +1152,7 @@ final class PreStart: @unchecked Sendable {
                 entry.insertionStatus = insertion.status.rawValue
                 try store.save(entry)
                 watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
-                showInsertionResult(insertion)
+                showInsertionResult(insertion, entryID: entry.id, text: entry.finalText)
                 // A provider failure is not silent: a bad key or quota would otherwise degrade every dictation.
                 if insertion.status != .failed, let error = processing?.lastProviderError {
                     setPhase("Ready", "Inserted with local cleanup. \(error.userMessage)")
@@ -1172,14 +1176,24 @@ final class PreStart: @unchecked Sendable {
         watchTick(ending: true)
         let result = pasteIntoFrontmostApp(text)
         timingLog.notice("paste-chord status=\(result.status.rawValue, privacy: .public) detail=\(result.detail, privacy: .public)")
-        showInsertionResult(result)
+        showInsertionResult(result, entryID: nil, text: text)
     }
     /// Read-back is diagnostic evidence, not a reason to warn or paste twice.
-    func showInsertionResult(_ result: InsertionResult) {
+    func showInsertionResult(_ result: InsertionResult, entryID: String?, text: String) {
         switch result.status {
         case .verified, .unverified: setPhase("Ready", idleMessage, announcement: "Dictation finished.")
-        case .failed: setPhase("Error", "Could not paste the dictation. Select a text field and press ⌃⌘V, or copy it from History. Check the field first to avoid a duplicate.")
+        case .failed: setPhase("Error", "Could not paste the dictation. Copy it here, select a text field and press ⌃⌘V, or copy it from History. Check the field first to avoid a duplicate.",
+                               pasteFailure: PasteFailure(entryID: entryID, text: text))
         }
+    }
+    /// The card's Copy button: the text goes to the clipboard and its History entry is marked copied.
+    func copyPasteFailure() {
+        guard let failure = pasteFailure else { return }
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(failure.text, forType: .string)
+        if let id = failure.entryID, var entry = history.first(where: { $0.id == id }) {
+            entry.insertionStatus = "copied"; try? records?.save(entry); refreshHistory()
+        }
+        setPhase("Ready", "Copied. Press ⌘V to paste it.", announcement: "Dictation copied.")
     }
     // Explicit developer check of the production pipeline, using a synthetic file
     // and an exact disposable destination. Never enabled during ordinary launch.

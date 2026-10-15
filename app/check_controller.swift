@@ -104,14 +104,18 @@ import ApplicationServices
         controller.lastDictationText = entry.finalText
         for status in [InsertionResult.Status.verified, .unverified] {
             controller.setPhase("Processing", "Processing synthetic dictation")
-            controller.showInsertionResult(InsertionResult(status: status, detail: "synthetic", snapshot: nil))
+            controller.showInsertionResult(InsertionResult(status: status, detail: "synthetic", snapshot: nil), entryID: entry.id, text: entry.finalText)
+            precondition(controller.pasteFailure == nil, "a posted paste shows no card")
             precondition(controller.phase == "Ready" && !controller.hasStatusToShow, "posted pastes finish quietly regardless of read-back")
             precondition(controller.lastDictationText == entry.finalText, "paste-last remains available after delivery")
             precondition(SettingsView.statusLabel(status.rawValue) == nil && SettingsView.statusNote(status.rawValue) == nil)
             precondition(!SettingsView.needsAttention(status.rawValue), "unreadable fields do not trigger the attention filter")
         }
-        controller.showInsertionResult(InsertionResult(status: .failed, detail: "synthetic", snapshot: nil))
+        controller.showInsertionResult(InsertionResult(status: .failed, detail: "synthetic", snapshot: nil), entryID: entry.id, text: entry.finalText)
         precondition(controller.phase == "Error" && controller.message.contains("⌃⌘V") && controller.lastDictationText == entry.finalText)
+        precondition(controller.pasteFailure == AppController.PasteFailure(entryID: entry.id, text: entry.finalText), "a failed paste shows the text card (gap #17)")
+        controller.setPhase("Error", "Another failure")
+        precondition(controller.pasteFailure == nil, "any later status replaces the card")
         precondition(SettingsView.needsAttention("failed") && SettingsView.statusLabel("failed") == "Not inserted")
         precondition(SettingsView.needsAttention("insertion-pending") && SettingsView.statusLabel("insertion-pending") == "Saved")
         precondition(SettingsView.statusNote("insertion-pending")?.contains("avoid a duplicate") == true)
