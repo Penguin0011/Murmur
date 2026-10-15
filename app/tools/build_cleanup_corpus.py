@@ -267,6 +267,7 @@ add("prose-not-list", [
     ("He was first in line, second to none, and third to leave.", FCL, U, ["negation"]),
     ("My first job paid ten dollars an hour.", FCL, U, ["numbers"]),
     ("The steps outside are slippery, first thing tomorrow I'll salt them.", FCL, U),
+    ("First, preheat the oven, then mix the batter, then bake it.", FCL, U),
 ])
 
 # --- Combinations ---------------------------------------------------------------------

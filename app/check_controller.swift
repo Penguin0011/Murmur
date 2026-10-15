@@ -61,6 +61,10 @@ import ApplicationServices
         let remaining = try FileManager.default.contentsOfDirectory(atPath: retry.directory.path)
         precondition(remaining.isEmpty)
         try MainActor.assumeIsolated { try checkDismissal() }
+        // Gap #9: settle once the accepted reading has been stable for 2 s, never before, never without one.
+        precondition(!AppController.settlesEarly(pending: true, changedAt: 10, now: 11.9))
+        precondition(AppController.settlesEarly(pending: true, changedAt: 10, now: 12))
+        precondition(!AppController.settlesEarly(pending: false, changedAt: 10, now: 30), "rejected or already settled reading waits for the window")
         print("Controller probe ownership checks passed (multi-buffer copy, private mode, original preserved, failed-copy cleanup).")
     }
     @MainActor static func checkDismissal() throws {

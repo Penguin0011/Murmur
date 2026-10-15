@@ -193,6 +193,16 @@ final class DictionaryStore {
         return removed
     }
 
+    /// Gap #12: spoken commands a dictionary entry may target ("Kocia Mark" -> "question mark").
+    /// Derived from `RuleCleaner.markCommands` (plus its "@" phrases) so the two never drift. Dictionary
+    /// application runs before cleanup (`ProcessingCoordinator.prepare`), so these entries apply first.
+    static let commandPhrases: Set<String> = Set(RuleCleaner.markCommands.map { $0.0.joined(separator: " ") } + ["at the rate", "at sign"])
+    /// An entry whose preferred form is a spoken command: applied ahead of other entries and kept
+    /// out of every transcription boost and cleanup hint (it is not a word to bias toward).
+    static func isCommandTarget(_ entry: DictionaryEntry) -> Bool {
+        TermText.phraseKey(entry.preferred).map(commandPhrases.contains) ?? false
+    }
+
     /// The enabled entry whose variant matches `phrase` (folded, whole words), if any.
     func entry(forVariant phrase: String) -> DictionaryEntry? {
         guard let key = TermText.phraseKey(phrase) else { return nil }
@@ -229,10 +239,13 @@ final class DictionaryStore {
                                source: entry.source, createdAt: entry.createdAt, enabled: entry.enabled)
     }
 
-    /// Folded variant key -> entry. Manual entries win over learned ones, then older entries.
+    /// Folded variant key -> entry. Command targets win, then manual entries over learned ones,
+    /// then older entries.
     private func variantTable() -> [String: DictionaryEntry] {
         var table: [String: DictionaryEntry] = [:]
         let ordered = entries.filter(\.enabled).sorted {
+            let command0 = Self.isCommandTarget($0), command1 = Self.isCommandTarget($1)
+            if command0 != command1 { return command0 }
             if $0.source != $1.source { return $0.source == .manual }
             return $0.createdAt < $1.createdAt
         }
@@ -245,12 +258,15 @@ final class DictionaryStore {
         return table
     }
 
-    /// Explicit variants win. With a lexicon, an unfamiliar single word may also use one unique
-    /// phonetic term. Names also allow a single doubled letter; ordinary words stay unchanged.
-    /// Punctuation or a line break ends a phrase; the longest explicit phrase wins.
+    /// Replaces whole-word variant phrases with preferred spellings. Explicit variants match
+    /// exactly after case folding. With a lexicon, an unfamiliar single word may also use one
+    /// unique phonetic term; names allow only a single doubled letter, and ordinary words stay
+    /// unchanged. Punctuation or a line break ends a phrase. At each position a command-target
+    /// phrase wins (gap #12), then the longest phrase; replaced text is never matched again, so
+    /// another entry cannot rewrite words inside an inserted command ("question mark" stays).
     func apply(to text: String, isCommonWord: ((String) -> Bool)? = nil) -> String {
         let table = variantTable()
-        let terms = isCommonWord == nil ? [] : entries.filter { $0.enabled && $0.preferred.count >= 6 && $0.preferred.allSatisfy(\.isLetter) }
+        let terms = isCommonWord == nil ? [] : entries.filter { $0.enabled && !Self.isCommandTarget($0) && $0.preferred.count >= 6 && $0.preferred.allSatisfy(\.isLetter) }
         guard !table.isEmpty || !terms.isEmpty else { return text }
         let maxWords = table.keys.map { $0.split(separator: " ").count }.max() ?? 1
         let chars = Array(text)
@@ -259,36 +275,30 @@ final class DictionaryStore {
         var cursor = 0
         var i = 0
         while i < words.count {
-            var matched = false
-            for length in stride(from: min(maxWords, words.count - i), through: 1, by: -1) {
+            let spans = stride(from: min(maxWords, words.count - i), through: 1, by: -1).compactMap { length -> (Int, DictionaryEntry)? in
                 let span = words[i..<(i + length)]
-                guard Self.spacedPhrase(span, chars) else { continue }
+                guard Self.spacedPhrase(span, chars) else { return nil }
                 let key = span.map(\.folded).joined(separator: " ")
-                var entry = table[key]
-                if entry == nil, length == 1, key.count >= 5, key.allSatisfy(\.isLetter),
-                   let common = isCommonWord, !common(key) {
-                    // Recognized names allow only one doubled letter, not broader phonetic swaps.
-                    let unfamiliar = key.count >= 6 && !common(key.capitalized)
-                    let exact = terms.filter { TermText.fold($0.preferred) == key }
-                    let candidates = exact.isEmpty ? terms.filter { term in
-                        (unfamiliar || Self.addsDoubledLetter(to: key, spelling: TermText.fold(term.preferred))) &&
-                        CorrectionFilter.phoneticKey(key) == CorrectionFilter.phoneticKey(term.preferred) &&
-                        CorrectionFilter.evaluate(source: words[i].text, target: term.preferred, isCommonWord: common)
-                            == .accepted(source: words[i].text, target: term.preferred)
-                    } : exact
-                    if candidates.count == 1 { entry = candidates[0] }
-                }
-                guard let entry else { continue }
-                let start = words[i].start, end = words[i + length - 1].end
-                output += String(chars[cursor..<start])
-                output += Self.cased(entry.preferred, original: String(chars[start..<end]),
-                                     sentenceStart: Self.atSentenceStart(start, chars))
-                cursor = end
-                i += length
-                matched = true
-                break
+                if let entry = table[key] { return (length, entry) }
+                guard length == 1, key.count >= 5, key.allSatisfy(\.isLetter), let common = isCommonWord, !common(key) else { return nil }
+                // Recognized names allow only one doubled letter, not broader phonetic swaps.
+                let unfamiliar = key.count >= 6 && !common(key.capitalized)
+                let exact = terms.filter { TermText.fold($0.preferred) == key }
+                let candidates = exact.isEmpty ? terms.filter { term in
+                    (unfamiliar || Self.addsDoubledLetter(to: key, spelling: TermText.fold(term.preferred))) &&
+                    CorrectionFilter.phoneticKey(key) == CorrectionFilter.phoneticKey(term.preferred) &&
+                    CorrectionFilter.evaluate(source: words[i].text, target: term.preferred, isCommonWord: common)
+                        == .accepted(source: words[i].text, target: term.preferred)
+                } : exact
+                return candidates.count == 1 ? (length, candidates[0]) : nil
             }
-            if !matched { i += 1 }
+            guard let (length, entry) = spans.first(where: { Self.isCommandTarget($0.1) }) ?? spans.first else { i += 1; continue }
+            let start = words[i].start, end = words[i + length - 1].end
+            output += String(chars[cursor..<start])
+            output += Self.isCommandTarget(entry) ? entry.preferred
+                : Self.cased(entry.preferred, original: String(chars[start..<end]), sentenceStart: Self.atSentenceStart(start, chars))
+            cursor = end
+            i += length
         }
         output += String(chars[cursor...])
         return output
@@ -312,7 +322,7 @@ final class DictionaryStore {
     /// because nothing can be filtered before a transcript exists.
     var vocabularyTerms: [String] {
         var seen = Set<String>()
-        let enabled = entries.filter(\.enabled)
+        let enabled = entries.filter { $0.enabled && !Self.isCommandTarget($0) }
         return (enabled.filter { $0.source == .manual } + enabled.filter { $0.source == .learned }).compactMap { entry in
             let term = TermText.collapseWhitespace(entry.preferred.replacingOccurrences(of: ",", with: " "))
             return seen.insert(TermText.fold(term)).inserted ? term : nil
@@ -325,9 +335,9 @@ final class DictionaryStore {
     /// similarity rules), so a misheard term can still be corrected by cleanup. Never the whole
     /// dictionary. These broader phrase matches feed cleanup; local respelling is narrower.
     func relevantEntries(for text: String) -> [DictionaryEntry] {
-        let exact = exactEntries(for: text)
+        let exact = exactEntries(for: text).filter { !Self.isCommandTarget($0) }
         let exactIDs = Set(exact.map(\.id))
-        let candidates = entries.filter { $0.enabled && !exactIDs.contains($0.id) }
+        let candidates = entries.filter { $0.enabled && !exactIDs.contains($0.id) && !Self.isCommandTarget($0) }
         guard !candidates.isEmpty else { return exact }
         let chars = Array(text)
         let words = TermText.tokens(chars)

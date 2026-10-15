@@ -50,6 +50,23 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         check(store.apply(to: "café ☕ Acme 🙂") == "café ☕ Akme 🙂", "unicode neighbours")
         check(store.apply(to: "") == "", "empty text")
 
+        // Gap #12: an entry whose target is a spoken command applies first and is never a hint.
+        do {
+            let d = dir.appendingPathComponent("commands")
+            let commands = try DictionaryStore(directory: d)
+            let command = try commands.add(preferred: "question mark", variants: ["Kocia Mark"])
+            try commands.add(preferred: "Marc", variants: ["mark"])
+            try commands.add(preferred: "Kocia Inc", variants: ["kocia mark please"])
+            check(DictionaryStore.isCommandTarget(command), "command phrase recognised as a command target")
+            check(commands.apply(to: "Is it done kocia mark") == "Is it done question mark", "misheard command replaced")
+            check(commands.apply(to: "Kocia Mark") == "question mark", "command target keeps its form at a sentence start")
+            check(commands.apply(to: "kocia mark please") == "question mark please", "command target wins over a longer entry")
+            check(commands.apply(to: "ask mark") == "ask Marc", "other entries still apply")
+            check(commands.vocabularyTerms == ["Marc", "Kocia Inc"], "command target excluded from transcription vocabulary")
+            check(!commands.relevantEntries(for: "kocia mark").contains { $0.id == command.id }
+                  && !commands.relevantEntries(for: "question mark").contains { $0.id == command.id }, "command target excluded from cleanup hints")
+        }
+
         // relevantEntries minimality.
         let relevant = store.relevantEntries(for: "Ask Acme about it")
         check(relevant.map(\.id) == [acme.id], "only the matching entry is relevant")
@@ -207,6 +224,63 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             try check(ledger.settle(sessionID: a).isEmpty, "settling twice is harmless")
             try check(ledger.record(obs(a, "Acme", "Akme", 6)) == .sessionClosed, "closed session ignored")
             check(learned(dict).count == 1 && learned(dict)[0].variants.isEmpty && ledger.evidence.count == 1, "same session counts once")
+        }
+
+        // Gap #9: settle on stable text, then keep watching the same session.
+        do {
+            let (dict, ledger) = try fresh("early-settle")
+            let a = UUID(), b = UUID(), c = UUID()
+            try ledger.record(obs(a, "Acme", "Akme"))
+            try check(ledger.settle(sessionID: a).map(\.preferred) == ["Akme"], "early settle adds the hint before the window closes")
+            try check(ledger.record(obs(a, "Acme", "Akme", 1)) == .sessionClosed, "same reading after an early settle changes nothing")
+            try check(ledger.record(obs(a, "Acme", "Akmee", 2)) == .provisional, "a later edit re-records the session")
+            check(learned(dict).isEmpty && ledger.evidence.map(\.target) == ["Akmee"] && ledger.provisionalSessions == [a],
+                  "later edit withdraws the early hint and replaces the evidence")
+            try check(ledger.settle(sessionID: a).map(\.preferred) == ["Akmee"] && ledger.blocked.isEmpty,
+                      "settling the replacement learns it without a conflict")
+            // Back to the first fix, settled again: still one session, so still only a hint.
+            try ledger.record(obs(a, "Acme", "Akme", 3)); try ledger.settle(sessionID: a)
+            try ledger.settle(sessionID: a)
+            check(learned(dict).count == 1 && learned(dict)[0].preferred == "Akme" && learned(dict)[0].variants.isEmpty,
+                  "a session settled twice counts once toward the two-session rule")
+            try ledger.record(obs(b, "Acme", "Akme", 10)); try ledger.settle(sessionID: b)
+            check(dict.apply(to: "Ask Acme") == "Ask Akme", "a second session promotes the replacement")
+            // A refinement after a second-tier early settle withdraws that replacement.
+            try check(ledger.record(obs(b, "Acme", "Akmé", 11)) == .provisional, "refinement after second-tier settle re-records")
+            check(dict.apply(to: "Ask Acme") == "Ask Acme" && learned(dict).count == 1, "second-tier early settle withdrawn, hint kept")
+            // A second fix after a second-tier early settle keeps the first fix's replacement.
+            let (dict3, ledger3) = try fresh("early-second-fix")
+            let d = UUID(), e = UUID()
+            try ledger3.record(obs(d, "Acme", "Akme")); try ledger3.settle(sessionID: d)
+            try ledger3.record(obs(e, "Acme met Zorblat", "Akme met Zorblat", 10)); try ledger3.settle(sessionID: e)
+            let owner = learned(dict3)[0].id
+            try check(ledger3.record(obs(e, "Acme met Zorblat", "Akme met Zorblatt", 11)) == .provisional, "second fix in the same span records")
+            check(dict3.apply(to: "Ask Acme") == "Ask Akme" && learned(dict3)[0].id == owner, "first fix's replacement survives a second fix")
+            try check(ledger3.settle(sessionID: e).map(\.preferred) == ["Zorblatt"], "second fix adds its own hint")
+            check(dict3.apply(to: "Ask Acme") == "Ask Akme", "replacement still applies after the final settle")
+            // Undo after an early settle withdraws what it promoted.
+            let (dict2, ledger2) = try fresh("early-undo")
+            try ledger2.record(obs(c, "Acme", "Akme")); try ledger2.settle(sessionID: c)
+            try ledger2.revert(sessionID: c)
+            check(learned(dict2).isEmpty && ledger2.evidence.isEmpty, "undo after an early settle withdraws the hint")
+        }
+
+        // Gap #10: a History edit learns through the same filter and thresholds, as its own session.
+        do {
+            let (dict, ledger) = try fresh("history-edit")
+            try check(ledger.learnFromEdit(original: "I talked to Acme today.", edited: "I talked to Akme today.").map(\.preferred) == ["Akme"],
+                      "history edit adds a hint")
+            try ledger.learnFromEdit(original: "Acme shipped it.", edited: "Akme shipped it.")
+            check(dict.apply(to: "Ask Acme") == "Ask Akme", "a second history edit promotes the replacement")
+            try check(ledger.learnFromEdit(original: "I accept the terms.", edited: "I decline the terms.").isEmpty
+                      && ledger.evidence.isEmpty && learned(dict).count == 1, "history meaning edit rejected by the filter")
+            try check(ledger.learnFromEdit(original: "Same text.", edited: "Same text.").isEmpty, "unchanged history text learns nothing")
+            try ledger.deleteLearned(id: learned(dict)[0].id)
+            try check(ledger.learnFromEdit(original: "Acme again", edited: "Akme again").isEmpty && learned(dict).isEmpty,
+                      "history edit honours tombstones")
+            try ledger.setLearningEnabled(false)
+            try check(ledger.learnFromEdit(original: "Zorblat", edited: "Zorblatt").isEmpty && ledger.evidence.isEmpty,
+                      "history edit learns nothing with learning off")
         }
 
         // accept -> decline never promotes.

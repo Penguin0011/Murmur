@@ -207,6 +207,14 @@ final class HistoryRouter<Entry: RetainedHistoryItem>: @unchecked Sendable {
         try disk.save(entry)
     }
 
+    /// Replaces an existing entry where it already lives (memory or disk), whatever `persistsTranscripts` says now.
+    func update(_ entry: Entry) throws {
+        lock.lock()
+        if memory[entry.id] != nil { memory[entry.id] = entry; lock.unlock(); return }
+        lock.unlock()
+        try disk.save(entry)
+    }
+
     /// Disk and memory entries, newest first. A memory entry wins over a disk entry with the same id.
     func entries() throws -> [Entry] {
         let stored = try disk.entries()

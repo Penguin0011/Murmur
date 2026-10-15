@@ -29,7 +29,7 @@ swiftc -O -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/app/Cleanup.swift" "$project_root/app/Dictionary.swift" "$project_root/app/Learning.swift" \
   "$project_root/app/Retention.swift" "$project_root/app/Providers.swift" "$project_root/app/Credentials.swift" \
   "$project_root/app/Processing.swift" "$project_root/app/ModelDownload.swift" "$project_root/app/Updates.swift" \
-  "$project_root/app/AppServices.swift" "$project_root/app/Routes.swift" \
+  "$project_root/app/AppServices.swift" "$project_root/app/Routes.swift" "$project_root/app/AppleCleanup.swift" \
   "$project_root/app/UI.swift" "$project_root/app/LaunchOptions.swift" "$project_root/app/main.swift" \
   -o "$app_path/Contents/MacOS/Murmur"
 cp "$project_root/app/Info.plist" "$app_path/Contents/Info.plist"

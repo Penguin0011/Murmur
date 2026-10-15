@@ -94,13 +94,15 @@ enum ProviderError: Error, Equatable, Sendable, CustomStringConvertible, Localiz
     /// Connection refused by a user-run model server: nothing is listening at `address`
     /// ("host:port", taken from the configured base URL, never from request content).
     case serverNotRunning(ProviderID, address: String)
+    /// An on-device model that cannot run now (Apple Intelligence); nothing was generated.
+    case modelUnavailable(ProviderID, OnDeviceModelUnavailable)
     case cancelled
 
     var provider: ProviderID? {
         switch self {
         case .authentication(let p), .quota(let p), .rateLimited(let p, _), .network(let p), .timeout(let p),
              .payloadTooLarge(let p, _), .server(let p, _), .malformedResponse(let p), .contentBlocked(let p),
-             .rejected(let p, _), .invalidConfiguration(let p), .serverNotRunning(let p, _):
+             .rejected(let p, _), .invalidConfiguration(let p), .serverNotRunning(let p, _), .modelUnavailable(let p, _):
             return p
         case .cancelled:
             return nil
@@ -110,7 +112,7 @@ enum ProviderError: Error, Equatable, Sendable, CustomStringConvertible, Localiz
     var disposition: SessionDisposition {
         switch self {
         case .rateLimited, .network, .timeout, .server, .malformedResponse, .serverNotRunning: return .preserveRetryLater
-        case .authentication, .quota, .payloadTooLarge, .contentBlocked, .rejected, .invalidConfiguration: return .preserveNeedsChange
+        case .authentication, .quota, .payloadTooLarge, .contentBlocked, .rejected, .invalidConfiguration, .modelUnavailable: return .preserveNeedsChange
         case .cancelled: return .discard
         }
     }
@@ -154,6 +156,8 @@ enum ProviderError: Error, Equatable, Sendable, CustomStringConvertible, Localiz
             return "\(name) isn't set up. Add an API key and model in Settings."
         case .serverNotRunning(_, let address):
             return "No local model server is running at \(address). Start it, or check the address in Settings."
+        case .modelUnavailable(_, let reason):
+            return reason.userMessage
         case .cancelled:
             return "Cancelled."
         }
@@ -161,6 +165,21 @@ enum ProviderError: Error, Equatable, Sendable, CustomStringConvertible, Localiz
 
     var description: String { userMessage }
     var errorDescription: String? { userMessage }
+}
+
+/// Why Apple's on-device model can't run (FoundationModels `SystemLanguageModel.availability`).
+enum OnDeviceModelUnavailable: String, Equatable, Sendable {
+    case deviceNotEligible
+    case appleIntelligenceOff
+    case modelNotReady
+
+    var userMessage: String {
+        switch self {
+        case .deviceNotEligible: return "This Mac can't run Apple Intelligence. Choose another cleanup route in Settings."
+        case .appleIntelligenceOff: return "Apple Intelligence is off. Turn it on in System Settings → Apple Intelligence & Siri, or choose another cleanup route."
+        case .modelNotReady: return "The Apple Intelligence model isn't ready yet; it may still be downloading. Try again later."
+        }
+    }
 }
 
 protocol TranscriptionProvider: Sendable {

@@ -10,6 +10,8 @@ Hardware scope: Apple Silicon, including M1; Intel support is deferred beyond la
 
 Proposed launch boundary: dictation and recovery, without meeting recording, an AI assistant, billing accounts, or automatic message submission.
 
+Decision, October 14, 2026 (user: close the feature gaps with BetterWispr): the gaps listed in [BETTERWISPR_GAPS.md](BETTERWISPR_GAPS.md) are in scope, except #11 (one-fix learned replacement), which awaits a decision. They bring in a meeting notetaker, which replaces the "without meeting recording" boundary above, plus opt-in screen context for AI cleanup and a local Home/Insights page. Multilingual models stay out of scope. Each amended rule (local AI cleanup, tone, screen-context disclosure, meetings) still needs its own documented decision when its workstream lands. [Certain]
+
 ## 2. Confirmed requirements
 
 | ID | Requirement | Acceptance criteria |
@@ -46,7 +48,7 @@ Proposed launch boundary: dictation and recovery, without meeting recording, an 
 
 ## 4. Cleanup contract
 
-Proposed behavior: cleanup edits dictation, never answers it, executes instructions inside it, invents facts, or changes tone merely to sound polished.
+Proposed behavior: cleanup edits dictation, never answers it, executes instructions inside it, invents facts, or changes tone merely to sound polished. Amended October 14, 2026: a writing mode may opt in to a rule-based tone (see "Decision: tone per writing mode" below). [Certain]
 
 | Option | Example input | Expected output when enabled |
 |---|---|---|
@@ -56,7 +58,7 @@ Proposed behavior: cleanup edits dictation, never answers it, executes instructi
 
 Cleanup acceptance is measured, not asserted. Build a fixed corpus (target 300+ labeled utterances, covering each option, interactions between options, names, numbers, negation, quoted speech, and look-alike prose) before choosing the cleanup model. Proposed pass bar: no more than 1% of utterances with an unintended edit to a name, number, or negation; spoken-correction accuracy and list-formatting precision thresholds set from the corpus baseline and recorded in the decision log. Report each local candidate and the cloud routes against the same corpus.
 
-Local AI cleanup is not a launch target (decision, October 7, 2026). Typical Macs lack the RAM and compute to run a productive cleanup model without slowing other apps, so the PRD no longer requires an 8B local-model evaluation or a curated local-model browser. On-device cleanup is `RuleCleaner`, the deterministic rules pass in `app/Cleanup.swift`, which is measured against the corpus (section 4 thresholds). Users who want AI cleanup choose a cloud route or a user-configured OpenAI-compatible endpoint, which may be a server they run themselves. No automatic fallback between cloud routes; a failed cloud cleanup falls back only to on-device local rules (decision, October 6, 2026). The October 5, 2026 evidence (three local models of 2B parameters or less, none passing) stands as history. [Certain]
+Local AI cleanup is not a launch target (decision, October 7, 2026). Typical Macs lack the RAM and compute to run a productive cleanup model without slowing other apps, so the PRD no longer requires an 8B local-model evaluation or a curated local-model browser. On-device cleanup is `RuleCleaner`, the deterministic rules pass in `app/Cleanup.swift`, which is measured against the corpus (section 4 thresholds). Users who want AI cleanup choose a cloud route or a user-configured OpenAI-compatible endpoint, which may be a server they run themselves. No automatic fallback between cloud routes; a failed cloud cleanup falls back only to on-device local rules (decision, October 6, 2026). The October 5, 2026 evidence (three local models of 2B parameters or less, none passing) stands as history. [Certain] Amended October 14, 2026 (user): Apple's on-device system model is allowed as an opt-in cleanup route, labelled less accurate than local rules and never the default; see "Decision: Apple Intelligence cleanup route" in section 10. [Certain]
 
 Prompt-injection guard: transcripts are data. Cleanup output must pass a bound check against the raw text (length ratio and edit-distance limits per enabled option, no new named entities or numbers). If the check fails, or the model appears to answer or obey the dictation, that output is never inserted: the dictation falls back as decided on October 6, 2026 (below). Log only a content-free failure reason locally. [Certain] Include injection phrases ("ignore previous instructions", "write me a…") in the corpus.
 
@@ -79,8 +81,12 @@ Proposed implementation and acceptance criteria:
 - Decision, October 4, 2026: where a field exposes no readable text (VS Code's default editor, canvas editors such as Google Docs), observation follows the keys typed in that app during the same window (listen-only, Input Monitoring) on an in-memory copy of the pasted span. Keystrokes are never stored or logged; only the filtered source/target pair reaches the ledger. Undo chords drop the evidence; Return, Tab, vertical caret keys and app switches end the watch and keep it. Decision, October 4, 2026 (user: fix the remaining gaps): after a click, the caret position is inferred by following every possible caret position and double-clicked word, and only a single plausible respelling is learned. The ledger diffs each span word by word, so a fix followed by more typing, and several fixes in one dictation, are each learned. The target app's own autocorrect is invisible to it. Murmur never turns on accessibility modes in other apps (VS Code switches to screen-reader mode when Electron accessibility is forced).
 - Mechanism and honest limits: macOS exposes no edit-event stream with ranges. Tracking means reading the field's AX value and selection on change notifications (with bounded polling where notifications are absent), then locating the inserted span by anchored text diff. Chrome/Electron apps expose AX text only when accessibility is enabled for them; some web rich-text editors (e.g. Google Docs, Notion) may expose none. The spike must measure this rather than assume it. Learning triggers only on a whole-word or short-phrase replacement inside the anchored span; case-only and punctuation-only changes are not candidates, and "consistent" means the same source and target string after case-folding.
 - Automatic post-insertion observation is required at launch. The macOS feasibility spike must prove field/range tracking in representative native, browser, rich-text, chat, and code-editor apps; publish the supported observation matrix. Unsupported apps may still support dictation, but cannot claim automatic learning. Do not replace this requirement with manual feedback. Approved launch rule: a category that fails observation ships with automatic learning marked unsupported in the published matrix and in-app (learning is off for those apps, dictation still works); it does not hold the launch. [Certain] Proposed floor: if no tested app in any category supports observation, report a launch blocker, since the feature would not exist.
+- Decision, October 14, 2026 (BetterWispr gaps #9, #10, #12; the 60-second window and two-observation rule are unchanged):
+  - Settle on stable text (#9): a dictation's evidence also settles once the edited span has been unchanged for 2 seconds and its reading is an accepted candidate, so a first fix adds its hint without waiting for the window to close. The watch then continues. A later edit in the same window replaces that session's evidence and withdraws what the early settle promoted; undo still withdraws it. One session never counts twice toward the two-session rule. Known limit: withdrawing a second-tier replacement this way also drops the other session's evidence, as undo always has.
+  - Learn from History edits (#10): the final text of a History entry can be edited (the raw transcript never changes). Saving diffs the old and new final text through the same filter and ledger as automatic observation, as a separate session settled at once, so the same thresholds, tombstones, conflicts and learning toggle apply. This adds to automatic learning and does not replace it. A dictation fixed both in the field and in History counts as two sessions.
+  - Misheard commands (#12): a dictionary entry may target a spoken command phrase ("Kocia Mark" → "question mark"). Such entries apply ahead of other entries, keep their exact form, and are left out of transcription vocabulary, the CTC boost and cleanup hints. The dictionary is applied before cleanup, so these entries run before spoken-command parsing; `DictionaryStore.commandPhrases` must stay in step with the command list in `Cleanup.swift`.
 - Proposed learning implementation: persisted vocabulary/preferences, not model-weight fine-tuning. Validate that these preferences improve repeated corrections without changing unrelated dictation.
-- Store dictionary and learned corrections locally. When a selected cloud stage needs relevant entries, disclose that those entries will leave the device; avoid sending unrelated history or the entire dictionary unnecessarily.
+- Store dictionary and learned corrections locally. When a selected cloud stage needs relevant entries, disclose that those entries will leave the device; avoid sending unrelated history or the entire dictionary unnecessarily. Amended October 14, 2026: opt-in screen context and writing-mode instructions may also go to an AI cleanup route, with disclosure (see "Decision: screen context for AI cleanup" below). [Certain]
 - Hardware policy: users may disable cleanup or choose models to suit their hardware. No M1-specific benchmark or 8 GB default rule blocks release. Keep transcription local by default; cleanup route is explicit and never silently changes to cloud. [Certain]
 
 Prefer runtime vocabulary biasing where supported; otherwise evaluate conservative correction during processing. Document limitations for each transcription/cleanup route instead of promising identical behavior.
@@ -203,7 +209,7 @@ Release handoff must include reproducible build instructions, architecture/macOS
 - Functional and safety requirements pass on the available Apple Silicon/macOS 26 test configuration. Publish tested hardware and model-specific performance without promising M1/8 GB performance. Intel is outside launch acceptance. [Certain]
 - Real insertion coverage includes a native editor, browser text field, rich-text editor, chat app, and code editor; publish unsupported cases rather than claiming universal compatibility.
 - Exercise cursor loss, focus change, full-screen/Spaces, microphone loss, permission revocation, missing model, interrupted download, offline cloud requests, invalid key, quota exhaustion, and cleanup failure.
-- Verify no inference network requests in local/local mode, and only the selected stage's data leaves the device in mixed modes.
+- Verify no inference network requests in local/local mode, and only the selected stage's data leaves the device in mixed modes. With screen context on, verify that its text goes only to the AI cleanup route and is named in that route's disclosure.
 - Verify no duplicate insertion, no automatic sending, no credential exposure, and recoverable output before insertion attempts.
 - Verify independent cleanup toggles against a fixed corpus, emphasizing unintended edits to names, numbers, and negation.
 - Verify automatic learning from real post-insertion edits in other apps, conservative promotion and attribution, dictionary editing, undo/reset, disabled learning, and cloud disclosure without unrelated vocabulary leakage. Manual history feedback cannot satisfy the automatic-learning requirement.
@@ -232,7 +238,7 @@ Local transcription keeps recording and transcription on the Mac; cleanup leaves
 
 Small local cleanup models are not recommended for production based on current tests. Until a larger candidate passes the quality and safety gates, tell users to use cloud cleanup or run a larger local model (around 8B parameters as an evaluation starting point). This size is guidance, not a guarantee of quality or hardware fit. M1/8 GB optimization and testing are deferred. [Certain]
 
-Cleanup-on means the initial output may differ from a literal transcript by design. Enable only the named features; do not silently add tone rewriting or summarization. Preserve raw text in history while history is enabled, and let users disable each feature independently.
+Cleanup-on means the initial output may differ from a literal transcript by design. Enable only the named features; do not silently add tone rewriting or summarization (a tone the user picks for a writing mode is not silent; decision of October 14, 2026). Preserve raw text in history while history is enabled, and let users disable each feature independently.
 
 Superseding hardware decision: M1/8 GB performance does not gate development or release, and the previous automatic 8 GB cleanup-off policy is retired. Cleanup quality/safety checks still apply; model choice and cleanup toggles let users adjust resource use. No silent cloud fallback. [Certain]
 
@@ -282,6 +288,129 @@ Recorded from the measured baseline in `app/README.md` (corpus `app/cleanup-corp
 Polish and Professional: the corpus labels cover fillers, corrections, and lists only, so the rule-based baseline does not measure their rewrites. Their evidence is the guard results above and the live Professional check (11 synthetic dictations, 22/22 passing; commit `b5481a5`). No live Polish run is recorded, so Polish stays at guard-level evidence until one is added. [Certain]
 
 Any local candidate or cloud route must meet these thresholds on the same corpus before it is offered as the cleanup default. The 425-utterance corpus was written by the same agent that wrote the rules, so these numbers overstate real-world quality (see `app/README.md`). [Certain]
+
+### Decision: spoken commands, numbers and the email layout — October 14, 2026
+
+BetterWispr gaps #2–#5 (`BETTERWISPR_GAPS.md`) ship as one cleanup option, "Spoken commands and numbers" (`CleanupOptions.spoken`, key `cleanupSpokenCommands`). It is on by default and off in Faithful. Saved options from before it existed decode with it off. `RuleCleaner.spokenCommands` runs first in local cleanup. It is conservative: when a rule is unsure, the words stay. It handles:
+- dictated marks and layout ("comma", "period", "new paragraph")
+- spoken numbers that contain hundred or a scale word, or come before "percent" ("250,000", "2,50,000", "2.5 million", "10%")
+- @ and # ("at the rate", "hashtag", "hash forty two")
+- the email layout
+
+The same operations are added to the cloud prompt. [Certain]
+
+**Guard:** with the option on, `CleanupGuard.check` first judges output against the raw transcript as usual. If that fails, it judges the output against `spokenCommands(raw)` instead. That text is a deterministic rewrite of what was said, so every check still applies to it: answers, obeyed instructions, inserted words, and names, negations and number values. A model has to make the same conversions as the rules; otherwise its output falls back as decided on October 6, 2026. [Certain]
+
+**Email-layout exception:** this amends "cleanup never adds structure or greetings", and only for an explicit frame at the start of the dictation: "write", "draft" or "compose" an email to someone "saying" something. With that frame, cleanup may:
+- drop the frame words
+- add "Hi <name>," as the greeting ("Hi" is the only word it may add)
+- lay the message out with blank lines
+- put a sign-off the speaker said at the end ("best regards, Kartik") on its own lines
+
+Without the frame, an added greeting or sign-off is still rejected. The frame never lets the model compose or answer the email. `check_cleanup.swift` covers each case. [Certain]
+
+**Evidence:** `check_cleanup.swift` covers the spec examples in both directions, plus adversarial outputs for the new path. On the 425-utterance corpus the October 7 thresholds are unchanged, with 0/237 false rejects. 0 of 2363 adversarial outputs are accepted with the option off, with it on, in Polish, or in Professional. With the option on, the rules change 4 corpus inputs, each one a spoken number that should be converted. [Certain]
+
+### Decision: Apple Intelligence cleanup route — October 14, 2026
+
+**Status: approved by the user, October 14, 2026: options 1 and 2 below (opt-in, labelled, not the default). Option 3 was declined.** This amends the October 7, 2026 decision in section 4 that local AI cleanup is not a launch target. The default route stays local rules either way. [Certain]
+
+That decision was about downloaded models: their RAM and compute cost slow other apps. Apple's FoundationModels system model doesn't have that cost. Murmur doesn't download it, macOS manages its memory, and Murmur already requires macOS 26. So BETTERWISPR_GAPS.md #1 adds it as a cleanup route: `CleanupChoice.appleIntelligence`, implemented in `app/AppleCleanup.swift`. [Certain]
+- It uses the same `CleanupPrompt` and `CleanupGuard` as the other routes.
+- It uses the October 6 failure policy:
+  - When the model is unavailable, it names the reason (this Mac is not eligible, Apple Intelligence is off, or the model is not ready).
+  - A generation error falls back to local rules.
+  - So does a guard rejection.
+- It sends nothing off this Mac and needs no key. [Certain]
+
+**Measured.** Corpus `app/cleanup-corpus.json`: 425 utterances, 402 of them with cleanup on. [Certain]
+- Run through the real `ProcessingCoordinator` path with `app/tools/measure_cleanup_route.swift`. The prompt is from `Cleanup.swift` at `42223c5`.
+- Hardware: MacBook Air M3 (Mac15,12), 16 GB RAM, macOS 27.0.1 (26A434).
+- "Inserted" means the text Murmur would insert, after the guard and the local-rules fallback.
+- The corpus labels are Strict labels. Polish and Professional are expected to differ from them, so their exact-match and correction numbers are lower bounds.
+
+| Measure (threshold) | Local rules | Apple Strict | Apple Polish | Apple Professional |
+|---|---|---|---|---|
+| Model output accepted by the guard | n/a | 78.4% (315/402) | 80.3% (323/402) | 63.7% (256/402) |
+| Unintended name, number or negation edits, inserted (≤ 1%) | 0.2% (1/425) | 1.2% (5/425) | 1.4% (6/425) | 1.4% (6/425) |
+| Spoken-correction exact match (≥ 95%) | 95.8% | 65.6% (63/96) | 51.0% (49/96) | 71.9% (69/96) |
+| Ambiguous corrections kept unchanged (100%) | 22/22 | 21/22 | 14/22 | 18/22 |
+| List precision (≥ 97%) | 97.7% | 100% (28/28) | 100% (22/22) | 97.5% (39/40) |
+| List recall (≥ 95%) | 100% | 65.1% (28/43) | 51.2% (22/43) | 90.7% (39/43) |
+| Inserted text equal to the label | 96.7% | 74.4% | 68.5% | 80.5% |
+| Model latency, median / p90 / max | instant | 0.65 / 0.83 / 2.06 s | 0.61 / 0.76 / 1.57 s | 0.80 / 1.03 / 1.53 s |
+
+What the numbers show:
+- Apple Intelligence misses the section 4 thresholds in every style. Local rules meets them. [Certain]
+- **Name, number and negation edits.** Every one of the 5–6 per style is one of two kinds:
+  - A correction the model half-applied: both versions kept, as in "Book it for 2, 3 people", "goes to Dana, Dan" and "nine, sorry, ten".
+  - Ordinal words turned into a list nobody asked for, as in "First, preheat" → "1. Preheat", or Polish's "first impressions matter, second chances" → a numbered list.
+
+  None is a legitimate Polish or Professional rewrite. The guard accepts these outputs because no word was invented. That is a guard gap on every route, noted for W1. [Certain]
+- **Most guard rejections are unexplained deletions.** The model drops words the prompt doesn't allow it to drop. It also lowercases sentence starts and drops final periods when punctuation is off. [Certain]
+- **Errors and latency.** No generation errors occurred. The first call after prewarming took up to 2.1 s. [Certain]
+- **Long dictation.** These were extra live runs in Professional, using non-repeating text built from corpus sentences.
+  - No request exceeded the context window. That includes a single 906-word unpunctuated request, which can't be split.
+  - Latency grows with length: 4.8 s for 156 words, 16.8 s for 600 words, 27–29 s for 906 words.
+  - The guard rejected every one of these long outputs, because one violation rejects the whole section, so local rules were used.
+  - In practice the route helps only short dictations. [Certain]
+
+**Cloud comparison: not run.** The only keys configured on this Mac are free tier, and neither can finish a 402-call style:
+- **Gemini** (gemini-3.5-flash-lite): an unthrottled pass had 75–83% of its calls rate limited, so its inserted text was mostly local rules.
+- **Cerebras** gpt-oss-120b, through the Custom Provider route: limited to 5 requests a minute and 150 an hour, so 97.5% of a Strict pass was rate limited, and one style would take about 3 hours.
+
+No numbers from those runs are recorded. To compare, run `app/tools/measure_cleanup_route.swift custom` or `gemini` with a paid or higher-limit key. `MCR_DELAY` spaces out the calls. [Certain]
+
+**Options put to the user (1 and 2 approved):**
+1. Amend section 4. Local AI cleanup through the system model is allowed as an **opt-in route**.
+   - Settings labels it on-device and says it is less accurate than local rules on the test corpus.
+   - A downloaded local model stays out of scope for launch.
+2. Do not offer it as the default. Do not call it recommended until a measured prompt or guard change brings it to the section 4 thresholds.
+3. The alternative is to hide the choice until it meets them. The code and checks stay in place either way.
+
+### Decision: writing modes — October 14, 2026
+
+BetterWispr gap #6. Settings → Modes holds a user-defined list of writing modes (key `writingModes`, JSON in UserDefaults). Each mode has a name, an on/off switch and three kinds of match:
+- apps, by bundle ID, picked from apps dictated into since launch or running apps
+- websites: "host", "host/path", "*.host" or "host/path/*". A host includes its subdomains, and a path matches itself and anything below it by whole segments.
+- trigger words, said at the start or end of a dictation and cut from the text. Whole words only; a dictation that is only the trigger does not match. History's raw transcript keeps them.
+
+A trigger word wins over a website, and a website over an app. Within one kind, the first mode in the list wins. The app and page are the ones focused when recording started. [Certain]
+
+Each mode can override the cleanup options (Faithful, Strict, Polish, Professional and the per-option toggles), the tone, screen context, and custom instructions (at most 2,000 characters). An override left unset follows the Cleanup settings. Custom instructions go only to AI cleanup routes, inside delimiter tags, and the prompt says the rules take precedence over them. They never change what `CleanupGuard` accepts. [Certain]
+
+**Page address:** the page URL is read through Accessibility (the web area's AXURL), not AppleScript, so there is no Automation prompt. It is read only in a known browser and only while an enabled mode lists a website. It is used once at recording start to pick the mode and is never stored, logged or sent. Murmur still never turns on accessibility modes in other apps, so a browser that exposes no web area to Accessibility does not match websites. [Certain]
+
+**Evidence:** `check_modes.swift` covers matching priority, subdomain and path rules, trigger stripping at either end without taking part of a word, override inheritance and persistence. Not verified in the live app: reading the URL in Safari, Chrome, Arc, Edge, Brave and Firefox (Chromium may not expose its web area without an accessibility mode Murmur will not force), and the Settings screen beyond the fixture building and launching. [Certain]
+
+### Decision: tone per writing mode — October 14, 2026
+
+BetterWispr gap #7. This amends "cleanup never changes tone" (section 4) for one case only: a tone the user picks in a writing mode. With no mode, or with Formal, the text is unchanged. [Certain]
+
+Tone is applied by rules (`Tone.apply` in `Cleanup.swift`) after cleanup and after any fallback, on every route:
+- Formal: unchanged.
+- Casual: drops commas and the final period. A comma inside a number ("250,000") stays.
+- Very casual: Casual, and sentence starts are lowercased, except "I" and mixed-case or all-capitals words ("iPhone", "NASA").
+- Excited: the final period becomes "!".
+
+Tone is never applied to the email layout. The guard's ordinary checks are not loosened for tone. `CleanupGuard.acceptsTone` accepts a toned text only when it is exactly `Tone.apply` of the guarded text, so a model cannot pass other case or "!" changes off as tone. The model is not told about tone. Known limit: Casual and Excited also change a comma or final period the user dictated with a spoken command. `check_modes.swift` covers each tone and the guard's rejections. [Certain]
+
+### Decision: screen context for AI cleanup — October 14, 2026
+
+BetterWispr gap #8, in scope per the user's decision of the same date. This amends the disclosure rule in section 4 ("avoid sending unrelated history"): with screen context on, an AI cleanup route also receives text from the screen. [Certain]
+
+**What is read:** when recording starts, an AI cleanup route will run, and the dictation could use context (the mode matched at start, or the global setting, has it on, or a mode with trigger words does), Murmur reads:
+- the focused field's selected text
+- the clipboard's plain text
+- up to 3,000 characters of the focused window's text through Accessibility, bounded by node count and time
+
+It is opt-in: a global setting in Settings → Cleanup, off by default, which a writing mode can override. Nothing is read while Secure Event Input is on or a secure field is focused, and the window walk skips secure fields. A clipboard item marked `org.nspasteboard.ConcealedType`, `TransientType` or `AutoGeneratedType` is never read. OCR is out of scope. [Certain]
+
+**How it is used:** the text stays in memory for that one dictation. It is never sent on the local-rules route and never stored. A model output the guard rejected is not kept in History when context was sent, because it could echo screen text. In the prompt, the context sits in its own nonce-tagged block before the transcript, as reference data only, for spelling terms the transcript already says. Anything shaped like the prompt's delimiter tags is stripped from it. The guard still judges the output against the transcript alone, so context never lets added content through. [Certain]
+
+**Disclosure:** the cleanup route's disclosure in Settings adds a sentence naming the selected text, the clipboard and the window text whenever screen context is on (globally or in any mode). It also names custom instructions when a mode has them. [Certain]
+
+**Evidence:** `check_modes.swift` covers exclusion under Secure Input, in secure fields and for each private pasteboard type, tag stripping, size caps, the prompt layout, context absent on the local-rules route, and a model output that copies a name from the context being rejected. Not verified in the live app: the Accessibility window walk and selected text in real apps, a real password manager's pasteboard markers, a real model run with context, and whether macOS 26's pasteboard privacy prompt appears on the clipboard read. [Certain]
 
 ### Milestone 1 implementation decisions — October 2, 2026
 

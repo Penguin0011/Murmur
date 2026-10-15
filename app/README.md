@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 ```
 
@@ -49,6 +49,12 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 /tmp/murmur-processing-check
 ```
 
+Writing modes, tone and screen context (BetterWispr gaps #6–#8; PRD decisions of October 14, 2026): `WritingMode`, `WritingModes` (matching: trigger word, then website, then app) and `DictationStyle` (the settings with a mode's overrides) are in `Processing.swift`; `Tone` and `ScreenContext` are in `Cleanup.swift`. `process` and `processAsync` take an optional `DictationStyle`; tone is applied last, and screen context and custom instructions reach only `CleanupPrompt` on AI routes. `AppController` matches the app (and, through Accessibility, the page URL) when recording starts, captures screen context then if it is on, and resolves a trigger word on the transcript. [Certain]
+
+```sh
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_modes.swift -o /tmp/murmur-modes-check && /tmp/murmur-modes-check
+```
+
 The processing check passes with Swift 6.1.2 on Linux. The Controller/UI integration has only been typechecked on Linux against hand-written AppKit/SwiftUI stubs; it has not been built or run on the Mac. [Certain]
 
 ## Dictionary, learning and retention
@@ -56,7 +62,7 @@ The processing check passes with Swift 6.1.2 on Linux. The Controller/UI integra
 `Dictionary.swift`, `Learning.swift` and `Retention.swift` are Foundation-only, so their checks also run on Linux. They are compiled into the app through `Processing.swift`. The history cap, history-off mode and Delete all data are wired in through `AppServices.swift` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)).
 
 ```sh
-swiftc app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
 ```
 
 - `DictionaryStore` keeps `dictionary.json` (0600, directory 0700). `apply(to:)` replaces exact variants as whole words and space-separated phrases (case-insensitive, longest match). The app also supplies its English lexicon: an unfamiliar alphabetic word of at least six letters may use one uniquely matching enabled term of at least six letters, with the same phonetic key and the existing semantic/respelling checks. A second narrow path permits a source of at least five letters when the stored term adds exactly one adjacent duplicate letter, even if title case is a recognized name (Akash → aakash, Alison → allison). Ordinary lowercase words remain protected, and phonetic/semantic checks, unique matching, enabled entries and explicit-variant priority still apply. Already-correct preferred forms take priority over near terms. Other recognized names, short words and unlisted phrases stay unchanged; explicit variants win. Without a lexicon, application remains exact-only. It inserts the preferred spelling as stored, and capitalizes its first letter only at a sentence start when the spelling is all lowercase. `relevantEntries(for:)` returns the entries present in the text, plus up to 10 whose preferred spelling sounds like a 1–3 word span (`DictionaryStore.soundsLike`: matching phonetic keys and similarity ≥ 0.5, or similarity ≥ 0.75 for terms of 6+ letters). That is what a cloud stage may receive. The broader 1–3 word near matches feed the cleanup prompt and guard; local respelling stays within the narrower single-word rule above. [Certain]
@@ -185,6 +191,13 @@ swiftc app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServ
 
 `Cleanup.swift` is Foundation-only. The app uses it through `Processing.swift` (see above). It provides:
 - `CleanupOptions`: fillers, corrections, and lists toggle independently. All are on by default, and `.faithful` turns all off.
+- `spoken` ("Spoken commands and numbers", on by default in the app): `RuleCleaner.spokenCommands` runs first and handles:
+  - dictated marks and layout
+  - spoken numbers with hundred or a scale word, or before "percent", as digits
+  - @ and # symbols
+  - the explicit "write an email to X saying …" layout
+
+  `CleanupGuard.check` also accepts output that matches `spokenCommands(raw)` (PRD decision, October 14, 2026).
 - `CleanupGuard`: the PRD bound check between raw and cleaned text.
 - `CleanupPrompt`: messages for an LLM provider.
 - `RuleCleaner`: a deterministic local baseline.
@@ -219,7 +232,11 @@ Treat these numbers with caution:
 Known gaps:
 - After a removed hesitation, comma handling uses a word list. This misses introductory phrases ("To be honest, um, I…") and over-keeps after a capitalized first word ("Please, um, don't…").
 - Corrections need an explicit cue set off by punctuation and either a same-category swap (weekday, month, number, time, color, name) or a phrase restarted with the same function word. These stay unchanged: "Order three pizzas, sorry, four", "Add salt, no wait, add sugar", and corrections inside list items.
-- "Remember: first impressions matter, second chances are rare" becomes a list.
+- "Remember: first impressions matter, second chances are rare" becomes a list. Since October 14, 2026 the guard rejects that list on every route, using a short list of nouns that make an ordinal part of a phrase ("first impressions"), so the dictation falls back to the transcript's own words. A phrase missing from that list can still become a list. [Certain]
+- Guard tightening, October 14, 2026 (all routes and styles):
+  - A dropped correction cue must take the word it corrects with it, so "Book it for 2, no, 3 people" → "Book it for 2, 3 people" is rejected. [Certain]
+  - A new "N." line needs an announced, counted enumeration of at least two items that reaches N. "Announced" means a list noun, a colon, or a list-noun sentence just before it, the same rule the Strict and Polish prompts state. Professional's spoken markers ("item one … item two") need no announcement, as its prompt says. Professional ordinals still do, which is stricter than its prompt. [Certain]
+  - Corpus: 426 utterances, 0/237 false rejects, 2382/2382 adversarial outputs rejected in every style. [Certain]
 - The guard does not convert number words; "twenty five" vs "25" is rejected.
 - No real ASR transcripts are in the corpus. [Certain]
 
@@ -253,18 +270,54 @@ No real Gemini key or local model server has been used yet; see [PROVIDERS.md](P
 
 The checks pass with Swift 6.1.2 on Linux, in both `-swift-version 5` and the default mode. No real key has been used. [Certain]
 
+## Apple Intelligence cleanup
+
+`app/AppleCleanup.swift` adds `AppleCleanupProvider`, a `CleanupProvider` (and an `AsyncCleaner`) backed by Apple's FoundationModels system model. You pick it in Settings → Cleanup runs with → Apple Intelligence. [Certain]
+- **How it runs:**
+  - It uses `CleanupPrompt.build` unchanged, puts the system text in the session's instructions, and uses greedy sampling.
+  - Each call gets a fresh session.
+  - Murmur prewarms the model when the route is applied and when a dictation starts.
+- **No key and no disclosure.** It needs no key, sends nothing off this Mac, and adds no disclosure stage.
+- **Availability** is checked on every call.
+  - If the model is unavailable, the provider throws `ProviderError.modelUnavailable`, with one of three reasons: this Mac is not eligible, Apple Intelligence is off, or the model is not ready.
+  - `ProcessingCoordinator` then uses local rules and shows "Inserted with local cleanup." with that reason.
+  - Settings shows the same reason under the route.
+- **Generation errors** are mapped to `ProviderError` and also fall back to local rules:
+
+  | Generation error | `ProviderError` |
+  |---|---|
+  | Context exceeded | payload too large |
+  | Guardrail or refusal | content blocked |
+  | Rate limit | rate limited |
+  | Assets unavailable | model not ready |
+
+- **Context window:** about 4K tokens. Text of 600 words or more is cleaned in sections of about 400 words, each guarded on its own.
+
+```sh
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/check_apple_cleanup.swift -o /tmp/murmur-apple-check && /tmp/murmur-apple-check
+```
+
+**What the check covers.** `check_apple_cleanup.swift` (29 checks) uses an injected status and a fake model:
+- the route wiring: no key read, no refusal, no disclosure;
+- each unavailable reason: the model is never called, the local-rules output is used, and the reason's message is shown;
+- the generation-error fallback;
+- guard rejection of an answer;
+- splitting long text into sections. [Certain]
+
+**Measured on October 14, 2026** with `app/tools/measure_cleanup_route.swift` (MacBook Air M3, 16 GB, macOS 27.0.1). It misses the corpus thresholds in all three styles, though the median latency is 0.6–0.8 s. The numbers are in PRD section 10, "Proposed decision: Apple Intelligence cleanup route". [Certain]
+
 ## Processing routes and API keys (wired in)
 
 `Routes.swift` is Foundation-only and holds the route decisions; Controller and UI display and act on them. [Certain]
 
 ```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/check_routes.swift -o /tmp/murmur-routes-check
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift app/check_routes.swift -o /tmp/murmur-routes-check
 /tmp/murmur-routes-check
 ```
 
 **Settings → Processing routes (R4).** Route and model changes apply as soon as they are made. Custom transcription and cleanup have separate editable base URLs, model IDs and destination-bound Keychain keys. Only endpoint preferences are stored in UserDefaults. [Certain]
-- Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini and Custom Provider. Gemini defaults to `gemini-3.5-transcribe`; other model IDs use Gemini's general audio endpoint. Custom transcription posts multipart audio without dictionary prompts to `/v1/audio/transcriptions`; a compatible server must implement that format. [Certain]
-- Cleanup: Local rules (the default), Gemini or Custom Provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. [Certain]
+- Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini and Custom Provider. Gemini defaults to `gemini-3.5-transcribe`; other model IDs use Gemini's general audio endpoint. Custom transcription posts multipart audio and spelling hints to `/v1/audio/transcriptions`; a compatible server must implement that format. [Certain]
+- Cleanup: Local rules (the default), Apple Intelligence (on this Mac; see [Apple Intelligence cleanup](#apple-intelligence-cleanup)), Gemini or Custom Provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. [Certain]
 - Existing shared custom settings migrate to separate transcription and cleanup settings. Existing keys are copied to separate Keychain accounts; each remains usable only when its saved destination matches that route's endpoint. [Certain]
 
 **A dictation on a cloud route.**

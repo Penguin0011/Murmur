@@ -393,6 +393,11 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(!CleanupPrompt.build(transcript: "x", options: .faithful).system.contains("punctuation"), "faithful omits it")
         let old = try JSONDecoder().decode(CleanupOptions.self, from: Data(#"{"fillers":true,"corrections":true,"lists":true}"#.utf8))
         check(!old.punctuation && CleanupOptions.standard.punctuation && !CleanupOptions.faithful.punctuation, "defaults and old saved options")
+        check(!old.spoken && CleanupOptions.standard.spoken && !CleanupOptions.faithful.spoken, "spoken commands: defaults and old saved options")
+        let suite = UserDefaults(suiteName: "murmur-spoken-\(UUID().uuidString)")!
+        check(ProcessingSettings.load(from: suite).options.spoken, "spoken commands are on when never saved")
+        var saved = ProcessingSettings.load(from: suite); saved.options.spoken = false; saved.save(to: suite)
+        check(!ProcessingSettings.load(from: suite).options.spoken, "spoken commands off round-trips")
     }
 
     static func learningChecks(_ dir: URL, _ defaults: UserDefaults) throws {
