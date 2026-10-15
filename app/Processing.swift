@@ -104,7 +104,7 @@ final class ProcessingCoordinator {
     static let punctuationOnly = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
 
     /// `directory` holds dictionary.json and ledger.json (MurmurDataLocations.standard layout).
-    /// `isCommonWord` is the learning lexicon (NSSpellChecker in the app; a fake set in checks).
+    /// `isCommonWord` guards learning and dictionary respelling (NSSpellChecker in the app).
     init(directory: URL, defaults: UserDefaults = .standard, isCommonWord: ((String) -> Bool)? = nil) throws {
         self.defaults = defaults
         dictionary = try DictionaryStore(directory: directory)
@@ -125,7 +125,7 @@ final class ProcessingCoordinator {
 
     /// Dictionary-applied text and the relevant terms for this transcript.
     private func prepare(_ raw: String) -> (text: String, terms: [String]) {
-        let applied = dictionary.apply(to: raw)
+        let applied = dictionary.apply(to: raw, isCommonWord: ledger.isCommonWord)
         var seen = Set<UUID>()
         var terms: [String] = []
         for entry in dictionary.relevantEntries(for: raw) + dictionary.relevantEntries(for: applied) where seen.insert(entry.id).inserted {

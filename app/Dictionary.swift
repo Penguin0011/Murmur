@@ -245,13 +245,13 @@ final class DictionaryStore {
         return table
     }
 
-    /// Replaces whole-word variant phrases with preferred spellings. Matching is exact on the
-    /// stored variants after case folding: no fuzzy or phonetic matching, so similar-sounding
-    /// words are never touched. Words in a phrase must be separated by spaces/tabs only (a line
-    /// break or punctuation ends a phrase). At each position the longest phrase wins.
-    func apply(to text: String) -> String {
+    /// Explicit variants win. With a lexicon, an unfamiliar single word may also use one unique
+    /// phonetic term; recognized words/names, short words and unlisted phrases stay unchanged.
+    /// Punctuation or a line break ends a phrase; the longest explicit phrase wins.
+    func apply(to text: String, isCommonWord: ((String) -> Bool)? = nil) -> String {
         let table = variantTable()
-        guard !table.isEmpty else { return text }
+        let terms = isCommonWord == nil ? [] : entries.filter { $0.enabled && $0.preferred.count >= 6 && $0.preferred.allSatisfy(\.isLetter) }
+        guard !table.isEmpty || !terms.isEmpty else { return text }
         let maxWords = table.keys.map { $0.split(separator: " ").count }.max() ?? 1
         let chars = Array(text)
         let words = TermText.tokens(chars)
@@ -264,7 +264,19 @@ final class DictionaryStore {
                 let span = words[i..<(i + length)]
                 guard Self.spacedPhrase(span, chars) else { continue }
                 let key = span.map(\.folded).joined(separator: " ")
-                guard let entry = table[key] else { continue }
+                var entry = table[key]
+                if entry == nil, length == 1, key.count >= 6, key.allSatisfy(\.isLetter),
+                   let common = isCommonWord, !common(key), !common(key.capitalized) {
+                    // Check title case too: the English lexicon recognizes Robert, not robert.
+                    let exact = terms.filter { TermText.fold($0.preferred) == key }
+                    let candidates = exact.isEmpty ? terms.filter { term in
+                        CorrectionFilter.phoneticKey(key) == CorrectionFilter.phoneticKey(term.preferred) &&
+                        CorrectionFilter.evaluate(source: words[i].text, target: term.preferred, isCommonWord: common)
+                            == .accepted(source: words[i].text, target: term.preferred)
+                    } : exact
+                    if candidates.count == 1 { entry = candidates[0] }
+                }
+                guard let entry else { continue }
                 let start = words[i].start, end = words[i + length - 1].end
                 output += String(chars[cursor..<start])
                 output += Self.cased(entry.preferred, original: String(chars[start..<end]),
