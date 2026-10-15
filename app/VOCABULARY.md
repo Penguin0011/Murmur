@@ -19,6 +19,16 @@ Any intentional replacement must explicitly address this decision, provide provi
 
 The user's result is qualitative testing of the installed build, not a controlled benchmark. The provider/model, audio samples, echo counts, and recognition error rates were not recorded in the report. Improvement across all providers is not established. [Certain]
 
+## Controlled follow-up — acceptance failed
+
+The fresh [PR #45 test results](../PR45_TEST_RESULTS.md) record 30 paired synthetic-audio comparisons on the actual candidate `fb55557`, using Groq `whisper-large-v3-turbo`, plus six real Standard cleanup calls on Cerebras `gpt-oss-120b`. All 60 ASR calls succeeded without retries, and the deterministic checks, build and signature verification passed. [Certain]
+
+Prompt removal reduced unspoken dictionary additions on direct silence/noise calls from 6/6 to 0/6, but both arms had 0/24 additions during speech. The normal app route skipped the silent fixtures without uploading them, so this does not reproduce the historical long-dictation echo. [Certain]
+
+For the rare-term fixtures, Faithful-mode exact preferred spellings fell from 18/18 with the prompt to 6/18 without it; ignoring capitalization, the comparison was 18/18 versus 9/18. Standard model cleanup recovered the unprompted outputs to 18/18 word spellings ignoring capitalization and 16/18 exact preferred spellings, without guard fallback. [Certain]
+
+The handoff's no-loss acceptance criterion failed. Keep the prompt/filter-removal policy intact as requested, but hold the merge decision for review of the Faithful-mode spelling cost. The user's positive local test does not erase this measured tradeoff, and successful Standard cleanup cannot be assumed in Faithful mode or during cleanup failure. [Certain]
+
 ## Decision
 
 Remove dictionary `prompt` text from the custom OpenAI-compatible transcription adapter and remove `CloudTranscription.stripHintEcho` entirely. Keep the existing provider-specific Gemini vocabulary inputs, post-transcription dictionary correction, silence pre-check, trailing-silence trimming, and LLM answer detection. [Certain]
