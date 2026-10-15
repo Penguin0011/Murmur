@@ -1600,6 +1600,23 @@ private struct PasteFailureCard: View {
     }
 }
 
+/// Gap #18: shown for a few seconds after Escape cancels a recording. Undo processes it as normal.
+private struct UndoCancelCard: View {
+    @ObservedObject var controller: AppController
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "xmark.circle").font(.system(size: 12)).foregroundStyle(.secondary).accessibilityHidden(true)
+            Text("Recording canceled").font(.system(size: 12, weight: .medium)).lineLimit(1)
+            Spacer(minLength: 4)
+            Button("Undo") { controller.undoCancel() }.buttonStyle(.borderedProminent).controlSize(.small)
+                .accessibilityHint("Transcribes and inserts the canceled recording.")
+        }
+        .padding(8).frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .modifier(UtilityGlass(radius: 18))
+    }
+}
+
 /// A short, buttonless notice; learned entries can be removed in Settings → Dictionary.
 private struct LearnedNotice: View {
     let word: String
@@ -1658,6 +1675,17 @@ final class BubblePresenter {
     func hide() { notice = nil; panel.orderOut(nil) }
 
     private var notice: UUID?
+    /// The Undo card; it leaves with the "Recording canceled" status (5 s) or when anything else is shown.
+    func showUndo(screen: NSScreen?) {
+        let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        let width = min(260, max(200, frame.width - 32))
+        let host = NSHostingView(rootView: UndoCancelCard(controller: controller).frame(width: width))
+        panel.contentView = host
+        panel.hasShadow = true
+        panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.minY + 24, width: width, height: host.fittingSize.height), display: true)
+        panel.orderFrontRegardless()
+        notice = UUID()
+    }
     /// The learned-word notice; leaves after 5 s unless something else took the panel first.
     func showLearned(_ word: String, screen: NSScreen?) {
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)

@@ -50,6 +50,8 @@ import Foundation
     /// A line `{"boundary": PATH}` (a clip spanning a cut between two recording chunks) answers
     /// {"replacements":[{"from":…,"to":…}]}: the dictionary replacements kept in that clip, so the
     /// app can repair a term the cut split. Without dictionary support it answers none.
+    /// A line `{"samples": BASE64}` (16 kHz mono little-endian Float32, from memory: an undone
+    /// cancel, which is never written to disk) answers like an audio path.
     static func serve(models: URL, ctc: URL?, vocabulary: URL?) async throws {
         let manager = UnifiedAsrManager()
         let start = Date()
@@ -59,6 +61,12 @@ import Foundation
         while let line = readLine() {
             if line.hasPrefix("{") {
                 let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any]
+                if let encoded = request?["samples"] as? String {
+                    guard let data = Data(base64Encoded: encoded), !data.isEmpty, data.count % 4 == 0,
+                          let text = try? await transcribe(floats(data), manager, dictionary)
+                    else { try emit(["error": "transcription failed"]); continue }
+                    try emit(["text": text]); continue
+                }
                 guard let clip = request?["boundary"] as? String else { try emit(["error": "unknown request"]); continue }
                 let found = (try? await boundaryReplacements(clip, manager, dictionary)) ?? []
                 try emit(["replacements": found.map { ["from": $0.from, "to": $0.to] }])
@@ -152,6 +160,13 @@ import Foundation
         }
         try file.read(into: buffer)
         return try AudioConverter().resampleBuffer(buffer)
+    }
+
+    /// Copies rather than rebinds: Data's storage need not be Float-aligned.
+    static func floats(_ data: Data) -> [Float] {
+        var samples = [Float](repeating: 0, count: data.count / 4)
+        _ = samples.withUnsafeMutableBytes { data.copyBytes(to: $0) }
+        return samples
     }
 
     static func emit(_ object: [String: Any]) throws {

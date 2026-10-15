@@ -11,7 +11,8 @@ import Carbon.HIToolbox
 
     static func main() {
         shortcutChecks()
-        print("Recording checks passed (shortcut validation and custom binding).")
+        undoChecks()
+        print("Recording checks passed (shortcut validation and custom binding; cancel-undo window, discard and session hook).")
     }
 
     static func shortcutChecks() {
@@ -83,5 +84,71 @@ import Carbon.HIToolbox
         toggle.receive(type: .keyDown, event: key(kVK_ANSI_D, true, ctrlOpt, at: 1)); toggle.receive(type: .keyUp, event: key(kVK_ANSI_D, false, ctrlOpt, at: 1.1))
         toggle.receive(type: .keyDown, event: key(kVK_ANSI_D, true, ctrlOpt, at: 4))
         check(actions == [.start, .finish], "press-to-toggle: tap starts, next press finishes")
+    }
+
+    static func undoChecks() {
+        // The window: open for `lifetime`, handed over once, gone after it or on discard.
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let window = UndoWindow<[Float]>(lifetime: 5); window.now = { clock }
+        check(!window.isOpen && window.take() == nil, "nothing held at first")
+        window.hold([0.1, 0.2])
+        clock += 4.9
+        check(window.isOpen && window.take() == [0.1, 0.2], "taken inside the window")
+        check(window.take() == nil && !window.isOpen, "taken only once")
+        window.hold([0.3]); clock += 5
+        check(!window.isOpen && window.take() == nil, "nothing after the window")
+        window.hold([0.4]); window.discard()
+        check(!window.isOpen && window.take() == nil, "discard drops it (a new recording calls this)")
+        window.hold([0.5]); window.hold([0.6])
+        check(window.take() == [0.6], "a later cancel replaces the earlier one")
+        window.hold([0.7]); _ = window.take(); clock += 1
+        check(window.take() == nil, "an expired take also releases the audio")
+
+        // The session shows the canceled file to Undo just before deleting it; a finish never does.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("murmur-undo-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        guard let store = try? RetryAudio(directory: root) else { check(false, "temporary retry store"); return }
+        var seen: [URL] = [], existed = false
+        let session = CaptureSession(store: store, start: { url in try Data([1, 2, 3]).write(to: url) }, stop: { true }, process: { _, done in done() })
+        session.willDeleteCanceled = { url in seen.append(url); existed = FileManager.default.fileExists(atPath: url.path) }
+        session.receive(.start, completed: {})
+        let audio = session.audio
+        session.receive(.cancel, completed: {})
+        check(seen == [audio].compactMap { $0 } && existed, "the hook sees the canceled file before deletion")
+        check(audio.map { !FileManager.default.fileExists(atPath: $0.path) } == true && session.state == .idle, "the file is still deleted at cancel")
+        session.receive(.start, completed: {}); session.receive(.finish, completed: {})
+        check(seen.count == 1, "a finished recording is not offered to Undo")
+
+        // Undo runs as processing: a press meanwhile is ignored, and the shortcut works after.
+        var actions: [ShortcutMachine.Action] = []
+        let listener = ShortcutListener(binding: .controlOptionSpace, processingSeconds: 0) { action, done in actions.append(action); done() }
+        var finish: (() -> Void)?
+        check(listener.runAsProcessing { finish = $0 } && listener.machine.state == .processing, "Undo puts the shortcut into processing")
+        check(!listener.runAsProcessing { _ in }, "a second Undo cannot start")
+        let chord: CGEventFlags = [.maskControl, .maskAlternate]
+        func key(_ down: Bool, _ at: Double) -> CGEvent {
+            let event = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Space), keyDown: down)!
+            event.flags = chord; event.timestamp = UInt64(at * 1_000_000_000); return event
+        }
+        listener.receive(type: .keyDown, event: key(true, 1)); listener.receive(type: .keyUp, event: key(false, 1.5))
+        check(actions.isEmpty, "a press during Undo starts nothing")
+        finish?()
+        check(listener.machine.state == .idle, "Undo finishing frees the shortcut")
+        listener.receive(type: .keyDown, event: key(true, 3))
+        check(actions == [.start], "the next press starts a dictation")
+
+        // Only Escape or the menu's Cancel count as the user's cancel; a lone tap's expiry does not.
+        var explicit: [Bool] = []
+        var cancelling: ShortcutListener!
+        cancelling = ShortcutListener(binding: .controlOptionSpace, processingSeconds: 0) { action, done in
+            if action == .cancel { explicit.append(cancelling.cancelIsExplicit) }; done()
+        }
+        cancelling.receive(type: .keyDown, event: key(true, 10))
+        let escape = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_Escape), keyDown: true)!
+        cancelling.receive(type: .keyDown, event: escape)
+        cancelling.receive(type: .keyUp, event: key(false, 10.5))
+        cancelling.receive(type: .keyDown, event: key(true, 20)); cancelling.receive(type: .keyUp, event: key(false, 20.1))
+        cancelling.emit(cancelling.machine.doublePressExpired(at: 21))
+        check(explicit == [true, false] && !cancelling.cancelIsExplicit, "Escape is explicit; a lone tap's expiry is not")
     }
 }

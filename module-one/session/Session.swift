@@ -25,6 +25,8 @@ final class CaptureSession {
     /// The clock for the recording limit; checks substitute a fixed one.
     var now: () -> Date = Date.init
     var resumeCapture: (() -> Void)?
+    /// Sees a canceled recording's finished file just before it is deleted (Undo reads it into memory).
+    var willDeleteCanceled: ((URL) -> Void)?
     /// Returns a capture started before the main thread handled the press, for .start to adopt.
     var takePrestarted: (() -> URL?)?
 
@@ -75,7 +77,11 @@ final class CaptureSession {
                 DispatchQueue.main.asyncAfter(deadline: .now() + releaseTail) { [weak self] in self?.runTail() }
             } else { stopAndProcess() }
         case .cancel:
-            if state == .listening { _ = stopCapture(); discard(); print("capture=canceled audio=deleted") }
+            if state == .listening {
+                _ = stopCapture()
+                if let audio { willDeleteCanceled?(audio) }
+                discard(); print("capture=canceled audio=deleted")
+            }
             else { cancelEarly() }
         }
     }
@@ -103,4 +109,19 @@ final class CaptureSession {
         if state == .listening { _ = stopCapture(); discard() }
         timer?.invalidate()
     }
+}
+
+/// Holds one item for `lifetime` seconds, then lets it go (gap #18: a canceled recording's audio,
+/// in memory only, so Undo can still process it). `take` hands it over once, inside the window.
+final class UndoWindow<Item> {
+    let lifetime: TimeInterval
+    /// The clock; checks substitute a fixed one.
+    var now: () -> Date = Date.init
+    private var held: (item: Item, until: Date)?
+    init(lifetime: TimeInterval = 5) { self.lifetime = lifetime }
+    func hold(_ item: Item) { held = (item, now().addingTimeInterval(lifetime)) }
+    var isOpen: Bool { held.map { now() < $0.until } ?? false }
+    /// The item while the window is open, then nothing: it is released either way.
+    func take() -> Item? { defer { held = nil }; return isOpen ? held?.item : nil }
+    func discard() { held = nil }
 }

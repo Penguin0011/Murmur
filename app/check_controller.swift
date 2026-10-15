@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import AppKit
 import ApplicationServices
+import AVFoundation
 
 @main struct ControllerChecks {
     static func main() throws {
@@ -65,6 +66,20 @@ import ApplicationServices
         precondition(!AppController.settlesEarly(pending: true, changedAt: 10, now: 11.9))
         precondition(AppController.settlesEarly(pending: true, changedAt: 10, now: 12))
         precondition(!AppController.settlesEarly(pending: false, changedAt: 10, now: 30), "rejected or already settled reading waits for the window")
+        // Undo (gap #18) keeps a canceled recording as 16 kHz mono samples.
+        let undoAudio = FileManager.default.temporaryDirectory.appendingPathComponent("murmur-undo-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: undoAudio) }
+        do {
+            let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+            let file = try AVAudioFile(forWriting: undoAudio, settings: format.settings)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48_000)!; buffer.frameLength = 48_000
+            for i in 0..<48_000 { buffer.floatChannelData![0][i] = sin(Float(i) * 0.05) * 0.5 }
+            try file.write(from: buffer)
+        }
+        let held = AppController.samples16k(undoAudio) ?? []
+        // The resampler drops under 20 ms at the edges, well inside the 0.4 s release tail.
+        precondition(abs(held.count - 16_000) < 500 && held.contains { abs($0) > 0.3 }, "a second at 48 kHz becomes about 16,000 samples")
+        precondition(AppController.samples16k(URL(fileURLWithPath: "/nonexistent.wav")) == nil, "an unreadable file holds nothing")
         print("Controller probe ownership checks passed (multi-buffer copy, private mode, original preserved, failed-copy cleanup).")
     }
     @MainActor static func checkDismissal() throws {

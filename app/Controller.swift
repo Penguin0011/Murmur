@@ -64,8 +64,16 @@ final class WarmRunner: @unchecked Sendable {
     func prepare(helper: URL, launch: HelperLaunch) { queue.async { [self] in _ = start(helper, launch) } }
     /// `boundary`: a clip spanning a chunk cut; the answer lists dictionary replacements, not text.
     func transcribe(_ audio: URL, helper: URL, launch: HelperLaunch, boundary: Bool = false, completion: @escaping (Data?) -> Void) {
+        send(boundary ? (try? JSONSerialization.data(withJSONObject: ["boundary": audio.path])).map { String(decoding: $0, as: UTF8.self) } : audio.path,
+             helper: helper, launch: launch, completion: completion)
+    }
+    /// 16 kHz mono samples held in memory (an undone cancel); the answer is like an audio path's.
+    func transcribe(samples: [Float], helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
+        let encoded = samples.withUnsafeBytes { Data($0).base64EncodedString() }
+        send(#"{"samples":""# + encoded + #""}"#, helper: helper, launch: launch, completion: completion)
+    }
+    private func send(_ line: String?, helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
         queue.async { [self] in
-            let line = boundary ? (try? JSONSerialization.data(withJSONObject: ["boundary": audio.path])).map { String(decoding: $0, as: UTF8.self) } : audio.path
             guard let line, !line.contains("\n"), start(helper, launch), let input,
                   (try? input.write(contentsOf: Data((line + "\n").utf8))) != nil,
                   let line = readLine(timeout: 300) else { stopLocked(); completion(nil); return }
@@ -740,6 +748,7 @@ final class PreStart: @unchecked Sendable {
             self.capture = capture; return url
         }
         session.resumeCapture = { [weak self] in guard let self else { return }; self.setPhase("Listening", self.listeningMessage) }
+        session.willDeleteCanceled = { [weak self] url in self?.holdForUndo(url) }
         session.finishRecording = { [weak self] in timingLog.notice("capture-cap reached"); guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.finish()) }
         session.resetShortcut = { [weak self] in guard let self, let listener = self.listener else { return }; listener.emit(listener.machine.eventStreamLost()); listener.machine.processingFinished() }
     }
@@ -775,6 +784,7 @@ final class PreStart: @unchecked Sendable {
         defer { if action == .start, let retry { prestart.discard(store: retry) } }
         guard sessionAvailable else { done(); return }
         if action == .start {
+            undo.discard()
             guard !IsSecureEventInputEnabled() else { session.resetShortcut?(); setPhase("Error", "Dictation is unavailable while Secure Input is active."); done(); return }
             guard permission() == "authorized" else { session.resetShortcut?(); setPhase("Error", "Allow Microphone access in Settings before dictating."); done(); return }
             // An unconfigured cloud route refuses; it never falls back to local.
@@ -802,7 +812,14 @@ final class PreStart: @unchecked Sendable {
         if action == .start, session.state == .listening { cue(.start) }
         if wasListening, action == .finish || (action == .cancel && listener?.cancelIsExplicit == true) { cue(.stop) }
         if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
-        if action == .cancel { destination = nil; setPhase("Ready", "Recording canceled."); bubble.hide() }
+        if action == .cancel {
+            destination = nil
+            if undo.isOpen {
+                setPhase("Ready", "Recording canceled. Undo is available for \(Int(undo.lifetime)) seconds.")
+                bubble.showUndo(screen: destinationScreen)
+                DispatchQueue.main.asyncAfter(deadline: .now() + undo.lifetime) { [weak self] in if self?.undo.isOpen == false { self?.undo.discard() } }
+            } else { setPhase("Ready", "Recording canceled."); bubble.hide() }
+        }
         else if action == .start && session.state == .idle { setPhase("Error", "The microphone could not start. Check the selected input device.") }
         else if action == .finish && session.state == .idle && phase == "Listening" {
             destination = nil; setPhase("Error", "No audio was captured. Check your microphone and try again.")
@@ -898,6 +915,54 @@ final class PreStart: @unchecked Sendable {
         if cloudRequest.isActive { cancelCloudRequest(); return }
         guard let listener else { return }; listener.cancelByUser()
     }
+    /// A canceled recording kept for Undo (gap #18): 16 kHz mono samples in memory, never on disk,
+    /// plus what its start captured, so Undo processes it as if it had finished normally.
+    private struct Canceled {
+        let samples: [Float]
+        let destination: FocusSnapshot?, mode: WritingMode?, context: ScreenContext?, screen: NSScreen?
+        let transcriber: TranscriptionProvider?, cleaner: CleanupProvider?
+        let insert: Bool, leadingSpace: Bool, modelDirectory: String, started: Date
+    }
+    private let undo = UndoWindow<Canceled>()
+    /// Only a cancel the user asked for (Escape, the menu) can be undone; a lone tap records nothing.
+    private func holdForUndo(_ url: URL) {
+        guard listener?.cancelIsExplicit == true, let samples = Self.samples16k(url), !samples.isEmpty else { return }
+        undo.hold(Canceled(samples: samples, destination: destination, mode: sessionMode, context: sessionContext, screen: destinationScreen,
+                           transcriber: sessionTranscriber, cleaner: processing?.cloudCleaner, insert: insertThisSession,
+                           leadingSpace: leadingSpaceThisSession, modelDirectory: activeModelDirectory, started: listeningStarted))
+    }
+    /// The recording as 16 kHz mono floats, the helper's input rate (a five-minute recording is about 19 MB).
+    static func samples16k(_ url: URL) -> [Float]? {
+        guard let file = try? AVAudioFile(forReading: url), file.length > 0,
+              let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
+              let input = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              (try? file.read(into: input)) != nil, let converter = AVAudioConverter(from: file.processingFormat, to: target) else { return nil }
+        // One call with a buffer for the whole clip returned only part of it; drain in blocks.
+        var samples: [Float] = [], fed = false
+        while let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 16_384) {
+            let status = converter.convert(to: output, error: nil) { _, state in
+                if fed { state.pointee = .endOfStream; return nil }
+                fed = true; state.pointee = .haveData; return input
+            }
+            guard status != .error, let data = output.floatChannelData else { return nil }
+            samples.append(contentsOf: UnsafeBufferPointer(start: data[0], count: Int(output.frameLength)))
+            if status != .haveData { return samples }
+        }
+        return nil
+    }
+    /// The Undo button: the held recording is transcribed, cleaned and inserted like any dictation.
+    func undoCancel() {
+        guard let listener, listener.machine.state == .idle, sessionAvailable, !isBusy, let item = undo.take() else { bubble.hide(); return }
+        _ = listener.runAsProcessing { [weak self] done in
+            guard let self else { done(); return }
+            self.destination = item.destination; self.sessionMode = item.mode; self.sessionContext = item.context
+            self.destinationScreen = item.screen; self.sessionTranscriber = item.transcriber; self.processing?.cloudCleaner = item.cleaner
+            self.insertThisSession = item.insert; self.leadingSpaceThisSession = item.leadingSpace
+            self.activeModelDirectory = item.modelDirectory; self.listeningStarted = item.started
+            self.generation = UUID(); self.recoveryEntryID = nil
+            self.transcribe(nil, held: item.samples, done: done)
+        }
+    }
     private enum Cue: String { case start = "Tink", stop = "Pop" }
     /// Measured October 15, 2026: both cues mixed at full level into a recording added no words,
     /// and a recording of only the cues transcribed as empty, so the stop cue can play at release.
@@ -939,8 +1004,10 @@ final class PreStart: @unchecked Sendable {
         bubble.show(phase: phase, message: message, screen: destinationScreen)
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: announcement ?? message, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
     }
-    private func transcribe(_ audio: URL, done: @escaping () -> Void) {
-        if let provider = sessionTranscriber { transcribeInCloud(audio, with: provider, done: done); return }
+    /// `held`: an undone cancel's samples (gap #18), in memory only. There is then no file: no chunks,
+    /// no one-shot fallback and no retry audio.
+    private func transcribe(_ audio: URL?, held: [Float]? = nil, done: @escaping () -> Void) {
+        if let provider = sessionTranscriber { transcribeInCloud(audio, held: held, with: provider, done: done); return }
         setPhase("Processing", "Transcribing on this Mac…")
         let token = generation; let models = URL(fileURLWithPath: activeModelDirectory)
         guard let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"), let store = records else { setPhase("Error", "The model runtime is unavailable. Audio is saved for retry."); done(); return }
@@ -951,10 +1018,13 @@ final class PreStart: @unchecked Sendable {
             defer { timingLog.notice("model-verify took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3))") }
             guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
                   let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel)
-            else { DispatchQueue.main.async { guard let self, self.generation == token else { return }; self.setPhase("Error", "Model verification failed. Choose the pinned model folder. Audio is saved for retry."); done() }; return }
+            else { DispatchQueue.main.async { guard let self, self.generation == token else { return }; self.setPhase("Error", "Model verification failed. Choose the pinned model folder. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry.")"); done() }; return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
-                self.runTranscription(helper, launch: launch, audio: audio, store: store, timestamp: timestamp, token: token, done: done)
+                if let audio { self.runTranscription(helper, launch: launch, audio: audio, store: store, timestamp: timestamp, token: token, done: done); return }
+                self.warm.transcribe(samples: held ?? [], helper: helper, launch: launch) { [weak self] line in
+                    self?.handleTranscript(line.map { .success($0) } ?? .failure(CaptureError("Transcription failed")), audio: nil, store: store, timestamp: timestamp, token: token, done: done)
+                }
             }
         }
     }
@@ -1016,7 +1086,8 @@ final class PreStart: @unchecked Sendable {
         }
     }
     /// Shared by the warm and one-shot helpers: parse the last JSON line, save, then deliver. Runs off main.
-    nonisolated private func handleTranscript(_ result: Result<Data, Error>, audio: URL, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
+    nonisolated static let heldDiscarded = "The canceled recording was discarded."
+    nonisolated private func handleTranscript(_ result: Result<Data, Error>, audio: URL?, store: HistoryRouter<HistoryEntry>, timestamp: Date, token: UUID, done: @escaping () -> Void) {
         do {
             let data = try result.get()
             guard let last = String(data: data, encoding: .utf8)?.split(separator: "\n").last,
@@ -1026,25 +1097,30 @@ final class PreStart: @unchecked Sendable {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NoSpeech() }
             let savedEntry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: text, insertionStatus: "saved-not-inserted")
             try store.save(savedEntry)
-            try? FileManager.default.removeItem(at: audio)
+            if let audio { try? FileManager.default.removeItem(at: audio) }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.generation == token else { return }
                 self.runner = nil
                 self.deliver(savedEntry, store: store, token: token, done: done)
             }
         } catch {
-            let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again." : "Transcription failed. Audio is saved for retry for up to 24 hours."
+            let message = error is NoSpeech ? "No speech was detected. Check your microphone and try again."
+                : audio == nil ? "Transcription failed. \(Self.heldDiscarded)" : "Transcription failed. Audio is saved for retry for up to 24 hours."
             DispatchQueue.main.async { [weak self] in guard let self, self.generation == token else { return }; self.runner = nil; self.setPhase("Error", message); done() }
         }
     }
     /// Cloud transcription (R4): one provider call in a cancellable Task, never the local model.
     /// The result then follows the local path: history save, processing, insertion.
-    private func transcribeInCloud(_ audio: URL, with provider: TranscriptionProvider, done: @escaping () -> Void) {
-        guard let store = records else { setPhase("Error", "Private storage is unavailable. Audio is saved for retry."); done(); return }
+    private func transcribeInCloud(_ audio: URL?, held: [Float]?, with provider: TranscriptionProvider, done: @escaping () -> Void) {
+        guard let store = records else { setPhase("Error", "Private storage is unavailable. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry.")"); done(); return }
         let token = generation; let timestamp = listeningStarted
         cloudStage = .transcription; cloudDone = done
         let vocabulary = processing?.dictionary.vocabularyTerms ?? []
-        cloudRequest.start({ await CloudTranscription.run(provider: provider, audioFile: audio, vocabulary: vocabulary) }) { [weak self] outcome in
+        let heldWAV = held.map { WAVAudio.encodePCM16($0, sampleRate: 16_000) }
+        cloudRequest.start({
+            if let heldWAV { return await CloudTranscription.run(provider: provider, audioData: heldWAV, vocabulary: vocabulary) }
+            return await CloudTranscription.run(provider: provider, audioFile: audio ?? URL(fileURLWithPath: "/dev/null"), vocabulary: vocabulary)
+        }) { [weak self] outcome in
             guard let self, self.generation == token else { return }
             self.cloudStage = nil; self.cloudDone = nil
             let text: String, held: Bool
@@ -1053,13 +1129,16 @@ final class PreStart: @unchecked Sendable {
             case .heldAnswerSuspected(let value): text = value; held = true
             case .noSpeech, .failed, .cancelled:
                 // Audio stays for retry (until the 24-hour purge) unless the provider error discards it.
-                if case .failed(_, false) = outcome { try? FileManager.default.removeItem(at: audio) }
-                self.setPhase("Error", CloudTranscription.message(outcome) ?? CloudTranscription.unknownFailure); done(); return
+                if case .failed(_, false) = outcome, let audio { try? FileManager.default.removeItem(at: audio) }
+                var message = CloudTranscription.message(outcome) ?? CloudTranscription.unknownFailure
+                // Held audio has no file to keep for retry.
+                if audio == nil, case .failed(let reason, _) = outcome { message = reason + " " + Self.heldDiscarded }
+                self.setPhase("Error", message); done(); return
             }
             // An answer-shaped LLM transcript is held like a failed cleanup: raw text only, never inserted.
             let entry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: held ? "" : text, insertionStatus: held ? "held-transcript" : "saved-not-inserted")
-            do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the transcript. Audio is saved for retry for up to 24 hours."); done(); return }
-            try? FileManager.default.removeItem(at: audio)
+            do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the transcript. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry for up to 24 hours.")"); done(); return }
+            if let audio { try? FileManager.default.removeItem(at: audio) }
             guard !held else {
                 self.recoveryEntryID = entry.id
                 self.setPhase("Error", CloudTranscription.message(outcome) ?? ""); self.destination = nil; self.historySaved(); done(); return
@@ -1755,6 +1834,7 @@ final class PreStart: @unchecked Sendable {
     func openReleasePage() { if let url = availableRelease?.pageURL { NSWorkspace.shared.open(url) } }
 
     func shutdown() {
+        undo.discard()
         generation = UUID(); cloudRequest.cancel(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
         watchTick(ending: true)
         downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.

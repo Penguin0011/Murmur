@@ -85,6 +85,12 @@ struct ShortcutMachine {
 
     mutating func processingFinished() { if state == .processing { state = .idle } }
 
+    /// Processing that no press started (Undo of a canceled recording): presses wait it out.
+    mutating func beginProcessing() -> Bool {
+        guard state == .idle else { return false }
+        state = .processing; return true
+    }
+
     mutating func eventStreamLost() -> Action? {
         let action = cancel()
         pressedAt = nil
@@ -262,6 +268,14 @@ final class ShortcutListener {
     /// True while a cancel the user asked for (Escape, the menu) is being handled, as opposed to a
     /// lone tap expiring or a lost event stream.
     private(set) var cancelIsExplicit = false
+    /// Runs `work` as processing outside the gesture (Undo). A press meanwhile is ignored, as after
+    /// an automatic stop. False when a dictation is already under way.
+    func runAsProcessing(_ work: (@escaping () -> Void) -> Void) -> Bool {
+        guard queued.isEmpty, machine.beginProcessing() else { return false }
+        userFinished = false; publishState()
+        work { [self] in machine.processingFinished(); publishState() }
+        return true
+    }
     func cancelByUser() { cancelIsExplicit = true; defer { cancelIsExplicit = false }; emit(machine.cancel()) }
     func replayQueued() {
         guard machine.state == .idle, !queued.isEmpty else { return }
