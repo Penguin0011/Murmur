@@ -10,6 +10,7 @@ This handoff is a test plan, not a completed test report. The results template s
 
 - PR: https://github.com/Penguin0011/Murmur/pull/45. Source repository: https://github.com/Penguin0011/Murmur. [Certain]
 - Behavior commit: `ba5f5e2` (`fix(transcription): remove dictionary decoder prompts`). Review notes: `d116e50`. User-tested preservation instructions: `263d5ec7c698a3aae041783d58b714a9d85fd94f`. These are the commits present when this handoff was written; verify the actual PR head before testing. [Certain]
+- Spelling follow-up: `cc5326e` recovers long unfamiliar single words through the production English lexicon and a unique phonetic/semantic dictionary match, without restoring prompts. The saved-response regression now scores 18/18 in Faithful mode; see the current results for the separate original benchmark and follow-up replay. [Certain]
 - Baseline: `b19124b3dbded1d74407ebc1afc529a780f6afa0`, the original PR #45 implementation with the labeled vocabulary prompt and output filter. [Certain]
 - The new implementation **removes** dictionary-derived custom transcription prompts and the entire vocabulary echo filter. It does not add a new filter. Gemini's vocabulary inputs, local Parakeet vocabulary support, post-transcription dictionary correction, silence checks/trimming, and LLM answer detection remain. [Certain]
 - The built candidate was installed at `/Users/aakash/Applications/Murmur.app` and launched. The user subsequently reported, “That seems to work far better.” This is qualitative user testing; no provider/model or controlled audio measurements accompanied that report. [Certain]
@@ -84,12 +85,16 @@ C09/C10 direct-provider calls intentionally measure behavior below the app's sil
 
 Use an isolated dictionary with manual `Aakash` / variant `Akash`, learned `spaceyboi` / variant `spacey boy`, and preferred-only learned `Shelfmate`. Do not seed these into the user's real dictionary.
 
+**Supply the production English lexicon when constructing the tested `ProcessingCoordinator`:** use `NSSpellChecker.shared.checkSpelling(of: word, startingAt: 0, language: "en", wrap: false, inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound` on the main actor, as the app does. A processor initialized without `isCommonWord` intentionally stays exact-only and is a control, not the production spelling path. Keep lowercase/title-case recognition, semantic guards, ambiguity and known-name/product regression cases enabled. [Certain]
+
 1. Feed `Call Akash and spacey boy.` through candidate processing in Faithful mode. Require `Call Aakash and spaceyboi.` without any cleanup call. Also preserve the raw input for recovery/history evidence.
 2. With Faithful mode, require `Send a shelf made report.` to remain unchanged. Preferred-only entries deliberately do not enable fuzzy local replacement. [Certain]
 3. With guarded model cleanup, verify the preferred-only `Shelfmate` correction; record the actual output, guard decision, and whether a fallback occurred. Existing mock-based checks alone do not count as a live cleanup measurement.
 4. Repeat exact correction with a mocked cleanup failure. Require manual and learned variants still to apply; this test must make no live failed-provider request.
 5. For each arm's recorded audio output, score raw spelling separately from dictionary-applied output. Report any recognition loss on C07/C08 even if post-processing repairs it. Do not describe raw recognition and final spelling as the same metric.
 6. If doing UI testing, use normal recording with the configured custom provider and a disposable field. Record route/model, cleanup mode, raw History text and final pasted text using synthetic dictation only. The existing `--test-audio ... --expected-app ...` probe forces local transcription and local processing; it cannot validate this custom-provider change. [Certain]
+
+If only post-transcription dictionary code changed, reuse the saved raw A/B responses to test that stage with the real native lexicon and the same fixture. Record the exact new commit, replayed outputs, control scores and ordinary-corpus checks; label it a replay, not new provider calls. Repeat live ASR only when request/audio behavior changes or evidence leaves a relevant uncertainty.
 
 ## 4. Scoring and decision rules
 
