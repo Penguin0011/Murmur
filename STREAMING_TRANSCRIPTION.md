@@ -124,3 +124,15 @@ When Flash-Lite is rate limited and cleanup goes to Gemma 4, text of 150 words o
 - **Measured** on a 300-word transcript (the 2-minute cap), two rounds: whole Gemma 7.7–8.0 s, sectioned Gemma 3.2 s. [Certain]
 - **Quality:** the sectioned output kept a few fillers and repeats ("like", "the the", "let's, let's") that whole-text Gemma removed. Nothing was added or reworded, and every section passed the guard. [Certain]
 - **Rate limits:** about 3 requests per dictation instead of 1. [Certain]
+
+## Live words: memory and contention on the M3 (October 15, 2026)
+
+Measured for BetterWispr gap #13 with a scratch program on the pinned FluidAudio revision: `UnifiedAsrManager` (offline int8, as the helper loads it) and `StreamingUnifiedAsrManager` [70, 13, 13] int8 in one process, fed 25.8 s of `say` speech at 48 kHz in real time (0.1 s buffers). The streaming encoder files were fetched at the pinned revision; the weights' SHA-256 matches `artifact-pins.json` (590,571,264 bytes). [Certain]
+
+- **Memory:** loading the offline model added no wired memory, because the running Murmur helper already had the same Neural Engine program. Loading the streaming encoder added 0.5–1.2 GB of wired memory (it settles near 0.5–0.6 GB), which roughly doubles the model's memory while it is loaded. The process footprint grew only 40–70 MB. Wired-memory readings are system-wide, so they are noisy. [Certain]
+- **Load:** 11.3 s the first time (compiling), then 0.07 s. [Certain]
+- **Speed:** 23 windows, mean 0.053 s and at most 0.103 s each, against a 1.04 s budget; `finish()` took 0.06 s. Partial text lags speech by about 2 s. [Certain]
+- **Contention:** transcribing the same clip offline while streaming ran back to back took 0.21–0.24 s, against 0.19 s alone. [Certain]
+- **Accuracy:** the streamed final text matched the offline text except for two punctuation marks. The model never revises an emitted token without vocabulary boosting; only the last word can still grow ("onboard" → "onboarding"). [Certain]
+
+**Proposed approach (not built; awaiting the user):** a short-lived second helper (`ModelBench MODELS --stream RATE`) started at recording start. Audio is fed from its own queue over a pipe, never disk, and dropped when the pipe falls behind. It prints partial lines and exits at release or cancel, so the extra memory is held only while recording; the warm helper is untouched. The streaming encoder gets its own pinned file list, availability check and optional download, so existing installs keep dictating without it. The preview is display only. [Likely]

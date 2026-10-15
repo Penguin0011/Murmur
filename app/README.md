@@ -30,7 +30,11 @@ swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/
 /tmp/dictation-history-check
 swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
+swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/check_recording.swift -o /tmp/murmur-recording-check
+/tmp/murmur-recording-check
 ```
+
+`check_recording.swift` covers the recording-experience gaps (BetterWispr #14, #16, #18): which custom shortcuts are refused and why, the stored form, the custom binding's hold, double-press, toggle and Escape behaviour (synthetic CGEvents fed to `ShortcutListener.receive`, no tap); the Automatic microphone rule and the format conversion after a device change; the cancel-undo window (taken once inside 5 s, nothing after, discarded on demand), the session hook that sees a canceled file before deletion, and Undo running as processing. No capture, insertion or key injection. [Certain]
 
 **Verified on macOS, October 6, 2026** (Command Line Tools, macOS 26 SDK): every check passes: launch; history; cleanup (0/237 guard false rejects, 2349/2349 adversarial outputs rejected, 2685/2685 punctuation transfers keep the transcript's words); processing 126; dictionary 177; providers 632 assertions; updates 91 assertions; model download 158; app services; routes 119; boost filter 18; native controller. Counts in dated records below are as of their dates. [Certain]
 
@@ -124,7 +128,11 @@ app/check_ui.sh --saved --bubble-only
 app/check_ui.sh --saved --learned --keep-notice --bubble-only
 app/check_ui.sh --custom-transcription
 app/check_ui.sh --light --dictionary
+app/check_ui.sh --paste-failed --bubble-only
+app/check_ui.sh --undo --bubble-only
 ```
+
+`--paste-failed` shows the paste-failure card (gap #17) with a synthetic three-line text; `--undo` shows the Undo card (gap #18) without its 5-second timer. Settings → General shows the shortcut recorder, the sounds toggle and the Automatic microphone option without a flag. [Certain]
 
 `--dictionary` seeds three sample entries (one turned off); open Settings → Dictionary to see them. The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
 
