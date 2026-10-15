@@ -241,6 +241,10 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
             warning = "The microphone stopped. Check that it is connected."
         } else if micStopped, capture?.engine.isRunning == true { micStopped = false; warning = nil }
         behind = (pumps[meeting.id]?.backlog ?? 0) > MeetingLimits.behind
+        // A denied tap may deliver silence rather than an error (PRD 11.10): say so after 60 s without call audio.
+        if let tap, systemAudioProblem == nil, elapsed > 60, !tap.queue.sync(execute: { tap.heardSignal }), warning == nil {
+            warning = "No call audio yet. If the call is playing, check that Murmur is allowed under System Audio Recording in System Settings → Privacy & Security."
+        } else if let tap, warning?.hasPrefix("No call audio") == true, tap.queue.sync(execute: { tap.heardSignal }) { warning = nil }
         // The aggregate device delivers buffers (silent or not) while the tap runs; none for 5 s means it stopped.
         // ponytail: flagged with a gap, not restarted; restart once if live tests show taps stopping.
         if let tap, let last = tap.queue.sync(execute: { tap.lastBuffer }), now - last > 5, !tapStopped {

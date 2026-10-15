@@ -2094,6 +2094,8 @@ final class PreStart: @unchecked Sendable {
         guard let checker = updateChecker else { if manual { updateStatus = "Update checks are unavailable in this build." }; return }
         guard !checkingForUpdates else { return }
         if !manual {
+            // No automatic network request while a meeting records (PRD 11.10).
+            guard meetingRecorder.live == nil else { return }
             guard UpdateSchedule.shouldAttemptAutomatic(lastAttempt: lastAutomaticUpdateAttempt) else { return }
             lastAutomaticUpdateAttempt = Date()
         }

@@ -132,8 +132,8 @@ final class Source {
             }
             try? FileManager.default.removeItem(at: job.url)
         })
-        let meChunker = Chunker(format: SystemAudioTap.format, directory: folder, boundaries: false)
-        let themChunker = Chunker(format: SystemAudioTap.format, directory: folder, boundaries: false)
+        let meChunker = Chunker(format: SystemAudioTap.format, directory: folder, boundaries: false, fileSettings: Chunker.int16(SystemAudioTap.format))
+        let themChunker = Chunker(format: SystemAudioTap.format, directory: folder, boundaries: false, fileSettings: Chunker.int16(SystemAudioTap.format))
         meChunker.attach(MeetingStreamFeed(stream: .me, folder: folder, offset: 0, enqueue: pump.enqueue, failed: { failed += 1000 }).receive)
         themChunker.attach(MeetingStreamFeed(stream: .them, folder: folder, offset: 0, enqueue: pump.enqueue, failed: { failed += 1000 }).receive)
 

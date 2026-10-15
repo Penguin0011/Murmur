@@ -278,6 +278,7 @@ struct MeetingLiveView: View {
             meter("Me", recorder.meLevel)
             if recorder.live?.source.micOnly == false {
                 meter("Them", recorder.themLevel)
+                if recorder.live?.source.bundleID == "com.apple.Safari" { Text("Safari plays audio through a shared WebKit process, so Mail and other WebKit apps are recorded too.").font(.system(size: 11)).foregroundStyle(Palette.ink64).fixedSize(horizontal: false, vertical: true) }
                 if recorder.live?.source.allApps == true { Text("All apps: music and notification sounds are recorded too.").font(.system(size: 11)).foregroundStyle(Palette.ink64) }
             }
             ScrollViewReader { proxy in

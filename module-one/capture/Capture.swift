@@ -136,7 +136,7 @@ final class Capture {
             file = try AVAudioFile(forWriting: url, settings: format.settings)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         }
-        if let chunkFolder { chunker = Chunker(format: format, directory: chunkFolder, boundaries: false) }
+        if let chunkFolder { chunker = Chunker(format: format, directory: chunkFolder, boundaries: false, fileSettings: Chunker.int16(format)) }
         else if Chunker.directory != nil { chunker = Chunker(format: format) }
         // Install before start: capture does not wait for tap/hold classification.
         installTap(inputFormat)
@@ -261,6 +261,8 @@ final class Chunker {
     private let folder: URL?
     /// Boundary clips repair dictionary terms in a joined dictation; meeting lines are not joined.
     private let boundaries: Bool
+    /// Settings of chunk files on disk; a meeting writes 16-bit samples to halve its disk use.
+    private let fileSettings: [String: Any]?
     static let target: TimeInterval = 15, slack: TimeInterval = 5, window: TimeInterval = 0.2
     private let format: AVAudioFormat
     private var buffers: [(buffer: AVAudioPCMBuffer, energy: Double)] = []
@@ -279,8 +281,8 @@ final class Chunker {
     private var handler: ((Event) -> Void)?
     private var failed = false, finished = false
 
-    init(format: AVAudioFormat, directory: URL? = nil, boundaries: Bool = true) {
-        self.format = format; folder = directory; self.boundaries = boundaries
+    init(format: AVAudioFormat, directory: URL? = nil, boundaries: Bool = true, fileSettings: [String: Any]? = nil) {
+        self.format = format; folder = directory; self.boundaries = boundaries; self.fileSettings = fileSettings
     }
 
     /// Receives every event in order, replaying earlier ones. `.end` follows an empty last chunk;
@@ -391,7 +393,7 @@ final class Chunker {
             let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
             guard fd >= 0 else { throw CaptureError("Cannot create chunk file") }
             close(fd)
-            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            let file = try AVAudioFile(forWriting: url, settings: fileSettings ?? format.settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
             for buffer in audio { try file.write(from: buffer) }
             return url
         } catch { try? FileManager.default.removeItem(at: url); return nil }
@@ -418,6 +420,12 @@ final class Chunker {
             }
         }
         return nil
+    }
+
+    /// 16-bit linear PCM at `format`'s rate and channel count, for meeting chunk files.
+    static func int16(_ format: AVAudioFormat) -> [String: Any] {
+        [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: format.sampleRate, AVNumberOfChannelsKey: format.channelCount,
+         AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false]
     }
 
     private func send(_ event: Event) { if let handler { handler(event) } else { pending.append(event) } }

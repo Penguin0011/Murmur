@@ -69,7 +69,7 @@ final class SystemAudioTap {
     private var target: TapTarget = .allExcept([])
     private var tappedIDs: [AudioObjectID] = []
 
-    init(chunkFolder: URL) { chunker = Chunker(format: Self.format, directory: chunkFolder, boundaries: false) }
+    init(chunkFolder: URL) { chunker = Chunker(format: Self.format, directory: chunkFolder, boundaries: false, fileSettings: Chunker.int16(Self.format)) }
     /// Replays earlier events, as Capture.attachChunks does.
     func attachChunks(_ handler: @escaping (Chunker.Event) -> Void) { queue.sync { chunker.attach(handler) } }
 
