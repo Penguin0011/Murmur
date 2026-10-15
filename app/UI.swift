@@ -237,11 +237,15 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Picker("Microphone", selection: $controller.inputDeviceUID) {
                 Text("System default").tag("")
+                Text("Automatic").tag(MicrophoneChoice.automatic)
                 ForEach(devices, id: \.uid) { device in Text(device.name).tag(device.uid) }
-                if !saved.isEmpty && !devices.contains(where: { $0.uid == saved }) { Text("Chosen microphone (not connected)").tag(saved) }
+                if !saved.isEmpty && saved != MicrophoneChoice.automatic && !devices.contains(where: { $0.uid == saved }) { Text("Chosen microphone (not connected)").tag(saved) }
             }
             .labelsHidden()
-            help("Used for the next dictation. If the chosen microphone is not connected, Murmur uses the system default.")
+            help(saved == MicrophoneChoice.automatic
+                 ? "Uses the Mac’s built-in microphone instead of a Bluetooth headset’s while the built-in one is available, so AirPods and other headsets keep full playback quality. Otherwise the system default."
+                 : "Used for the next dictation. If the chosen microphone is not connected, Murmur uses the system default.")
+            help("If the microphone changes while you dictate, recording continues on the new one and keeps what was already recorded.")
         }
     }
 

@@ -564,7 +564,9 @@ final class PreStart: @unchecked Sendable {
                 if self.modelDownloadInFlight, let status = self.downloader?.status(), status != self.modelStatus { self.modelStatus = status }
                 if self.dictionaryDownloadInFlight, let status = self.dictionaryDownloader?.status(), status != self.dictionaryModelStatus { self.dictionaryModelStatus = status }
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
-                   !capture.engine.isRunning || capture.queue.sync(execute: { capture.writeError != nil }) {
+                   // A device change stops the engine; it restarts on the current device (gap #16) and only
+                   // an engine that cannot restart counts as an interruption.
+                   (!capture.engine.isRunning && !capture.restart()) || capture.queue.sync(execute: { capture.writeError != nil }) {
                     let running = capture.engine.isRunning, writeFailed = capture.queue.sync { capture.writeError != nil }
                     timingLog.notice("capture-interrupted engine-running=\(running, privacy: .public) write-error=\(writeFailed, privacy: .public)")
                     self.recordingFailed = true; self.stopRecording()

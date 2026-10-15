@@ -3,6 +3,7 @@
 import Foundation
 import CoreGraphics
 import Carbon.HIToolbox
+import AVFoundation
 
 @main struct RecordingChecks {
     static func check(_ condition: Bool, _ message: String) {
@@ -12,7 +13,8 @@ import Carbon.HIToolbox
     static func main() {
         shortcutChecks()
         undoChecks()
-        print("Recording checks passed (shortcut validation and custom binding; cancel-undo window, discard and session hook).")
+        microphoneChecks()
+        print("Recording checks passed (shortcut validation and custom binding; cancel-undo window, discard and session hook; Automatic microphone rule).")
     }
 
     static func shortcutChecks() {
@@ -150,5 +152,34 @@ import Carbon.HIToolbox
         cancelling.receive(type: .keyDown, event: key(true, 20)); cancelling.receive(type: .keyUp, event: key(false, 20.1))
         cancelling.emit(cancelling.machine.doublePressExpired(at: 21))
         check(explicit == [true, false] && !cancelling.cancelIsExplicit, "Escape is explicit; a lone tap's expiry is not")
+    }
+
+    static func microphoneChecks() {
+        typealias D = MicrophoneChoice.Device
+        let builtIn = D(uid: "BuiltInMicrophoneDevice", transport: .builtIn, alive: true)
+        let airPods = D(uid: "AA-BB-CC:input", transport: .bluetooth, alive: true)
+        let usb = D(uid: "usb-mic", transport: .other, alive: true)
+        func pick(_ current: String?, _ devices: [D]) -> String? { MicrophoneChoice.automaticUID(defaultInput: current, devices: devices) }
+        check(pick(airPods.uid, [builtIn, airPods]) == builtIn.uid, "Bluetooth default with a built-in mic → built-in")
+        check(pick(airPods.uid, [builtIn, airPods, usb]) == builtIn.uid, "also with other devices around")
+        check(pick(airPods.uid, [airPods]) == nil, "Bluetooth default, no built-in mic (Mac mini) → system default")
+        check(pick(airPods.uid, [D(uid: builtIn.uid, transport: .builtIn, alive: false), airPods]) == nil, "built-in mic not alive → system default")
+        check(pick(usb.uid, [builtIn, usb, airPods]) == nil, "USB default → system default")
+        check(pick(builtIn.uid, [builtIn, airPods]) == nil, "built-in default → system default (already built-in)")
+        check(pick(nil, [builtIn, airPods]) == nil && pick("gone", [builtIn]) == nil, "unknown default → system default")
+        check(MicrophoneChoice.automatic != "", "Automatic has a stored value distinct from System default")
+
+        // Mid-recording format change: a 16 kHz headset buffer converts to the file's 48 kHz format.
+        let from = AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1)!, to = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let converter = AVAudioConverter(from: from, to: to)!
+        var total = 0
+        for _ in 0..<10 {
+            let buffer = AVAudioPCMBuffer(pcmFormat: from, frameCapacity: 1600)!; buffer.frameLength = 1600
+            for i in 0..<1600 { buffer.floatChannelData![0][i] = sin(Float(i) * 0.1) }
+            guard let out = Capture.convert(buffer, with: converter) else { check(false, "conversion"); return }
+            check(out.format == to, "converted to the file's format")
+            total += Int(out.frameLength)
+        }
+        check(abs(total - 48_000) < 200, "a second of 16 kHz audio becomes about a second at 48 kHz (\(total))")
     }
 }
