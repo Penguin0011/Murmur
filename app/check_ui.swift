@@ -2,6 +2,9 @@
 import AppKit
 import SwiftUI
 
+/// Keeps the fixture's live meeting panel alive.
+@MainActor var fixtureMeetingPanel: MeetingPanelPresenter?
+
 @MainActor final class FixtureDelegate: NSObject, NSApplicationDelegate {
     var controller: AppController?
     @objc func quit() { NSApp.terminate(nil) }
@@ -98,6 +101,7 @@ import SwiftUI
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }
             if args.contains("--settings") || args.contains("--dictionary") { controller.screenRequest = "settings" }
+            if args.contains("--meeting-settings") { controller.meetingTranscription = args.contains("--cloud") ? .cloud : .local; controller.screenRequest = "meeting-settings" }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
             controller.message = CommandLine.arguments.contains("--credential-warning")
@@ -122,11 +126,35 @@ import SwiftUI
                     MainActor.assumeIsolated { controller.bubble.showLearned("Aakash", screen: nil) }
                 }
             }
+            // Meeting notes (PRD 11.9): --meetings shows the page, --meeting-live the live panel, --consent the sheet.
+            if args.contains("--meetings") || args.contains("--meeting-live") || args.contains("--consent") {
+                var call = Meeting(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-7200), source: MeetingSource(name: "Zoom", bundleID: "us.zoom.xos"))
+                call.insert(stream: .them, start: 2, end: 16, text: "Thanks for joining. Let's go over the synthetic launch plan for next week.")
+                call.insert(stream: .me, start: 3, end: 17, text: "Sure. let's go over the synthetic launch plan for next week")
+                call.insert(stream: .me, start: 18, end: 31, text: "I can draft the checklist by Thursday if that works for everyone.")
+                call.insert(stream: .them, start: 30, end: 44, text: "That works. Send it to the team channel when it's ready.")
+                call.myNotes = "Synthetic note: checklist due Thursday."
+                call.seconds = 1834; call.finished = true
+                var solo = Meeting(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-86400 * 2), source: .microphoneOnly)
+                solo.insert(stream: .me, start: 0, end: 12, text: "Synthetic voice memo recorded with only the microphone.")
+                solo.finished = true
+                var live = Meeting(id: UUID().uuidString, recordedAt: Date(), source: MeetingSource(name: "Google Chrome", bundleID: "com.google.Chrome"))
+                live.insert(stream: .them, start: 0, end: 14, text: "Synthetic participant line in a live meeting.")
+                live.insert(stream: .me, start: 14, end: 28, text: "Synthetic reply that wraps onto a second line in the narrow live panel.")
+                live.seconds = 754
+                let recorder = controller.meetingRecorder
+                let panel = MeetingPanelPresenter(recorder: recorder)
+                recorder.onLiveChange = { panel.update() }
+                recorder.showFixture([call, solo], live: args.contains("--meeting-live") ? live : nil, leftovers: [solo.id: 2])
+                if args.contains("--consent") { recorder.consentPending = .everything }
+                controller.screenRequest = "meetings"
+                fixtureMeetingPanel = panel
+            }
             if CommandLine.arguments.contains("--bubble-only") { window.orderOut(nil) }
             // --snapshot PATH renders the window offscreen to a PNG and quits; works with the screen locked.
             if let flag = args.firstIndex(of: "--snapshot"), args.indices.contains(flag + 1) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    if let view = window.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                    if let view = args.contains("--meeting-live") ? fixtureMeetingPanel?.view : window.contentView, let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                         view.cacheDisplay(in: view.bounds, to: image)
                         try? image.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: args[flag + 1]))
                     }

@@ -91,6 +91,12 @@ final class Capture {
         }
     }
 
+    /// Only a dictation's capture becomes `current`, the one the shortcut thread cuts at release.
+    /// A meeting's microphone passes false, so a dictation during a meeting never cuts it (PRD 11.1).
+    func register(current: Bool) { if current { Self.currentLock.withLock { Self._current = self } } }
+    /// Clears `current` only when it is this capture, as `stop` does.
+    func unregister() { Self.currentLock.withLock { if Self._current === self { Self._current = nil } } }
+
     func cut(after uptime: TimeInterval) {
         queue.async { [self] in
             cutoff = min(cutoff, uptime)
@@ -121,24 +127,30 @@ final class Capture {
         if status != noErr { timingLog.notice("input-device-set failed status=\(status)") }
     }
 
-    func start(url: URL) throws {
+    /// Dictation passes only `url`. A meeting's microphone (PRD 11.1) passes no file, a fixed 16 kHz
+    /// mono format, its own chunk folder, and `current: false` so the shortcut thread never cuts it.
+    func start(url: URL?, fixedFormat: AVAudioFormat? = nil, chunkFolder: URL? = nil, current: Bool = true) throws {
         let input = engine.inputNode
         pinInput()
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
+        let inputFormat = input.outputFormat(forBus: 0)
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw CaptureError("No usable system microphone format")
         }
+        let format = fixedFormat ?? inputFormat
         self.format = format
-        file = try AVAudioFile(forWriting: url, settings: format.settings)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        if Chunker.directory != nil { chunker = Chunker(format: format) }
+        if let url {
+            file = try AVAudioFile(forWriting: url, settings: format.settings)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
+        if let chunkFolder { chunker = Chunker(format: format, directory: chunkFolder, boundaries: false, fileSettings: Chunker.int16(format)) }
+        else if Chunker.directory != nil { chunker = Chunker(format: format) }
         // Install before start: capture does not wait for tap/hold classification.
-        installTap(format)
+        installTap(inputFormat)
         started = ProcessInfo.processInfo.systemUptime
         do { try engine.start() }
         catch { engine.inputNode.removeTap(onBus: 0); queue.sync { file = nil }; throw error }
         let running = ProcessInfo.processInfo.systemUptime
-        Self.currentLock.withLock { Self._current = self }
+        register(current: current)
         // A device change (a headset connecting, the chosen mic unplugged) stops the engine; follow it.
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
             _ = self?.restart()
@@ -215,7 +227,7 @@ final class Capture {
     func stop() {
         guard restartLock.withLock({ defer { stopped = true }; return !stopped }) else { return }
         if let observer { NotificationCenter.default.removeObserver(observer) }
-        Self.currentLock.withLock { if Self._current === self { Self._current = nil } }
+        unregister()
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         // The last chunk is cut here; chunks nobody attached to (a cloud route) are deleted.
@@ -251,6 +263,12 @@ enum MicrophoneChoice {
 final class Chunker {
     /// Private per-user folder for chunk files; nil turns chunking off.
     nonisolated(unsafe) static var directory: URL?
+    /// A meeting stream's own folder (PRD 11.5); nil uses `directory`.
+    private let folder: URL?
+    /// Boundary clips repair dictionary terms in a joined dictation; meeting lines are not joined.
+    private let boundaries: Bool
+    /// Settings of chunk files on disk; a meeting writes 16-bit samples to halve its disk use.
+    private let fileSettings: [String: Any]?
     static let target: TimeInterval = 15, slack: TimeInterval = 5, window: TimeInterval = 0.2
     private let format: AVAudioFormat
     private var buffers: [(buffer: AVAudioPCMBuffer, energy: Double)] = []
@@ -269,7 +287,9 @@ final class Chunker {
     private var handler: ((Event) -> Void)?
     private var failed = false, finished = false
 
-    init(format: AVAudioFormat) { self.format = format }
+    init(format: AVAudioFormat, directory: URL? = nil, boundaries: Bool = true, fileSettings: [String: Any]? = nil) {
+        self.format = format; folder = directory; self.boundaries = boundaries; self.fileSettings = fileSettings
+    }
 
     /// Receives every event in order, replaying earlier ones. `.end` follows an empty last chunk;
     /// after `.failed` nothing more is sent and the caller uses the full WAV.
@@ -292,6 +312,7 @@ final class Chunker {
         emit(chunk, final: false, sentenceEnd: Self.pauseLength(shape, at: cut, rate: format.sampleRate) >= Self.sentencePause)
         buffers.removeFirst(cut); frames = buffers.reduce(0) { $0 + Int($1.buffer.frameLength) }
         guard !failed else { return }
+        guard boundaries else { return }
         boundaryBefore = Self.tail(chunk, seconds: Self.boundarySpan, rate: format.sampleRate)
         if Double(frames) >= Self.boundarySpan * format.sampleRate { emitBoundary() }
     }
@@ -307,7 +328,7 @@ final class Chunker {
     /// Writes the last cut's boundary clip: the tail before the cut and up to `boundarySpan` after it.
     /// A failed write only skips the repair; the chunks are unaffected.
     private func emitBoundary() {
-        guard let before = boundaryBefore, let directory = Self.directory else { boundaryBefore = nil; return }
+        guard let before = boundaryBefore, let directory = folder ?? Self.directory else { boundaryBefore = nil; return }
         boundaryBefore = nil
         let after = Self.head(buffers.map(\.buffer), seconds: Self.boundarySpan, rate: format.sampleRate)
         guard !after.isEmpty, let url = write(before + after, in: directory) else { return }
@@ -367,7 +388,7 @@ final class Chunker {
 
     private func emit(_ chunk: [AVAudioPCMBuffer], final: Bool, sentenceEnd: Bool) {
         guard !chunk.isEmpty else { send(.end); return }
-        guard let directory = Self.directory, let url = write(chunk, in: directory) else { failed = true; send(.failed); return }
+        guard let directory = folder ?? Self.directory, let url = write(chunk, in: directory) else { failed = true; send(.failed); return }
         send(.chunk(url, last: final, sentenceEnd: sentenceEnd))
     }
 
@@ -378,7 +399,7 @@ final class Chunker {
             let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
             guard fd >= 0 else { throw CaptureError("Cannot create chunk file") }
             close(fd)
-            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            let file = try AVAudioFile(forWriting: url, settings: fileSettings ?? format.settings, commonFormat: format.commonFormat, interleaved: format.isInterleaved)
             for buffer in audio { try file.write(from: buffer) }
             return url
         } catch { try? FileManager.default.removeItem(at: url); return nil }
@@ -405,6 +426,12 @@ final class Chunker {
             }
         }
         return nil
+    }
+
+    /// 16-bit linear PCM at `format`'s rate and channel count, for meeting chunk files.
+    static func int16(_ format: AVAudioFormat) -> [String: Any] {
+        [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: format.sampleRate, AVNumberOfChannelsKey: format.channelCount,
+         AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false]
     }
 
     private func send(_ event: Event) { if let handler { handler(event) } else { pending.append(event) } }

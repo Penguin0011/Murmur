@@ -16,7 +16,7 @@ extension EnvironmentValues {
 }
 
 // Glass belongs to the floating status and action layers; reading surfaces stay opaque.
-private struct UtilityGlass: ViewModifier {
+struct UtilityGlass: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.utilityOpaquePreview) private var opaquePreview
@@ -82,7 +82,7 @@ enum Logo {
     }()
 }
 
-private struct InkButtonStyle: ButtonStyle {
+struct InkButtonStyle: ButtonStyle {
     enum Kind { case filled, outline, accent, plain }
     var kind: Kind = .filled
     @Environment(\.isEnabled) private var enabled
@@ -130,7 +130,7 @@ private struct WindowAppearance: NSViewRepresentable {
 
 struct SettingsView: View {
     @ObservedObject var controller: AppController
-    private enum Screen { case home, insights, settings, history, setup }
+    private enum Screen { case home, insights, meetings, settings, history, setup }
     @State private var screen = Screen.home
     /// The welcome guide's current step (gap #21), saved as it changes so the guide resumes there.
     @State private var guideStep = WelcomeGuide.Step.microphone
@@ -162,7 +162,7 @@ struct SettingsView: View {
     /// API address and model apply when editing ends (Return or leaving the field), not per keystroke.
     @FocusState private var apiFieldFocused: Bool
 
-    private static let sections = ["General", "Transcription", "Cleanup", "Modes", "Dictionary", "History & Privacy", "API Keys", "Updates"]
+    private static let sections = ["General", "Transcription", "Cleanup", "Modes", "Dictionary", "History & Privacy", "API Keys", "Updates", "Meetings"]
     private static let ledes = [
         "The shortcut, how text is inserted, and what Murmur is allowed to do.",
         "Where your voice is turned into text. On this Mac by default.",
@@ -171,7 +171,8 @@ struct SettingsView: View {
         "Words Murmur should spell your way, in every mode.",
         "What Murmur saves, and for how long. Nothing leaves this Mac.",
         "Needed only for cloud routes. Stored in your Keychain.",
-        "Murmur checks for new versions. You install them yourself."
+        "Murmur checks for new versions. You install them yourself.",
+        "Where meeting audio is transcribed, apart from dictation."
     ]
 
     var body: some View {
@@ -182,6 +183,7 @@ struct SettingsView: View {
                 switch screen {
                 case .home: home
                 case .insights: insightsView
+                case .meetings: MeetingsPage(controller: controller, recorder: controller.meetingRecorder)
                 case .settings: settings
                 default: history
                 }
@@ -224,6 +226,8 @@ struct SettingsView: View {
         switch request {
         case "guide": WelcomeGuide.replay(.standard); guideStep = .microphone; screen = .setup
         case "insights": screen = .insights
+        case "meetings": screen = .meetings
+        case "meeting-settings": section = 8; screen = .settings
         case "settings": screen = .settings
         default: screen = .home
         }
@@ -342,24 +346,26 @@ struct SettingsView: View {
 
     // MARK: Header
 
-    /// Four tabs leave no room for the route label at the 760-point minimum width; it drops first.
+    /// Five tabs leave no room for the route label at the 760-point minimum width; it drops first,
+    /// then the tabs tighten. Labels never wrap, so ViewThatFits can tell when a row does not fit.
     private var header: some View {
-        ViewThatFits(in: .horizontal) { headerRow(showRoute: true); headerRow(showRoute: false) }
+        ViewThatFits(in: .horizontal) { headerRow(showRoute: true); headerRow(showRoute: false); headerRow(showRoute: false, tight: true) }
             .padding(.horizontal, 24).frame(height: 64)
             .overlay(alignment: .bottom) { rule }
     }
 
-    private func headerRow(showRoute: Bool) -> some View {
-        HStack(spacing: 32) {
+    private func headerRow(showRoute: Bool, tight: Bool = false) -> some View {
+        HStack(spacing: tight ? 16 : 32) {
             HStack(spacing: 12) {
                 Logo.mark(size: 32)
                 wordmark("Murmur", size: 24)
             }
-            HStack(spacing: 4) {
-                tab("Home", .home, count: nil)
-                tab("Insights", .insights, count: nil)
-                tab("History", .history, count: controller.history.count)
-                tab("Settings", .settings, count: nil)
+            HStack(spacing: tight ? 0 : 4) {
+                tab("Home", .home, count: nil, tight: tight)
+                tab("Insights", .insights, count: nil, tight: tight)
+                tab("Meetings", .meetings, count: nil, tight: tight)
+                tab("History", .history, count: controller.history.count, tight: tight)
+                tab("Settings", .settings, count: nil, tight: tight)
             }
             Spacer()
             HStack(spacing: 16) {
@@ -373,13 +379,14 @@ struct SettingsView: View {
         }
     }
 
-    private func tab(_ title: String, _ target: Screen, count: Int?) -> some View {
+    private func tab(_ title: String, _ target: Screen, count: Int?, tight: Bool = false) -> some View {
         Button { screen = target } label: {
             HStack(spacing: 6) {
-                mono(title, size: 13)
-                if let count { mono("\(count)", size: 13, color: Palette.ink64) }
+                mono(title, size: tight ? 12 : 13)
+                if let count { mono("\(count)", size: tight ? 12 : 13, color: Palette.ink64) }
             }
-            .padding(.horizontal, 14).frame(height: 44)
+            .lineLimit(1).fixedSize()
+            .padding(.horizontal, tight ? 9 : 14).frame(height: 44)
             .overlay(alignment: .bottom) { Rectangle().fill(screen == target ? Palette.accent : Color.clear).frame(height: 2) }
             .contentShape(Rectangle())
         }
@@ -464,7 +471,25 @@ struct SettingsView: View {
         case 4: dictionary
         case 5: privacy
         case 6: apiKeys
+        case 8: meetingSettings
         default: updates
+        }
+    }
+
+    /// Settings → Meetings (decision of October 15, 2026, amending Q2): the meeting transcription route.
+    private var meetingSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            eyebrow("Meeting transcription").padding(.top, 20)
+            segmented([(MeetingTranscription.local, "On this Mac (Parakeet)"), (MeetingTranscription.cloud, "Cloud (\(controller.cloudTranscriber.displayName))")], $controller.meetingTranscription)
+            if controller.meetingTranscription == .local {
+                help("Meeting audio is transcribed on this Mac and never leaves it. This is the default.")
+            } else if let cloud = controller.meetingCloudNote {
+                help(cloud.note, color: Palette.ink)
+                help(cloud.disclosure)
+            } else {
+                help("No cloud transcriber is set up. Choose one and save its key in Settings → Transcription and API Keys.", color: Palette.ink)
+            }
+            help("A change applies to meetings started afterwards; a meeting in progress keeps its route. Dictation’s route is set separately in Transcription.", color: Palette.ink64)
         }
     }
 
@@ -1468,6 +1493,16 @@ extension SettingsView {
             }
             .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 8)
             help("Start Dictation hides this window so your words go to the app you were using; press the shortcut to finish.", color: Palette.ink64).padding(.top, 8)
+            HStack(alignment: .center, spacing: 20) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Meeting notes").font(.system(size: 17, weight: .semibold))
+                    help(controller.meetingRecorder.live == nil ? "Transcribe a call on this Mac: your microphone as Me, the call’s audio as Them." : "Recording now. The live panel shows the transcript.")
+                }
+                Spacer()
+                if controller.meetingRecorder.live == nil { MeetingStartMenu(controller: controller) }
+                else { Button("Open Meetings") { screen = .meetings }.buttonStyle(InkButtonStyle(kind: .outline)) }
+            }
+            .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 16)
 
             HStack(alignment: .firstTextBaseline) {
                 eyebrow("Ready to dictate")

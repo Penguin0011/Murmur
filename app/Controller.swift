@@ -447,6 +447,8 @@ final class PreStart: @unchecked Sendable {
     var openSettings: (() -> Void)?
     var updateMenu: (() -> Void)?
     lazy var bubble = BubblePresenter(controller: self)
+    /// Meeting notes (PRD section 11): its own capture and store, sharing the warm helper.
+    let meetingRecorder = MeetingRecorder()
     private var store: HistoryStore?
     /// All history reads and writes; it keeps entries in memory only when history is off.
     private var records: HistoryRouter<HistoryEntry>?
@@ -615,6 +617,7 @@ final class PreStart: @unchecked Sendable {
                 historyNotice = "\(moved) damaged history \(moved == 1 ? "file was" : "files were") moved to the history/unreadable folder. \(moved == 1 ? "It" : "They") still expire with your retention setting."
             }
             try store?.purge(retention: appliedRetention)
+            configureMeetings(base: base)
             historySaved(); refreshRecoveryAudio(); refreshDictionary()
         } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
         modelStatus = downloader?.status() ?? .notDownloaded
@@ -659,6 +662,7 @@ final class PreStart: @unchecked Sendable {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.voiceLevel = self.capture?.queue.sync { self.capture?.level ?? 0 } ?? 0
+                self.meetingRecorder.tick()
                 // A canceled or empty recording's audio is gone; drop its chunk transcripts.
                 for (audio, job) in self.chunkJobs where !FileManager.default.fileExists(atPath: audio.path) { job.discard(); self.chunkJobs[audio] = nil }
                 // Download progress and the verifying phase are sampled here, on the main thread.
@@ -682,6 +686,7 @@ final class PreStart: @unchecked Sendable {
                 do {
                     try self.retry?.purge(); try self.store?.purge(retention: self.appliedRetention)
                     if let cutoff = HistoryExpiry.cutoff(HistoryRetention(rawValue: self.appliedRetention) ?? .thirtyDays) { self.records?.purgeSessionOnly(recordedAtOrBefore: cutoff) }
+                    self.meetingRecorder.purge(cutoff: HistoryExpiry.cutoff(HistoryRetention(rawValue: self.appliedRetention) ?? .thirtyDays))
                     try self.enforceHistoryCap(); self.refreshHistory(); self.refreshRecoveryAudio()
                 }
                 catch {
@@ -739,8 +744,10 @@ final class PreStart: @unchecked Sendable {
         let expired: [HistoryEntry]
         do { expired = try store?.expired(retention: retention) ?? [] }
         catch { message = "Could not review history retention. Settings were not applied."; return }
-        if retention != appliedRetention, !expired.isEmpty {
-            let alert = NSAlert(); alert.messageText = "Delete \(expired.count) expired transcripts?"
+        let expiredMeetings = HistoryExpiry.cutoff(HistoryRetention(rawValue: retention) ?? .thirtyDays).map { cutoff in meetingRecorder.meetings.filter { $0.recordedAt <= cutoff }.count } ?? 0
+        if retention != appliedRetention, !expired.isEmpty || expiredMeetings > 0 {
+            let alert = NSAlert()
+            alert.messageText = expiredMeetings == 0 ? "Delete \(expired.count) expired transcripts?" : "Delete \(expired.count) expired transcripts and \(expiredMeetings) \(expiredMeetings == 1 ? "meeting" : "meetings")?"
             alert.informativeText = "Applying this retention period permanently removes these older entries."
             alert.addButton(withTitle: "Apply and Delete"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { retention = appliedRetention; return }
@@ -756,6 +763,7 @@ final class PreStart: @unchecked Sendable {
         appliedRoutes = routes; routes.save(to: .standard)
         appliedRetention = retention
         appliedHistoryMode = historyMode; records?.persistsTranscripts = historyMode.persistsTranscripts
+        if meetingRecorder.persists != historyMode.persistsTranscripts { meetingRecorder.persists = historyMode.persistsTranscripts; meetingRecorder.reload() }
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(showInDock, forKey: "showInDock"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
@@ -782,7 +790,7 @@ final class PreStart: @unchecked Sendable {
         defaults.set(historyMode.rawValue, forKey: ProcessingSettings.Key.historyMode)
         defaults.set(learningRequiresReadableField, forKey: ProcessingSettings.Key.readableLearning)
         defaults.set(updateChecksEnabled, forKey: ProcessingSettings.Key.updateChecks)
-        do { try store?.purge(retention: appliedRetention); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
+        do { try store?.purge(retention: appliedRetention); meetingRecorder.purge(cutoff: HistoryExpiry.cutoff(HistoryRetention(rawValue: appliedRetention) ?? .thirtyDays)); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }
         if phase == "Ready" { message = idleMessage }
         updateMenu?()
@@ -1913,6 +1921,75 @@ final class PreStart: @unchecked Sendable {
     func useDefaultModelDirectory() { if let downloader { modelDirectory = downloader.target.path } }
     func openLink(_ url: URL) { NSWorkspace.shared.open(url) }
 
+    // MARK: Meeting notes (PRD section 11)
+
+    /// Meetings are stored in `history/meetings` and their chunk audio in `retry-audio/meetings`, so
+    /// History's retention and Delete All Data cover them. They transcribe on this Mac only (Q2).
+    private func configureMeetings(base: URL) {
+        let recorder = meetingRecorder
+        recorder.configure(store: try? MeetingStore(directory: base.appendingPathComponent("history").appendingPathComponent("meetings")),
+                           audioRoot: base.appendingPathComponent("retry-audio").appendingPathComponent("meetings"),
+                           persists: appliedHistoryMode.persistsTranscripts)
+        recorder.applyDictionary = { [weak self] text in self?.processing?.dictionary.apply(to: text, isCommonWord: isCommonEnglishWord) ?? text }
+        recorder.onLiveChange = { [weak self] in self?.updateMenu?(); self?.meetingPanelChanged?() }
+        guard !preview, let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
+        let warm = warm
+        recorder.transcribe = { [weak self] url, done in
+            guard let self else { done(nil); return }
+            let models = URL(fileURLWithPath: self.modelDirectory), vocabulary = self.vocabularyFile, dictionaryModel = self.dictionaryModelDirectory
+            DispatchQueue.global(qos: .utility).async {
+                guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
+                      let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel) else { done(nil); return }
+                warm.transcribe(url, helper: helper, launch: launch) { line in
+                    let answer = line.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                    done(answer?["text"] as? String)
+                }
+            }
+        }
+    }
+    /// Settings → Meetings: where meeting audio is transcribed (decision of October 15, 2026). Applies
+    /// to meetings started after it changes; a meeting keeps the route it started with.
+    @Published var meetingTranscription = MeetingTranscription.load(.standard) {
+        didSet { UserDefaults.standard.set(meetingTranscription.rawValue, forKey: MeetingTranscription.key) }
+    }
+    /// The disclosure, volume and cost note for Cloud, or nil when no cloud transcriber is configured.
+    var meetingCloudNote: (disclosure: String, note: String)? {
+        var routes = routeSettings; routes.transcription = .cloud
+        let plan = RoutePlan.make(routes, cleanupSendsText: false) { _ in nil }
+        guard let disclosure = plan.stages.first(where: { $0.disclosure.stage == .transcription })?.disclosure else { return nil }
+        return (disclosure.summary, MeetingRoute.cloudNote(provider: disclosure.provider.displayName, host: disclosure.destinationHost, storesAudio: routes.cloudTranscriber == .gemini))
+    }
+    /// Shows or hides the live meeting panel; set by the app delegate.
+    var meetingPanelChanged: (() -> Void)?
+    /// Start from the Meetings page, Home or the menu bar. Meetings need the local model (Q2).
+    func startMeeting(_ source: MeetingSource) {
+        var cloud: MeetingRoute.Cloud?, cloudName: String?
+        if meetingTranscription == .cloud {
+            // The configured cloud transcriber with its existing key; an unconfigured one refuses, never falls back.
+            var routes = appliedRoutes; routes.transcription = .cloud
+            let plan = routePlan(routes, cleanupSendsText: false)
+            guard let provider = plan.transcriber else {
+                meetingRecorder.message = (plan.refusal ?? "The cloud transcriber is not set up.") + " Set it up in Settings → Transcription, or choose On this Mac in Settings → Meetings."
+                screenRequest = "meetings"; openSettings?(); return
+            }
+            let vocabulary = processing?.dictionary.vocabularyTerms ?? []
+            cloudName = provider.id.displayName
+            cloud = { url, done in
+                Task {
+                    switch await CloudTranscription.run(provider: provider, audioFile: url, vocabulary: vocabulary) {
+                    case .transcript(let text): done(.text(text))
+                    case .noSpeech: done(.noSpeech)
+                    case .heldAnswerSuspected, .failed, .cancelled: done(.failed)
+                    }
+                }
+            }
+        } else if !modelRow.isReady {
+            meetingRecorder.message = "Meeting notes transcribe on this Mac. Download the speech model in Settings → Transcription first."
+            screenRequest = "meetings"; openSettings?(); return
+        }
+        if !meetingRecorder.start(source, cloud: cloud, cloudName: cloudName), meetingRecorder.consentPending != nil { screenRequest = "meetings"; openSettings?() }
+    }
+
     // MARK: History cap and Delete All Data (R9, §6)
 
     private func historyDisk(_ store: HistoryStore) -> HistoryDisk<HistoryEntry> {
@@ -1921,7 +1998,21 @@ final class PreStart: @unchecked Sendable {
     /// Drops oldest disk entries over the 50 MB cap for finite retention; warns for Forever.
     private func enforceHistoryCap() throws {
         guard let store else { historyCapWarning = nil; return }
-        let result = try HistoryCap.enforce(entries: store.entries(), directory: store.directory, retention: HistoryRetention(rawValue: appliedRetention) ?? .thirtyDays, delete: store.delete)
+        // Meetings live inside the History folder, so they share the cap's oldest-first list.
+        let entries = try store.entries()
+        // The recorder's list mirrors the saved meetings (the live one excluded); no files are re-read.
+        let meetings = meetingRecorder.persists ? meetingRecorder.meetings : []
+        let result: HistoryCapResult<CappedHistoryItem>
+        if let meetingStore = meetingRecorder.store {
+            result = try MeetingCap.enforce(entries: entries.map { ($0.id, $0.recordedAt) }, meetings: meetings, historyDirectory: store.directory, meetingStore: meetingStore,
+                                            retention: HistoryRetention(rawValue: appliedRetention) ?? .thirtyDays) { id in
+                if let entry = entries.first(where: { $0.id == id }) { try store.delete(entry) }
+            }
+            if result.dropped.contains(where: \.isMeeting) { meetingRecorder.forget(Set(result.dropped.filter(\.isMeeting).map(\.id))) }
+        } else {
+            let plain = try HistoryCap.enforce(entries: entries, directory: store.directory, retention: HistoryRetention(rawValue: appliedRetention) ?? .thirtyDays, delete: store.delete)
+            result = HistoryCapResult(status: plain.status, dropped: [])
+        }
         historyCapWarning = appliedRetention == HistoryRetention.forever.rawValue ? result.status.warning : nil
     }
     /// Called once a dictation's last history save is done.
@@ -1941,6 +2032,7 @@ final class PreStart: @unchecked Sendable {
         guard !isBusy else { message = "Finish the current dictation before deleting data."; return }
         guard let base = dataDirectory else { return }
         stopWatching()
+        meetingRecorder.discardAll()
         if let retry { prestart.discard(store: retry) }
         chunkJobs.values.forEach { $0.discard() }; chunkJobs.removeAll()
         warm.stop()
@@ -1963,6 +2055,7 @@ final class PreStart: @unchecked Sendable {
             case .recreateHistory:
                 let next = try HistoryStore(directory: locations.history)
                 store = next; records = HistoryRouter(disk: historyDisk(next), persists: appliedHistoryMode.persistsTranscripts)
+                configureMeetings(base: base)
             case .recreateRetryAudio:
                 retry = try RetryAudio(directory: locations.retryAudio)
                 try FileManager.default.createDirectory(at: locations.chunks, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -2036,6 +2129,8 @@ final class PreStart: @unchecked Sendable {
         guard let checker = updateChecker else { if manual { updateStatus = "Update checks are unavailable in this build." }; return }
         guard !checkingForUpdates else { return }
         if !manual {
+            // No automatic network request while a meeting records (PRD 11.10).
+            guard meetingRecorder.live == nil else { return }
             guard UpdateSchedule.shouldAttemptAutomatic(lastAttempt: lastAutomaticUpdateAttempt) else { return }
             lastAutomaticUpdateAttempt = Date()
         }
@@ -2061,6 +2156,7 @@ final class PreStart: @unchecked Sendable {
         downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.
         dictionaryDownloader?.cancel()
         if sessionAvailable { session.shutdown() }
+        meetingRecorder.shutdown()
         if let runner, runner.isRunning {
             runner.terminate()
             // Closing the app cancels this one local helper; reap it before process exit.

@@ -15,7 +15,22 @@ import AVFoundation
         buttonStartChecks()
         undoChecks()
         microphoneChecks()
-        print("Recording checks passed (shortcut validation and custom binding; cancel-undo window, discard and session hook; Automatic microphone rule).")
+        meetingCaptureChecks()
+        print("Recording checks passed (shortcut validation and custom binding; cancel-undo window, discard and session hook; Automatic microphone rule; a meeting's microphone is never current).")
+    }
+
+    /// A dictation during a meeting (PRD 11.1): the shortcut thread cuts only `Capture.current`, which a
+    /// meeting's microphone never becomes, and a dictation ending does not unregister anything else.
+    static func meetingCaptureChecks() {
+        let meeting = Capture(), dictation = Capture()
+        meeting.register(current: false)
+        check(Capture.current == nil, "a meeting's microphone does not become current")
+        dictation.register(current: true)
+        check(Capture.current === dictation, "the dictation is what release cuts")
+        meeting.unregister()
+        check(Capture.current === dictation, "the meeting stopping leaves the dictation current")
+        dictation.unregister()
+        check(Capture.current == nil, "the dictation finishing leaves nothing current; the meeting keeps recording")
     }
 
     /// Home's Start button (gap #19): a latched start the next shortcut press finishes.

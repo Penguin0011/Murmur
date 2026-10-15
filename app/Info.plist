@@ -11,7 +11,8 @@
 <key>CFBundleShortVersionString</key><string>0.1.0</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
-<key>NSMicrophoneUsageDescription</key><string>Murmur records speech only while you activate the dictation shortcut.</string>
+<key>NSMicrophoneUsageDescription</key><string>Murmur records speech while you activate the dictation shortcut, and during meeting notes you start.</string>
+<key>NSAudioCaptureUsageDescription</key><string>Murmur records the call's audio only during meeting notes you start, and transcribes it on this Mac.</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
