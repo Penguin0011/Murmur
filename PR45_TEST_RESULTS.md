@@ -1,6 +1,30 @@
 # PR #45 test results
 
-**Current status: PASS for the measured spelling regression, frozen-response replay, and required checks/build.** The pre-fix live provider benchmark below remains preserved as historical evidence. [Certain]
+**Current status: PASS for preferred-only regression checks and saved-response replay; live alias-free retest pending.** The user's live miss and the original provider benchmark are preserved below. PR #45 remains unmerged. [Certain]
+
+## Preferred-only names follow-up — `38c7b73`
+
+**Live observation: FAIL for the intended spelling.** The user confirmed Faithful mode and showed enabled learned spellings `aakash` and `spaceyboi`. The supplied test output used `Akash` twice in the paragraph and again in the list, while retaining `spaceyboi`; no obvious vocabulary echo appeared in those samples. A subsequent short sentence produced `Aakash` after the explicit-alias workaround was proposed, but that is not evidence of alias-free automatic correction. The earlier 18/18 replay seeded an `Akash` alias and therefore did not cover the setup at issue. [Certain]
+
+The old fallback excluded five-letter sources and all title-case recognized names. A native probe confirmed `akash` is unrecognized but `Akash` is recognized by this Mac's English spell checker. The fix adds one narrow spelling-equivalence path: source ≥5 alphabetic letters, preferred term ≥6, with exactly one adjacent duplicate letter added in the preferred spelling. The lowercase source must remain unrecognized. Matching full phonetic keys, semantic guards, a unique enabled candidate, exact preferred-form priority and explicit-variant priority still apply. It adds no ASR prompts, output deletion, model calls or persistent aliases. [Certain]
+
+**Regression checks: PASS.** Twelve assertions failed against the prior implementation before the fix. Tests now exercise preferred-only learned `aakash`, `allison` and `michelle` without variants using both a fake lexicon and native `NSSpellChecker`, including the user's sentence, sentence-initial casing and actual spoken lists. They preserve ordinary `diner`/`dinner` and `desert`/`dessert`, other name changes (`Robert`/`Rupert`, `Robert`/`Roberto`, `Steven`/`Stephen`), short forms, possessives, hyphenated boundaries, ambiguity, disabled entries and explicit alias priority. The expanded **28-term** native dictionary creates **zero unintended changes across 425 ordinary corpus inputs**. Processing passes **196 checks**; dictionary passes 177, provider requests 592, routes 169 and the complete cleanup suite passes. [Certain]
+
+**All-preferred-only replay: PASS.** Both revised and prior production processors used native lexicons, an isolated dictionary containing learned `Aakash`, `spaceyboi` and `Shelfmate`, and **no variants at all**. Each replayed the same 60 saved raw provider responses; requests, audio and raw recognition were unchanged. Exact-only controls were also retained. [Certain]
+
+| Exact preferred spellings on C07/C08 | Original prompt A | No prompt B |
+|---|---:|---:|
+| No aliases, exact-only control | 12/18 [Certain] | 0/18 [Certain] |
+| No aliases, previous native processor (`44bfc8a`) | 12/18 [Certain] | 12/18 [Certain] |
+| No aliases, revised native processor (`38c7b73`) | **18/18** [Certain] | **18/18** [Certain] |
+
+Neither native processor made additional changes on the ordinary C01/C02 outputs. **Zero new provider calls** were made. This is a replay of previously captured synthetic-audio responses, not new microphone or provider evidence. The lowercase user spelling `aakash` is covered by the persistent tests separately from the uppercase benchmark preference. [Certain]
+
+Evidence: `/Users/aakash/.codex/worktrees/833a/Murmur/runtime/pr45-preferred-only/` contains `processing-red.log`, `processing.log`, the provider/routes/dictionary/cleanup logs, the all-preferred-only `Replay.swift`, `replayed-outputs.json`, `replay-summary.json`, and `baseline-replay/` with the prior processor's results. [Certain]
+
+**Build/install: PASS.** `app/build.sh` exited 0, strict signature verification passed, and `git diff --check` passed. The revised bundle was installed at `/Users/aakash/Applications/Murmur.app` and relaunched; the installed app and helper binaries match the fresh build. App executable SHA-256: `727deb60dc1dbb285b2d3d13bcc17a0ad5bbecc58a0974e6b1021b11bbad7879`. The previous bundle is backed up at `/tmp/murmur-pr45-install.rOehJA/Murmur.app`. The user's dictionary, settings and History were not edited. Build evidence is `runtime/pr45-preferred-only/build.log`. [Certain]
+
+**Limits and next live check:** this only generalizes the measured miss to single-letter doubling; it does not infer arbitrary names or phrases. A genuinely intended alternate name such as Alison can still be replaced by the stored preferred spelling allison; dictionary intent cannot be proven from text alone. Other ambiguous/short forms need explicit aliases or optional cleanup. To validate the new app live, temporarily remove only the workaround `Akash` heard-as variant, retain the enabled `aakash` entry and all other variants, select Faithful, and dictate `Please ask Aakash to review the report.` The expected output is `Please ask aakash to review the report.` under the existing stored-case policy. This live alias-free retest is **NOT RUN**. [Certain]
 
 ## Faithful spelling follow-up — `cc5326e`
 

@@ -16,6 +16,12 @@ This handoff is a test plan, not a completed test report. The results template s
 - The built candidate was installed at `/Users/aakash/Applications/Murmur.app` and launched. The user subsequently reported, “That seems to work far better.” This is qualitative user testing; no provider/model or controlled audio measurements accompanied that report. [Certain]
 - Read [app/AGENTS.md](app/AGENTS.md) and [app/VOCABULARY.md](app/VOCABULARY.md) before testing. The user explicitly requested preservation of this behavior across overlapping PR merges. [Certain]
 
+## Required follow-up: preferred-only names
+
+The user's live Faithful test exposed `aakash` → `Akash` without an explicit alias. The earlier replay seeded `Akash` and missed this case. Test preferred-only learned `aakash` and `spaceyboi` with **no variants** before testing alias behavior. Require `Please ask Akash to review the report.` → `Please ask aakash to review the report.`; sentence-initial `Akash` becomes `Aakash` under the existing casing policy. Do not alter the user's real dictionary just to run an isolated test. [Certain]
+
+The current rule permits exactly one adjacent doubled letter, with source ≥5 and term ≥6, while preserving lowercase common words, other known-name changes, ambiguity, disabled terms and explicit alias priority. Exercise the persistent preferred-only checks with both fake and native lexicons, and the 28-term native 425-input corpus. Replay the saved 60 provider responses with every dictionary entry preferred-only; record controls separately from the old alias-seeded replay. A fresh live test must omit the workaround alias to count as evidence of automatic correction. Broader known-name substitutions and phrases still need aliases. [Certain]
+
 ## Scope and setup
 
 1. Record repository path, `git rev-parse HEAD`, working-tree status, PR head, macOS/Swift versions, and the executable hash if testing the installed app. Verify that `ba5f5e2` is an ancestor and the request builder omits dictionary prompts. Stop and explain any mismatch before calling a result a candidate result.

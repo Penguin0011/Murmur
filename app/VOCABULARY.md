@@ -27,6 +27,14 @@ Reprocessing all 60 stored raw provider outputs with the native lexicon restores
 
 This addresses the failing post-transcription stage; it does not change ASR requests or restore a vocabulary output filter. Unknown real names remain a possible false match, and words recognized by the lexicon or unlisted phrases still require explicit variants or optional model cleanup. Preserve these limits and the corpus checks in future merges. [Certain]
 
+## Live preferred-only spelling gap
+
+The user tested the installed follow-up in Faithful mode: enabled learned `aakash` was transcribed as `Akash`, while `spaceyboi` survived. A later sentence produced `Aakash` after the explicit-alias workaround was proposed; that result does not demonstrate alias-free correction. The original 18/18 replay used a preseeded `Akash` alias, so it did not cover this setup. [Certain]
+
+On this Mac, NSSpellChecker recognizes title-case `Akash`. Lowering only the source-length floor would therefore leave the failure in place. The current local correction additionally permits a single adjacent doubled-letter expansion from a source of at least five letters to a preferred spelling of at least six, even for a recognized title-case name. The lowercase source must remain unrecognized; matching phonetic keys, semantic guards, uniqueness, enabled entries and explicit-variant priority remain required. An already-correct preferred spelling takes priority over near terms. Thus preferred-only `aakash`, `allison` and `michelle` cover `Akash`, `Alison` and `Michele`, while `diner`/`dinner`, `desert`/`dessert`, `Robert`/`Rupert`, `Robert`/`Roberto` and `Steven`/`Stephen` remain protected in the checks. [Certain]
+
+The all-preferred-only replay removes every alias from the isolated dictionary. The previous native processor scores 12/18 in each arm; the revised processor recovers 18/18 exact spellings in both arms (exact-only controls: A 12/18, B 0/18). The expanded 28-term native dictionary leaves all 425 ordinary corpus inputs unchanged. This is saved-response replay and deterministic testing; a new human-spoken test without the alias remains pending. The exception can still replace a genuinely intended alternate name with the stored doubled-letter spelling; explicit aliases remain necessary for other short/ambiguous forms and unlisted phrases. No ASR prompt, vocabulary output deletion or automatic persistent alias was added. [Certain]
+
 ## Original controlled run — acceptance failed before local correction
 
 The fresh [PR #45 test results](../PR45_TEST_RESULTS.md) record 30 paired synthetic-audio comparisons on the actual candidate `fb55557`, using Groq `whisper-large-v3-turbo`, plus six real Standard cleanup calls on Cerebras `gpt-oss-120b`. All 60 ASR calls succeeded without retries, and the deterministic checks, build and signature verification passed. [Certain]
