@@ -91,6 +91,12 @@ final class Capture {
         }
     }
 
+    /// Only a dictation's capture becomes `current`, the one the shortcut thread cuts at release.
+    /// A meeting's microphone passes false, so a dictation during a meeting never cuts it (PRD 11.1).
+    func register(current: Bool) { if current { Self.currentLock.withLock { Self._current = self } } }
+    /// Clears `current` only when it is this capture, as `stop` does.
+    func unregister() { Self.currentLock.withLock { if Self._current === self { Self._current = nil } } }
+
     func cut(after uptime: TimeInterval) {
         queue.async { [self] in
             cutoff = min(cutoff, uptime)
@@ -144,7 +150,7 @@ final class Capture {
         do { try engine.start() }
         catch { engine.inputNode.removeTap(onBus: 0); queue.sync { file = nil }; throw error }
         let running = ProcessInfo.processInfo.systemUptime
-        if current { Self.currentLock.withLock { Self._current = self } }
+        register(current: current)
         // A device change (a headset connecting, the chosen mic unplugged) stops the engine; follow it.
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
             _ = self?.restart()
@@ -221,7 +227,7 @@ final class Capture {
     func stop() {
         guard restartLock.withLock({ defer { stopped = true }; return !stopped }) else { return }
         if let observer { NotificationCenter.default.removeObserver(observer) }
-        Self.currentLock.withLock { if Self._current === self { Self._current = nil } }
+        unregister()
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         // The last chunk is cut here; chunks nobody attached to (a cloud route) are deleted.
