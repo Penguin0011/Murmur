@@ -676,6 +676,18 @@ Each milestone is its own pull request with its own evidence (11.10) and live-te
 | **W7c, detection** | Process-object listener, app list, offer card, settings and "Never" list | W7a (it starts a meeting); Q5, Q6 | S |
 | **W7d, speaker separation** | Pinned diarization download, attribution notices, offline diarization after Stop, Them-audio retention, renaming, merging and reassigning | W7a; Q4 | M |
 
+**W7a status (October 15, 2026): built, in review, not live-tested.** Measured with `app/tools/measure_meeting.swift` on the MacBook Air M3 (Mac15,12), 16 GB, macOS 27.0.1. It feeds two LibriSpeech test-clean streams, with clips looped and 0.8 s gaps, through the real Chunker, feed, pump and warm helper. This is read speech, not call audio, so it does not meet the 11.10 call-audio bars by itself. [Certain]
+- **Accuracy, 20 min per stream, real time:**
+  - Chunked WER: Me 1.49%, Them 1.84%.
+  - The same clips transcribed whole: 1.29% and 1.50%.
+  - The difference is 0.2–0.34 points, inside the 1-point bar.
+- **Accuracy, 120 min per stream at 12×:** chunked 1.51% and 1.65%, against 1.33% and 1.34% whole.
+- **Lag at real time:** median 10.0 s, p90 14.7 s and max 16.9 s from a chunk's end to its line, inside the 25 s bar. The backlog never exceeded one chunk.
+- **Dictation during a meeting:** median 0.117 s and max 0.178 s for a 10 s clip, against 0.068 s alone. That is within the 0.5 s bar.
+- **CPU:** 20.6 CPU-seconds for 20 minutes of two-stream meeting, 1.7% of one core. At 12×, 105 CPU-seconds for 120 minutes.
+- **Memory (RSS):** the helper's stayed flat at 71–73 MB over 120 minutes. Wired model memory is not counted. The harness grew 35→46 MB between minute 10 and minute 120 in the first run, which had no autorelease pool in its loop. The app's capture queues drain theirs. The rerun with a pool is not recorded here.
+- **Not measured:** the app's own memory and CPU during a real meeting, the tap, echo with speakers, and real calls. These are on the W7a pull request's live checklist.
+
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
 ### 11.12 Amendments (applied October 15, 2026)
