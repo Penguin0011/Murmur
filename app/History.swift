@@ -136,18 +136,18 @@ final class ModelVerificationCache: @unchecked Sendable {
     private let lock = NSLock()
     /// Verified fingerprint per folder (the transcription model and the dictionary model).
     private var verified: [String: [String]] = [:]
-    func verify(_ directory: URL, manifest: URL, repository: String = unifiedRepository) throws {
-        let fingerprint = try Self.fingerprint(directory, manifest: manifest, repository: repository)
+    func verify(_ directory: URL, manifest: URL, repository: String = unifiedRepository, list: String = "batch_files") throws {
+        let fingerprint = try Self.fingerprint(directory, manifest: manifest, repository: repository, list: list)
         lock.lock(); let hit = verified[directory.path] == fingerprint; lock.unlock()
         if hit { return }
-        try verifyAppModels(directory, manifest: manifest, repository: repository)
+        try verifyAppModels(directory, manifest: manifest, repository: repository, list: list)
         lock.lock(); verified[directory.path] = fingerprint; lock.unlock()
     }
-    static func fingerprint(_ directory: URL, manifest: URL, repository: String = unifiedRepository) throws -> [String] {
+    static func fingerprint(_ directory: URL, manifest: URL, repository: String = unifiedRepository, list: String = "batch_files") throws -> [String] {
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
         guard let models = object?["models"] as? [String: Any],
               let model = models[repository] as? [String: Any],
-              let batch = model["batch_files"] as? [String] else { throw CaptureError("Invalid model manifest") }
+              let batch = model[list] as? [String] else { throw CaptureError("Invalid model manifest") }
         return try batch.map { name in
             var info = stat()
             guard stat(directory.appendingPathComponent(name).path, &info) == 0 else { throw CaptureError("Missing model file") }
@@ -157,14 +157,17 @@ final class ModelVerificationCache: @unchecked Sendable {
 }
 
 let unifiedRepository = "FluidInference/parakeet-unified-en-0.6b-coreml"
+/// The live-words files (gap #13): the streaming encoder plus the decoder, joint and vocabulary it
+/// loads with, in their own folder so the batch model is never touched.
+let liveWordsFileList = "live_files"
 /// The CTC model that rescores local transcripts toward the dictionary.
 let dictionaryModelRepository = "FluidInference/parakeet-ctc-110m-coreml"
 
-func verifyAppModels(_ directory: URL, manifest: URL, repository: String = unifiedRepository) throws {
+func verifyAppModels(_ directory: URL, manifest: URL, repository: String = unifiedRepository, list: String = "batch_files") throws {
     let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
     guard let models = object?["models"] as? [String: Any],
           let model = models[repository] as? [String: Any],
-          let files = model["files"] as? [[String: Any]], let batch = model["batch_files"] as? [String] else {
+          let files = model["files"] as? [[String: Any]], let batch = model[list] as? [String] else {
         throw CaptureError("Invalid model manifest")
     }
     for name in batch {

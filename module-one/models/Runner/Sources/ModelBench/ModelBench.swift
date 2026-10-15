@@ -5,7 +5,7 @@ import Foundation
 
 // Explicit local directory: no mutable-main download or implicit network access.
 @main struct ModelBench {
-    static let usage = "Usage: ModelBench MODEL_DIRECTORY (AUDIO_FILE [--single] | --serve) [--ctc CTC_DIRECTORY --vocabulary VOCABULARY_JSON]"
+    static let usage = "Usage: ModelBench MODEL_DIRECTORY (AUDIO_FILE [--single] | --serve | --stream SAMPLE_RATE) [--ctc CTC_DIRECTORY --vocabulary VOCABULARY_JSON]"
 
     static func main() async throws {
         var arguments = Array(CommandLine.arguments.dropFirst())
@@ -18,6 +18,9 @@ import Foundation
         }
         guard arguments.contains("--ctc") == false, arguments.contains("--vocabulary") == false else {
             throw NSError(domain: usage, code: 1)
+        }
+        if arguments.count == 3 && arguments[1] == "--stream", let rate = Double(arguments[2]), rate >= 8_000, rate <= 192_000, ctc == nil {
+            try await stream(models: URL(fileURLWithPath: arguments[0]), sampleRate: rate); return
         }
         if arguments.count == 2 && arguments[1] == "--serve" {
             try await serve(models: URL(fileURLWithPath: arguments[0]), ctc: ctc, vocabulary: vocabulary); return
@@ -83,6 +86,32 @@ import Foundation
             } catch {
                 try emit(["error": "transcription failed"])
             }
+        }
+    }
+
+    /// Live words (gap #13), display only: loads the streaming encoder folder, prints {"ready":true},
+    /// then reads raw mono little-endian Float32 samples at `sampleRate` from stdin and prints
+    /// {"partial": TEXT} whenever the running transcript changes. Audio stays in memory; the
+    /// process exits when stdin closes. No vocabulary boosting: emitted words are never revised.
+    static func stream(models: URL, sampleRate: Double) async throws {
+        let manager = StreamingUnifiedAsrManager()
+        try await manager.loadModels(from: models)
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1) else { throw NSError(domain: usage, code: 1) }
+        try emit(["ready": true])
+        var carry = Data(), last = ""
+        while true {
+            let chunk = FileHandle.standardInput.availableData
+            if chunk.isEmpty { break }
+            carry.append(chunk)
+            let count = carry.count / 4
+            guard count > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else { continue }
+            buffer.frameLength = AVAudioFrameCount(count)
+            carry.copyBytes(to: UnsafeMutableRawBufferPointer(start: buffer.floatChannelData![0], count: count * 4), count: count * 4)
+            carry = Data(carry.suffix(from: carry.startIndex + count * 4))
+            try await manager.appendAudio(buffer)
+            try await manager.processBufferedAudio()
+            let text = await manager.getPartialTranscript()
+            if text != last { last = text; try emit(["partial": text]) }
         }
     }
 

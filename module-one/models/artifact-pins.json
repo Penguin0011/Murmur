@@ -617,6 +617,21 @@
         "parakeet_unified_joint_decision_single_step.mlmodelc/weights/weight.bin",
         "vocab.json"
       ],
+      "live_files": [
+        "parakeet_unified_decoder.mlmodelc/analytics/coremldata.bin",
+        "parakeet_unified_decoder.mlmodelc/coremldata.bin",
+        "parakeet_unified_decoder.mlmodelc/model.mil",
+        "parakeet_unified_decoder.mlmodelc/weights/weight.bin",
+        "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/analytics/coremldata.bin",
+        "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/coremldata.bin",
+        "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/model.mil",
+        "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc/weights/weight.bin",
+        "parakeet_unified_joint_decision_single_step.mlmodelc/analytics/coremldata.bin",
+        "parakeet_unified_joint_decision_single_step.mlmodelc/coremldata.bin",
+        "parakeet_unified_joint_decision_single_step.mlmodelc/model.mil",
+        "parakeet_unified_joint_decision_single_step.mlmodelc/weights/weight.bin",
+        "vocab.json"
+      ],
       "batch_with_fp16_fallback_bytes": 1801783964
     },
     "FluidInference/parakeet-tdt-0.6b-v2-coreml": {

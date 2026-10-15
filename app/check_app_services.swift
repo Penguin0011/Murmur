@@ -259,9 +259,21 @@ func checkUpdates() async throws {
     check(manual == .noReleases, "manual result")
 }
 
+/// Live words (gap #13): the bubble dims only the last word and keeps the newest tail.
+func checkLiveWordsSplit() {
+    check(LiveWordsFacts.split("") == ("", ""), "empty preview")
+    check(LiveWordsFacts.split("Thanks") == ("", "Thanks"), "a lone word is still a guess")
+    check(LiveWordsFacts.split("Thanks for sending the onboard") == ("Thanks for sending the ", "onboard"), "only the last word is dimmed")
+    let long = (1...80).map { "word\($0)" }.joined(separator: " ")
+    let tail = LiveWordsFacts.split(long, limit: 60)
+    check(tail.settled.hasPrefix("… ") && tail.settled.count <= 62 && tail.guess == "word80", "a long preview keeps the newest tail, cut at a word")
+    check(!LiveWordsFacts.explanation.isEmpty && LiveWordsFacts.directory(home: URL(fileURLWithPath: "/Users/x")).path.hasSuffix("unified-d32e972-live"), "live folder beside the batch model, not inside it")
+}
+
 @main struct AppServicesChecks {
     static func main() async throws {
         checkModelRow()
+        checkLiveWordsSplit()
         try checkHistoryRouter()
         checkExpiryAndText()
         try checkWipe()

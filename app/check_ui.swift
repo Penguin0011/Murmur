@@ -73,6 +73,9 @@ import SwiftUI
                 ? "Save the API key again for this server address."
                 : "Model verification failed. Choose the pinned model folder."
             if CommandLine.arguments.contains("--recovery") { controller.hasRecoveryAudio = true }
+            if CommandLine.arguments.contains("--live-words") {
+                controller.showLiveWordsFixture("Synthetic live words keep the newest tail of a long dictation on two lines, with only the last word dimm")
+            }
             controller.bubble.show(phase: controller.phase, message: controller.message)
             if CommandLine.arguments.contains("--paste-failed") {
                 controller.showInsertionResult(InsertionResult(status: .failed, detail: "fixture", snapshot: nil), entryID: entries.first?.id,

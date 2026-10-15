@@ -94,6 +94,40 @@ enum DictionaryModelFacts {
     static let unavailableMessage = "Dictionary support could not start, so on-device transcription is running without your dictionary. Remove it and download it again."
 }
 
+/// Live words (gap #13): the streaming encoder and the small models it loads with, in a folder of
+/// their own beside the batch model. Optional; dictation never needs it.
+enum LiveWordsFacts {
+    static let displayName = "Live words while speaking"
+    static func directory(home: URL) -> URL {
+        home.appendingPathComponent("Library/Caches/Dictation/module-one/unified-d32e972-live")
+    }
+    static func summary(downloadSize: Int64) -> String {
+        "Parakeet Unified streaming · \(ModelFacts.formatBytes(downloadSize)) download · \(ModelFacts.location)"
+    }
+    static let explanation = "Shows your words in the bubble while you speak. Display only: the inserted text still comes from the whole recording. While you record, a second on-device model uses about 0.5–1 GB more memory; it quits when you stop."
+    static func confirmation(downloadSize: Int64, license: ModelLicenseInfo, folder: URL) -> (title: String, body: String) {
+        ("Download live words (\(ModelFacts.formatBytes(downloadSize)))?",
+         "Murmur downloads \(ModelFacts.formatBytes(downloadSize)) from Hugging Face and checks every file against its pinned checksum. It is saved in \(folder.path).\n\nLicense:\n\(ModelFacts.licenseText(license))")
+    }
+    static let removeTitle = "Remove live words?"
+    static func removeBody(folder: URL) -> String { "The bubble goes back to the level meter until you download it again. This deletes \(folder.path)." }
+    static func completionMessage(_ result: Result<Void, ModelDownloadError>) -> String {
+        switch result {
+        case .success: return "Live words are downloaded and verified."
+        case .failure(.cancelled): return "The download was cancelled. Retry continues from the files already downloaded."
+        case .failure(let error): return error.userMessage
+        }
+    }
+    /// The bubble's text: everything but the last word is settled; the last word may still grow
+    /// ("onboard" → "onboarding"), so it is shown dimmed. Only the tail that fits two lines is kept.
+    static func split(_ text: String, limit: Int = 140) -> (settled: String, guess: String) {
+        var tail = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if tail.count > limit, let space = tail.dropFirst(tail.count - limit).firstIndex(of: " ") { tail = "…" + tail[space...] }
+        guard let space = tail.lastIndex(of: " ") else { return ("", tail) }
+        return (String(tail[...space]), String(tail[tail.index(after: space)...]))
+    }
+}
+
 enum ModelRowAction: Equatable { case download, cancel, retry, remove }
 
 struct ModelRowPresentation: Equatable {

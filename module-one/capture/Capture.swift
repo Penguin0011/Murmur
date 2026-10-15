@@ -104,7 +104,11 @@ final class Capture {
         queue.sync { guard let chunker else { return false }; chunker.attach(handler); return true }
     }
 
+    /// Queue-owned: also receives each kept buffer, in the file's format (live words, gap #13).
+    private var tee: ((AVAudioPCMBuffer) -> Void)?
+    func setTee(_ handler: ((AVAudioPCMBuffer) -> Void)?) { queue.async { [self] in tee = handler } }
     /// The file's format, fixed at start. After a device change, buffers are converted to it.
+    var recordingFormat: AVAudioFormat? { format }
     private var format: AVAudioFormat?
     /// Serializes `restart` with itself and with `stop`.
     private let restartLock = NSLock()
@@ -173,6 +177,7 @@ final class Capture {
                 do { try file?.write(from: copy); frames += AVAudioFramePosition(copy.frameLength) }
                 catch { writeError = error }
                 chunker?.append(copy)
+                tee?(copy)
             }
         }
     }
@@ -214,7 +219,7 @@ final class Capture {
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
         // The last chunk is cut here; chunks nobody attached to (a cloud route) are deleted.
-        queue.sync { file = nil; chunker?.finish(); chunker?.discardUnclaimed() }
+        queue.sync { file = nil; tee = nil; chunker?.finish(); chunker?.discardUnclaimed() }
         let now = ProcessInfo.processInfo.systemUptime
         let rate = format?.sampleRate ?? 0
         let recorded = rate > 0 ? Double(frames) / rate : 0

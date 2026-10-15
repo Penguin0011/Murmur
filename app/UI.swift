@@ -444,6 +444,8 @@ struct SettingsView: View {
             .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
             toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
             toggleRow("Start and stop sounds", "A short sound when recording starts and when it stops or is canceled. No sound when text is inserted.", isOn: $controller.recordingSounds)
+            toggleRow(LiveWordsFacts.displayName, LiveWordsFacts.explanation, isOn: $controller.liveWords)
+            if controller.liveWords { liveWordsModel.padding(.vertical, 12).overlay(alignment: .bottom) { softRule } }
             toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. Press ⌃⌘V to paste the last dictation again if it is missing; check the field first to avoid a duplicate. The previous clipboard is restored unless you copy something newer. Automatic paste is marked transient; other software may still read or retain it. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
@@ -789,6 +791,30 @@ struct SettingsView: View {
                 controller.writingModes.removeAll { $0.id == m.id }; editingModeID = nil
             }
             .buttonStyle(InkButtonStyle(kind: .outline)).fixedSize().padding(.top, 20)
+        }
+    }
+
+    /// Download row for live words (gap #13), shown while the setting is on.
+    private var liveWordsModel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(controller.liveWordsSummary).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                    if controller.liveWordsRow.isReady { mono("Ready ✓", color: Palette.accentInk) }
+                    else { Text(controller.liveWordsRow.statusText).font(.system(size: 13)).foregroundStyle(Palette.ink70).fixedSize(horizontal: false, vertical: true) }
+                }
+                Spacer()
+                let row = controller.liveWordsRow
+                if row.actions.contains(.download) { Button("Download…", action: controller.downloadLiveWords).buttonStyle(InkButtonStyle()).fixedSize() }
+                if row.actions.contains(.retry) { Button("Retry…", action: controller.downloadLiveWords).buttonStyle(InkButtonStyle()).fixedSize() }
+                if row.actions.contains(.cancel) { Button("Cancel", action: controller.cancelLiveWordsDownload).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+                if row.actions.contains(.remove) { Button("Remove…", role: .destructive, action: controller.removeLiveWords).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+            }
+            if let progress = controller.liveWordsRow.progress { progressBar(progress) }
+            if !controller.liveWordsMessage.isEmpty { help(controller.liveWordsMessage) }
+            if let license = controller.liveWordsLicense, let declaration = license.declarations.first {
+                help("License: \(declaration.name) (\(declaration.url.absoluteString))", color: Palette.ink64)
+            }
         }
     }
 
@@ -1422,6 +1448,7 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.automaticInsertion) { controller.settingsChanged() }
             .onChange(of: controller.pressToToggle) { controller.settingsChanged() }
             .onChange(of: controller.recordingSounds) { controller.settingsChanged() }
+            .onChange(of: controller.liveWords) { controller.settingsChanged() }
             .onChange(of: controller.intelligentLeadingSpace) { controller.settingsChanged() }
             .onChange(of: controller.showMenuBar) { controller.settingsChanged() }
             .onChange(of: controller.inputDeviceUID) { controller.settingsChanged() }
@@ -1604,6 +1631,27 @@ private struct PasteFailureCard: View {
     }
 }
 
+/// Gap #13: the level meter plus the words heard so far, at most two lines (the newest tail).
+/// Settled words are bright; the last word, which can still grow, is dimmed. Display only.
+private struct LiveWordsBubble: View {
+    @ObservedObject var controller: AppController
+    var body: some View {
+        let parts = LiveWordsFacts.split(controller.liveText)
+        HStack(spacing: 6) {
+            VoiceBubbles(controller: controller, phase: "Listening")
+            Group {
+                if parts.settled.isEmpty && parts.guess.isEmpty { Text("Listening…").foregroundStyle(.secondary) }
+                else { Text(parts.settled).foregroundStyle(.primary) + Text(parts.guess).foregroundStyle(.secondary) }
+            }
+            .font(.system(size: 13, weight: .medium)).lineLimit(2).truncationMode(.head)
+            .frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
+            .accessibilityHidden(true)
+        }
+        .padding(.trailing, 12).padding(.vertical, 2)
+        .modifier(UtilityGlass(radius: 22))
+    }
+}
+
 /// Gap #18: shown for a few seconds after Escape cancels a recording. Undo processes it as normal.
 private struct UndoCancelCard: View {
     @ObservedObject var controller: AppController
@@ -1666,8 +1714,10 @@ final class BubblePresenter {
         let minimal = phase != "Error"
         panel.hasShadow = !minimal
         let card = phase == "Error" ? controller.pasteFailure : nil
-        let width = minimal ? 80 : card != nil ? min(320, max(200, frame.width - 32)) : min(240, max(180, frame.width - 32))
-        let content = minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase))
+        let live = phase == "Listening" && controller.liveWordsActive
+        let width = live ? min(420, max(240, frame.width - 32)) : minimal ? 80 : card != nil ? min(320, max(200, frame.width - 32)) : min(240, max(180, frame.width - 32))
+        let content = live ? AnyView(LiveWordsBubble(controller: controller))
+            : minimal ? AnyView(VoiceBubbles(controller: controller, phase: phase))
             : card.map { AnyView(PasteFailureCard(controller: controller, failure: $0)) } ?? AnyView(BubbleView(controller: controller, message: message))
         let host = NSHostingView(rootView: content.frame(width: width))
         panel.contentView = host

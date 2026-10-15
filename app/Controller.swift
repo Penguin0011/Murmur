@@ -216,6 +216,71 @@ final class ChunkJob: @unchecked Sendable {
     }
 }
 
+/// Live words (gap #13): a second helper, `ModelBench LIVE_FOLDER --stream RATE`, that lives only
+/// while one recording lasts, so its memory (about 0.5–1 GB wired) is held only then. Audio goes over
+/// its stdin pipe from this object's own queue, never to disk; when the helper falls behind, buffers
+/// are dropped rather than queued, so capture never waits. The text is display only.
+final class LiveStream: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "murmur.live-words", qos: .userInitiated)
+    private let task = Process()
+    private let input: FileHandle
+    private let lock = NSLock()
+    private var backlog = 0
+    /// Buffers waiting for the pipe (about 2 s of 1024-frame buffers at 48 kHz).
+    private static let maxBacklog = 96
+
+    /// `onText` runs on the main thread with the running transcript.
+    init?(helper: URL, folder: URL, sampleRate: Double, onText: @escaping (String) -> Void) {
+        let toChild = Pipe(), fromChild = Pipe()
+        task.executableURL = helper; task.arguments = [folder.path, "--stream", String(Int(sampleRate))]
+        task.standardInput = toChild; task.standardOutput = fromChild; task.standardError = FileHandle.nullDevice
+        do { try task.run() } catch { return nil }
+        input = toChild.fileHandleForWriting
+        let output = fromChild.fileHandleForReading
+        DispatchQueue.global(qos: .userInitiated).async {
+            var buffered = Data()
+            while true {
+                let chunk = output.availableData
+                if chunk.isEmpty { return }
+                buffered.append(chunk)
+                while let newline = buffered.firstIndex(of: 0x0A) {
+                    let line = buffered[buffered.startIndex..<newline]; buffered = Data(buffered[(newline + 1)...])
+                    if let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any], let text = object["partial"] as? String {
+                        DispatchQueue.main.async { onText(text) }
+                    }
+                }
+                if buffered.count > 1 << 20 { return }
+            }
+        }
+    }
+
+    /// Any thread: copies the first channel and sends it, or drops it when the helper is behind.
+    func feed(_ buffer: AVAudioPCMBuffer) {
+        guard let samples = buffer.floatChannelData, buffer.frameLength > 0 else { return }
+        let data = Data(bytes: samples[0], count: Int(buffer.frameLength) * MemoryLayout<Float>.size)
+        let accepted: Bool = lock.withLock {
+            guard backlog < Self.maxBacklog else { return false }
+            backlog += 1; return true
+        }
+        guard accepted else { return }
+        queue.async { [self] in
+            if !closed { _ = try? input.write(contentsOf: data) }
+            lock.withLock { backlog -= 1 }
+        }
+    }
+    /// Queue-owned.
+    private var closed = false
+
+    /// Ends the helper: closing its stdin makes it exit; a stuck one is terminated.
+    func stop() {
+        queue.async { [self] in
+            guard !closed else { return }
+            closed = true; try? input.close()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [task] in if task.isRunning { task.terminate() } }
+        }
+    }
+}
+
 /// Starts capture on a dedicated queue as soon as the tap thread sees a shortcut press, so a slow
 /// main thread does not delay the microphone. The session adopts it; anything unclaimed is deleted.
 final class PreStart: @unchecked Sendable {
@@ -269,6 +334,20 @@ final class PreStart: @unchecked Sendable {
     @Published var pressToToggle: Bool
     /// Short system sounds when recording starts and stops (gap #15); none on insertion.
     @Published var recordingSounds: Bool
+    /// Live words in the bubble while recording (gap #13); needs the optional download.
+    @Published var liveWords: Bool
+    /// The running preview transcript. Display only: never saved, logged, learned from or cleaned.
+    @Published private(set) var liveText = ""
+    @Published var liveWordsStatus: ModelStatus = .notDownloaded
+    @Published var liveWordsMessage = ""
+    var liveWordsRow: ModelRowPresentation { ModelRowPresentation.make(liveWordsDownloader == nil ? nil : liveWordsStatus) }
+    var liveWordsSummary: String { liveWordsDownloader.map { LiveWordsFacts.summary(downloadSize: $0.downloadSize) } ?? "" }
+    var liveWordsLicense: ModelLicenseInfo? { liveWordsDownloader?.license }
+    /// Whether this recording's bubble shows live words.
+    var liveWordsActive: Bool { live != nil || liveWordsFixture }
+    /// The UI fixture's synthetic preview; never set in the app.
+    private var liveWordsFixture = false
+    func showLiveWordsFixture(_ text: String) { liveWordsFixture = true; liveText = text }
     @Published var retention: String
     // Cleanup and learning settings, applied as soon as they change like the others.
     @Published var cleanupFillers: Bool
@@ -369,6 +448,11 @@ final class PreStart: @unchecked Sendable {
     /// Dictionary support for on-device transcription (the pinned CTC model) and the private
     /// vocabulary file the helper reads; see DictionaryModelFacts.
     private let dictionaryDownloader: ModelDownloader?
+    private let liveWordsDownloader: ModelDownloader?
+    private var liveWordsDownloadInFlight = false
+    /// Set once the live folder's hashes were checked this launch (and the model compiled).
+    private var liveWordsVerified = false
+    private var live: LiveStream?
     private var dictionaryDownloadInFlight = false
     private var vocabularyFile: URL?
     /// Set by start(); until then dictionary refreshes do not pre-warm, so launch hashes the model once.
@@ -457,6 +541,10 @@ final class PreStart: @unchecked Sendable {
            let manifest = try? ModelManifest(contentsOf: pins, repository: dictionaryModelRepository) {
             dictionaryDownloader = ModelDownloader(manifest: manifest, target: dictionaryModelDirectory)
         } else { dictionaryDownloader = nil }
+        if let pins = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"),
+           let manifest = try? ModelManifest(contentsOf: pins, list: liveWordsFileList) {
+            liveWordsDownloader = ModelDownloader(manifest: manifest, target: LiveWordsFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser))
+        } else { liveWordsDownloader = nil }
         shortcut = defaults.string(forKey: "shortcut") ?? "right-option"
         showMenuBar = defaults.object(forKey: "showMenuBar") as? Bool ?? true
         let inputDevice = defaults.string(forKey: "inputDeviceUID") ?? ""
@@ -465,6 +553,7 @@ final class PreStart: @unchecked Sendable {
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         pressToToggle = defaults.bool(forKey: "pressToToggle")
         recordingSounds = defaults.object(forKey: "recordingSounds") as? Bool ?? true
+        liveWords = defaults.object(forKey: "liveWords") as? Bool ?? true
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
         let processingSettings = ProcessingSettings.load(from: defaults)
@@ -519,6 +608,7 @@ final class PreStart: @unchecked Sendable {
         } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
         modelStatus = downloader?.status() ?? .notDownloaded
         dictionaryModelStatus = dictionaryDownloader?.status() ?? .notDownloaded
+        liveWordsStatus = liveWordsDownloader?.status() ?? .notDownloaded
         warm.onDictionaryStatus = { [weak self] failed in DispatchQueue.main.async { self?.dictionarySupportFailed = failed } }
         if !preview {
             do { try RouteSettings.migrateCustomAPI(in: defaults, credentials: credentials) }
@@ -538,7 +628,7 @@ final class PreStart: @unchecked Sendable {
         signal(SIGPIPE, SIG_IGN)
         // App Nap would delay the shortcut; idle system sleep stays allowed.
         // Verify the model now so the first dictation does not hash 1.8 GB.
-        started = true; prewarm()
+        started = true; prewarm(); if liveWords { prepareLiveWords() }
         noNap = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Respond to the dictation shortcut without delay")
         refreshPermissions()
         if !preview { configureShortcut() }
@@ -563,6 +653,7 @@ final class PreStart: @unchecked Sendable {
                 // Download progress and the verifying phase are sampled here, on the main thread.
                 if self.modelDownloadInFlight, let status = self.downloader?.status(), status != self.modelStatus { self.modelStatus = status }
                 if self.dictionaryDownloadInFlight, let status = self.dictionaryDownloader?.status(), status != self.dictionaryModelStatus { self.dictionaryModelStatus = status }
+                if self.liveWordsDownloadInFlight, let status = self.liveWordsDownloader?.status(), status != self.liveWordsStatus { self.liveWordsStatus = status }
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
                    // A device change stops the engine; it restarts on the current device (gap #16) and only
                    // an engine that cannot restart counts as an interruption.
@@ -658,6 +749,7 @@ final class PreStart: @unchecked Sendable {
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
         defaults.set(recordingSounds, forKey: "recordingSounds")
+        defaults.set(liveWords, forKey: "liveWords"); if liveWords { prepareLiveWords() }
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(inputDeviceUID, forKey: "inputDeviceUID"); Capture.preferredInputUID = inputDeviceUID.isEmpty ? nil : inputDeviceUID
         defaults.set(retention, forKey: "retention")
@@ -814,6 +906,8 @@ final class PreStart: @unchecked Sendable {
         let adoptsEarly = session.early != nil
         session.receive(action, completed: done)
         if action == .start, session.state == .listening, !adoptsEarly { cue(.start) }
+        if action == .start, session.state == .listening { startLiveWords() }
+        if session.state != .listening { stopLiveWords() }
         if wasListening, action == .finish || (action == .cancel && listener?.cancelIsExplicit == true) { cue(.stop) }
         if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
         if action == .cancel {
@@ -1693,6 +1787,75 @@ final class PreStart: @unchecked Sendable {
         dictionaryModelStatus = dictionaryDownloader.status(); dictionarySupportFailed = false
         prewarm()
     }
+    // MARK: Live words (gap #13)
+
+    /// Checks the live folder's hashes once per launch, then loads the model once with no audio, so
+    /// its first compile (about 10 s) happens now rather than in a recording. Off the main thread.
+    private func prepareLiveWords() {
+        guard !preview, !liveWordsVerified, liveWordsRow.isReady, let folder = liveWordsDownloader?.target,
+              let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"),
+              let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard (try? ModelVerificationCache.shared.verify(folder, manifest: manifest, list: liveWordsFileList)) != nil else {
+                DispatchQueue.main.async { self?.liveWordsMessage = "Live words failed verification. Remove them and download again." }
+                return
+            }
+            let compile = Process(); compile.executableURL = helper; compile.arguments = [folder.path, "--stream", "16000"]
+            compile.standardInput = FileHandle.nullDevice; compile.standardOutput = FileHandle.nullDevice; compile.standardError = FileHandle.nullDevice
+            if (try? compile.run()) != nil { compile.waitUntilExit() }
+            DispatchQueue.main.async { self?.liveWordsVerified = true }
+        }
+    }
+    private func startLiveWords() {
+        stopLiveWords()
+        guard liveWords, liveWordsVerified, !preview, let capture, let rate = capture.recordingFormat?.sampleRate,
+              let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let folder = liveWordsDownloader?.target else { return }
+        let token = generation
+        guard let stream = LiveStream(helper: helper, folder: folder, sampleRate: rate, onText: { [weak self] text in
+            guard let self, self.generation == token, self.live != nil else { return }
+            self.liveText = text
+        }) else { return }
+        live = stream
+        capture.setTee { stream.feed($0) }
+        bubble.show(phase: phase, message: message, screen: destinationScreen)
+    }
+    private func stopLiveWords() {
+        capture?.setTee(nil)
+        live?.stop(); live = nil; liveText = ""
+    }
+    func downloadLiveWords() {
+        guard let liveWordsDownloader else { liveWordsMessage = ModelDownloadError.invalidManifest.userMessage; return }
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: liveWordsDownloadInFlight) { liveWordsMessage = refusal; return }
+        let text = LiveWordsFacts.confirmation(downloadSize: liveWordsDownloader.downloadSize, license: liveWordsDownloader.license, folder: liveWordsDownloader.target)
+        let alert = NSAlert(); alert.messageText = text.title; alert.informativeText = text.body
+        alert.addButton(withTitle: "Download"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: liveWordsDownloadInFlight) { liveWordsMessage = refusal; return }
+        liveWordsDownloadInFlight = true; liveWordsMessage = ""; liveWordsVerified = false
+        liveWordsStatus = .downloading(ModelDownloadProgress(bytesDone: 0, totalBytes: liveWordsDownloader.downloadSize))
+        liveWordsDownloader.start { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.liveWordsDownloadInFlight = false
+                self.liveWordsStatus = liveWordsDownloader.status()
+                self.liveWordsMessage = LiveWordsFacts.completionMessage(result)
+                self.prepareLiveWords()
+            }
+        }
+    }
+    func cancelLiveWordsDownload() { liveWordsDownloader?.cancel() }
+    func removeLiveWords() {
+        guard let liveWordsDownloader else { return }
+        if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: liveWordsDownloadInFlight) { liveWordsMessage = refusal; return }
+        let alert = NSAlert(); alert.messageText = LiveWordsFacts.removeTitle
+        alert.informativeText = LiveWordsFacts.removeBody(folder: liveWordsDownloader.target)
+        alert.addButton(withTitle: "Remove"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let refusal = ModelGate.removeRefusal(isBusy: isBusy, preview: preview, downloading: liveWordsDownloadInFlight) { liveWordsMessage = refusal; return }
+        do { try liveWordsDownloader.remove(); liveWordsMessage = "Live words were removed." }
+        catch { liveWordsMessage = (error as? ModelDownloadError)?.userMessage ?? ModelDownloadError.fileSystem.userMessage }
+        liveWordsStatus = liveWordsDownloader.status(); liveWordsVerified = false
+    }
     func useDefaultModelDirectory() { if let downloader { modelDirectory = downloader.target.path } }
     func openLink(_ url: URL) { NSWorkspace.shared.open(url) }
 
@@ -1838,7 +2001,7 @@ final class PreStart: @unchecked Sendable {
     func openReleasePage() { if let url = availableRelease?.pageURL { NSWorkspace.shared.open(url) } }
 
     func shutdown() {
-        undo.discard()
+        undo.discard(); stopLiveWords(); liveWordsDownloader?.cancel()
         generation = UUID(); cloudRequest.cancel(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
         watchTick(ending: true)
         downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.
