@@ -343,8 +343,8 @@ enum WelcomeGuide {
 
 enum DeleteAllDataText {
     static let title = "Delete all Murmur data?"
-    static let body = "This permanently deletes transcript history, your dictionary and learned entries, retry audio, and API keys Murmur saved in the Keychain. Settings and the downloaded model are kept. Backups or snapshots may still hold copies. This cannot be undone."
-    static let explanation = "Deletes history, dictionary, learned entries, retry audio and saved API keys. Settings and the downloaded model stay."
+    static let body = "This permanently deletes transcript history and meeting notes, your dictionary and learned entries, retry audio, and API keys Murmur saved in the Keychain. A meeting being recorded is stopped and discarded. Settings and the downloaded model are kept. Backups or snapshots may still hold copies. This cannot be undone."
+    static let explanation = "Deletes history and meetings, dictionary, learned entries, retry audio and saved API keys. Settings and the downloaded model stay."
 }
 
 /// What happens after DataWipe: every in-memory store pointing at a deleted directory is discarded

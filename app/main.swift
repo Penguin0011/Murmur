@@ -11,6 +11,7 @@ import SwiftUI
     }
     var window: NSWindow?
     var statusItem: NSStatusItem?
+    lazy var meetingPanel = MeetingPanelPresenter(recorder: controller.meetingRecorder)
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(controller.showInDock ? .regular : .accessory)
         let mainMenu = NSMenu()
@@ -21,6 +22,8 @@ import SwiftUI
         appItem.submenu = appMenu; mainMenu.addItem(appItem); mainMenu.addItem(standardEditMenuItem()); NSApp.mainMenu = mainMenu
         controller.openSettings = { [weak self] in self?.showWindow() }
         controller.updateMenu = { [weak self] in self?.refreshMenu() }
+        // The live meeting panel shows whether or not the menu bar icon is visible (R6, PRD 11.3).
+        controller.meetingPanelChanged = { [weak self] in self?.meetingPanel.update() }
         // Open at login is on by default once; after that the Settings toggle decides.
         if !options.preview && options.testAudio == nil && !UserDefaults.standard.bool(forKey: "openAtLoginDefaulted") {
             controller.setOpenAtLogin(true); UserDefaults.standard.set(true, forKey: "openAtLoginDefaulted")
@@ -55,12 +58,15 @@ import SwiftUI
             if window?.isVisible == true { NSApp.activate(ignoringOtherApps: true); window?.makeKeyAndOrderFront(nil) }
         }
         if !controller.showMenuBar { if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }; statusItem = nil; return }
-        if statusItem == nil { statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength); statusItem?.button?.image = Logo.menuBarImage }
+        if statusItem == nil { statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength) }
+        let recording = controller.meetingRecorder.live != nil
+        statusItem?.button?.image = recording ? NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Murmur: recording meeting notes") : Logo.menuBarImage
         let menu = NSMenu()
         let state = NSMenuItem(title: controller.phase, action: nil, keyEquivalent: ""); state.isEnabled = false; menu.addItem(state)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings and History…", action: #selector(openSettings), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Welcome Guide…", action: #selector(openGuide), keyEquivalent: "").target = self
+        menu.addItem(withTitle: recording ? "Stop Meeting Notes" : "Start Meeting Notes…", action: recording ? #selector(stopMeeting) : #selector(openMeetings), keyEquivalent: "").target = self
         menu.addItem(withTitle: UpdateText.menuTitle(controller.availableRelease), action: #selector(checkForUpdates), keyEquivalent: "").target = self
         if controller.phase == "Listening" {
             menu.addItem(withTitle: "Finish Dictation", action: #selector(finish), keyEquivalent: "").target = self
@@ -78,6 +84,8 @@ import SwiftUI
     /// Results appear quietly in Settings; a known release is shown there with its page link.
     @objc func checkForUpdates() { if controller.availableRelease == nil { controller.checkForUpdates() }; showWindow() }
     @objc func finish() { controller.stopRecording() }
+    @objc func openMeetings() { controller.screenRequest = "meetings"; showWindow() }
+    @objc func stopMeeting() { controller.meetingRecorder.stop() }
     @objc func cancel() { controller.cancelRecording() }
     @objc func quit() { NSApp.terminate(nil) }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }

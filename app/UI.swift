@@ -16,7 +16,7 @@ extension EnvironmentValues {
 }
 
 // Glass belongs to the floating status and action layers; reading surfaces stay opaque.
-private struct UtilityGlass: ViewModifier {
+struct UtilityGlass: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.utilityOpaquePreview) private var opaquePreview
@@ -82,7 +82,7 @@ enum Logo {
     }()
 }
 
-private struct InkButtonStyle: ButtonStyle {
+struct InkButtonStyle: ButtonStyle {
     enum Kind { case filled, outline, accent, plain }
     var kind: Kind = .filled
     @Environment(\.isEnabled) private var enabled
@@ -130,7 +130,7 @@ private struct WindowAppearance: NSViewRepresentable {
 
 struct SettingsView: View {
     @ObservedObject var controller: AppController
-    private enum Screen { case home, insights, settings, history, setup }
+    private enum Screen { case home, insights, meetings, settings, history, setup }
     @State private var screen = Screen.home
     /// The welcome guide's current step (gap #21), saved as it changes so the guide resumes there.
     @State private var guideStep = WelcomeGuide.Step.microphone
@@ -182,6 +182,7 @@ struct SettingsView: View {
                 switch screen {
                 case .home: home
                 case .insights: insightsView
+                case .meetings: MeetingsPage(controller: controller, recorder: controller.meetingRecorder)
                 case .settings: settings
                 default: history
                 }
@@ -224,6 +225,7 @@ struct SettingsView: View {
         switch request {
         case "guide": WelcomeGuide.replay(.standard); guideStep = .microphone; screen = .setup
         case "insights": screen = .insights
+        case "meetings": screen = .meetings
         case "settings": screen = .settings
         default: screen = .home
         }
@@ -358,6 +360,7 @@ struct SettingsView: View {
             HStack(spacing: 4) {
                 tab("Home", .home, count: nil)
                 tab("Insights", .insights, count: nil)
+                tab("Meetings", .meetings, count: nil)
                 tab("History", .history, count: controller.history.count)
                 tab("Settings", .settings, count: nil)
             }
@@ -1468,6 +1471,16 @@ extension SettingsView {
             }
             .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 8)
             help("Start Dictation hides this window so your words go to the app you were using; press the shortcut to finish.", color: Palette.ink64).padding(.top, 8)
+            HStack(alignment: .center, spacing: 20) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Meeting notes").font(.system(size: 17, weight: .semibold))
+                    help(controller.meetingRecorder.live == nil ? "Transcribe a call on this Mac: your microphone as Me, the call’s audio as Them." : "Recording now. The live panel shows the transcript.")
+                }
+                Spacer()
+                if controller.meetingRecorder.live == nil { MeetingStartMenu(controller: controller) }
+                else { Button("Open Meetings") { screen = .meetings }.buttonStyle(InkButtonStyle(kind: .outline)) }
+            }
+            .padding(20).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).padding(.top, 16)
 
             HStack(alignment: .firstTextBaseline) {
                 eyebrow("Ready to dictate")

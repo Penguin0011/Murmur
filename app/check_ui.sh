@@ -16,7 +16,7 @@ swiftc -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/app/Retention.swift" "$project_root/app/Providers.swift" "$project_root/app/Credentials.swift" \
   "$project_root/app/Processing.swift" "$project_root/app/ModelDownload.swift" "$project_root/app/Updates.swift" \
   "$project_root/app/AppServices.swift" "$project_root/app/Routes.swift" "$project_root/app/AppleCleanup.swift" \
-  "$project_root/app/UI.swift" "$project_root/app/check_ui.swift" \
+  "$project_root/app/UI.swift" "$project_root/app/Meetings.swift" "$project_root/app/MeetingCapture.swift" "$project_root/app/MeetingRecorder.swift" "$project_root/app/MeetingsUI.swift" "$project_root/app/check_ui.swift" \
   -o "$fixture_path/Contents/MacOS/UIQA"
 cp "$project_root/app/Info.plist" "$fixture_path/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable UIQA' "$fixture_path/Contents/Info.plist"
