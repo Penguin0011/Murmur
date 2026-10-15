@@ -130,10 +130,11 @@ app/check_ui.sh --custom-transcription
 app/check_ui.sh --light --dictionary
 app/check_ui.sh --paste-failed --bubble-only
 app/check_ui.sh --undo --bubble-only
+app/check_ui.sh --not-pasted --bubble-only
 app/check_ui.sh --listening --live-words --bubble-only
 ```
 
-`--live-words` with `--listening` shows the live-words bubble (gap #13) with a synthetic preview. `--paste-failed` shows the paste-failure card (gap #17) with a synthetic three-line text; `--undo` shows the Undo card (gap #18) without its 5-second timer. Settings → General shows the shortcut recorder, the sounds toggle and the Automatic microphone option without a flag. [Certain]
+`--live-words` with `--listening` shows the live-words bubble (gap #13) with a synthetic preview. `--paste-failed` shows the paste-failure card (gap #17) with a synthetic three-line text, and `--not-pasted` the same card for a dictation saved with Insert at the cursor off; `--undo` shows the Undo card (gap #18) without its 5-second timer. Settings → General shows the shortcut recorder, the sounds toggle and the Automatic microphone option without a flag. [Certain]
 
 `--dictionary` seeds three sample entries (one turned off); open Settings → Dictionary to see them. The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
 

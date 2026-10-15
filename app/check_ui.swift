@@ -81,6 +81,9 @@ import SwiftUI
                 controller.showInsertionResult(InsertionResult(status: .failed, detail: "fixture", snapshot: nil), entryID: entries.first?.id,
                                                text: "Synthetic dictation that could not be pasted because the target app closed. It wraps to show the card's three-line limit and keeps going past it.")
             }
+            if CommandLine.arguments.contains("--not-pasted") {
+                controller.showNotPasted(.insertionOff, saved: "Saved to History.", entryID: entries.first?.id, text: "Synthetic dictation saved with Insert at the cursor off.")
+            }
             if CommandLine.arguments.contains("--undo") { controller.bubble.showUndo(screen: nil) }
             if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", screen: nil) }
             if CommandLine.arguments.contains("--keep-notice") {

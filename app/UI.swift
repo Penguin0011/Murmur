@@ -445,7 +445,10 @@ struct SettingsView: View {
             toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
             toggleRow("Start and stop sounds", "A short sound when recording starts and when it stops or is canceled. No sound when text is inserted.", isOn: $controller.recordingSounds)
             toggleRow(LiveWordsFacts.displayName, LiveWordsFacts.explanation, isOn: $controller.liveWords)
-            if controller.liveWords { liveWordsModel.padding(.vertical, 12).overlay(alignment: .bottom) { softRule } }
+            if controller.liveWords {
+                liveWordsModel.padding(.vertical, 12).overlay(alignment: .bottom) { softRule }
+                toggleRow("Show live words on cloud routes", "Off: when transcription runs in the cloud, the bubble shows only the level meter and the extra model does not start. The preview always runs on this Mac.", isOn: $controller.liveWordsOnCloud)
+            }
             toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. Press ⌃⌘V to paste the last dictation again if it is missing; check the field first to avoid a duplicate. The previous clipboard is restored unless you copy something newer. Automatic paste is marked transient; other software may still read or retain it. Murmur never sends a message.", isOn: $controller.automaticInsertion)
             toggleRow("Add a leading space when needed", "Separates dictation from existing text at the cursor. Existing whitespace, punctuation and selected text are left alone.", isOn: $controller.intelligentLeadingSpace)
             toggleRow("Show menu bar icon", "When hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showMenuBar)
@@ -1449,6 +1452,7 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.pressToToggle) { controller.settingsChanged() }
             .onChange(of: controller.recordingSounds) { controller.settingsChanged() }
             .onChange(of: controller.liveWords) { controller.settingsChanged() }
+            .onChange(of: controller.liveWordsOnCloud) { controller.settingsChanged() }
             .onChange(of: controller.intelligentLeadingSpace) { controller.settingsChanged() }
             .onChange(of: controller.showMenuBar) { controller.settingsChanged() }
             .onChange(of: controller.inputDeviceUID) { controller.settingsChanged() }
@@ -1612,7 +1616,7 @@ private struct PasteFailureCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "doc.on.clipboard").font(.system(size: 12)).foregroundStyle(.orange).accessibilityHidden(true)
-                Text("Couldn’t paste here").font(.system(size: 12, weight: .semibold))
+                Text(failure.title).font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 4)
                 Button { controller.dismissStatus() } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
                     .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Dismiss")
@@ -1708,12 +1712,13 @@ final class BubblePresenter {
 
     func show(phase: String, message: String, screen: NSScreen? = nil) {
         // An idle status change leaves a learned-word notice up; anything shown replaces it.
-        guard showsFloatingIndicator(phase: phase) else { if notice == nil { hide() }; return }
+        // A card holding text not pasted shows in any phase (Saved included).
+        guard showsFloatingIndicator(phase: phase) || controller.pasteFailure != nil else { if notice == nil { hide() }; return }
         notice = nil
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-        let minimal = phase != "Error"
+        let minimal = phase != "Error" && controller.pasteFailure == nil
         panel.hasShadow = !minimal
-        let card = phase == "Error" ? controller.pasteFailure : nil
+        let card = controller.pasteFailure
         let live = phase == "Listening" && controller.liveWordsActive
         let width = live ? min(420, max(240, frame.width - 32)) : minimal ? 80 : card != nil ? min(320, max(200, frame.width - 32)) : min(240, max(180, frame.width - 32))
         let content = live ? AnyView(LiveWordsBubble(controller: controller))

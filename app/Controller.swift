@@ -336,6 +336,8 @@ final class PreStart: @unchecked Sendable {
     @Published var recordingSounds: Bool
     /// Live words in the bubble while recording (gap #13); needs the optional download.
     @Published var liveWords: Bool
+    /// Live words also while transcription runs in the cloud; off by default (user, Oct 15, 2026).
+    @Published var liveWordsOnCloud: Bool
     /// The running preview transcript. Display only: never saved, logged, learned from or cleaned.
     @Published private(set) var liveText = ""
     @Published var liveWordsStatus: ModelStatus = .notDownloaded
@@ -554,6 +556,7 @@ final class PreStart: @unchecked Sendable {
         pressToToggle = defaults.bool(forKey: "pressToToggle")
         recordingSounds = defaults.object(forKey: "recordingSounds") as? Bool ?? true
         liveWords = defaults.object(forKey: "liveWords") as? Bool ?? true
+        liveWordsOnCloud = defaults.bool(forKey: "liveWordsOnCloud")
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
         let processingSettings = ProcessingSettings.load(from: defaults)
@@ -749,6 +752,7 @@ final class PreStart: @unchecked Sendable {
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
         defaults.set(recordingSounds, forKey: "recordingSounds")
+        defaults.set(liveWordsOnCloud, forKey: "liveWordsOnCloud")
         defaults.set(liveWords, forKey: "liveWords"); if liveWords { prepareLiveWords() }
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(inputDeviceUID, forKey: "inputDeviceUID"); Capture.preferredInputUID = inputDeviceUID.isEmpty ? nil : inputDeviceUID
@@ -1078,7 +1082,8 @@ final class PreStart: @unchecked Sendable {
         bubble.hide(); historySaved(); done()
     }
     /// A dictation that could not be pasted, shown in the bubble with Copy (gap #17). Any other status replaces it.
-    struct PasteFailure: Equatable { let entryID: String?; let text: String }
+    /// `title` names why: a failed paste, or a paste Murmur did not attempt.
+    struct PasteFailure: Equatable { let entryID: String?; let text: String; var title = "Couldn’t paste here" }
     @Published private(set) var pasteFailure: PasteFailure?
     func setPhase(_ phase: String, _ message: String, announcement: String? = nil, pasteFailure: PasteFailure? = nil) {
         self.phase = phase; self.message = message; self.pasteFailure = pasteFailure
@@ -1335,12 +1340,12 @@ final class PreStart: @unchecked Sendable {
                     setPhase("Ready", "Inserted with local cleanup. \(error.userMessage)")
                 }
             } catch {
-                setPhase("Error", attempted
-                    ? "\(saved) Delivery status could not be saved. Check the destination before pasting again."
-                    : "\(saved) Could not save the text for insertion, so nothing was pasted. Copy it from History.")
+                // After an attempt the paste may have landed, so no card offers the text again.
+                if attempted { setPhase("Error", "\(saved) Delivery status could not be saved. Check the destination before pasting again.") }
+                else { showNotPasted(.unsaved, saved: saved, entryID: entry.id, text: processed) }
             }
         } else {
-            setPhase("Saved", "\(saved) Press ⌃⌘V to paste it where your cursor is.")
+            showNotPasted(.insertionOff, saved: saved, entryID: entry.id, text: processed)
         }
         destination = nil; historySaved(); done()
     }
@@ -1361,6 +1366,17 @@ final class PreStart: @unchecked Sendable {
         case .verified, .unverified: setPhase("Ready", idleMessage, announcement: "Dictation finished.")
         case .failed: setPhase("Error", "Could not paste the dictation. Copy it here, select a text field and press ⌃⌘V, or copy it from History. Check the field first to avoid a duplicate.",
                                pasteFailure: PasteFailure(entryID: entryID, text: text))
+        }
+    }
+    enum NotPasted { case insertionOff, unsaved }
+    /// Murmur deliberately did not paste: the card shows the text with Copy (gap #17, Oct 15 follow-up).
+    /// Failed pastes go through `showInsertionResult`; a posted but unconfirmed paste stays quiet.
+    func showNotPasted(_ why: NotPasted, saved: String, entryID: String?, text: String) {
+        switch why {
+        case .insertionOff:
+            setPhase("Saved", "\(saved) Press ⌃⌘V to paste it where your cursor is.", pasteFailure: PasteFailure(entryID: entryID, text: text, title: "Saved, not pasted"))
+        case .unsaved:
+            setPhase("Error", "\(saved) Could not save the text for insertion, so nothing was pasted. Copy it here or from History.", pasteFailure: PasteFailure(entryID: entryID, text: text))
         }
     }
     /// The card's Copy button: the text goes to the clipboard and its History entry is marked copied.
@@ -1810,7 +1826,8 @@ final class PreStart: @unchecked Sendable {
     }
     private func startLiveWords() {
         stopLiveWords()
-        guard liveWords, liveWordsVerified, !preview, let capture, let rate = capture.recordingFormat?.sampleRate,
+        guard LiveWordsFacts.starts(enabled: liveWords, ready: liveWordsVerified, cloudTranscription: sessionTranscriber != nil, onCloud: liveWordsOnCloud),
+              !preview, let capture, let rate = capture.recordingFormat?.sampleRate,
               let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let folder = liveWordsDownloader?.target else { return }
         let token = generation
         liveText = ""

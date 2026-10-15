@@ -118,6 +118,11 @@ enum LiveWordsFacts {
         case .failure(let error): return error.userMessage
         }
     }
+    /// Whether a recording starts the live-words helper. On a cloud transcription route it starts only
+    /// with "Show live words on cloud routes" on (off by default); the preview itself is always on this Mac.
+    static func starts(enabled: Bool, ready: Bool, cloudTranscription: Bool, onCloud: Bool) -> Bool {
+        enabled && ready && (!cloudTranscription || onCloud)
+    }
     /// The bubble's text: everything but the last word is settled; the last word may still grow
     /// ("onboard" → "onboarding"), so it is shown dimmed. Only the tail that fits two lines is kept.
     static func split(_ text: String, limit: Int = 140) -> (settled: String, guess: String) {
