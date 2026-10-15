@@ -105,6 +105,7 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         settingsChecks(defaults)
         audioChecks()
         await transcriptionChecks()
+        try await dictionaryTranscriptionChecks(root.appendingPathComponent("transcription"), defaults)
         await keyChecks()
         try await lexiconChecks(root.appendingPathComponent("lexicon"), defaults)
         try await cleanupChecks(root.appendingPathComponent("cleanup"), defaults)
@@ -268,6 +269,13 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         let raw = CloudAudio.prepare(Data("not a wav".utf8))
         check(raw.peak == nil && raw.payload.data == Data("not a wav".utf8), "unparsable audio is sent unchanged with no peak")
         check(WAVAudio.downsample([1, 2, 3], from: 8_000, to: 16_000) == [1, 2, 3], "never upsamples")
+        let tail = CloudAudio.prepare(WAVAudio.encodePCM16(tone(seconds: 1, amplitude: 0.5) + [Float](repeating: 0.001, count: 96_000), sampleRate: 48_000))
+        check(tail.payload.data.count == 44 + 24_000 * 2 && abs((tail.duration ?? 0) - 3) < 0.001, "silent tail trimmed to a 0.5 s pad; duration is the recording's")
+        check(CloudAudio.trimTrailingSilence([0.001, 0, 0.002], sampleRate: 16_000) == [0.001, 0, 0.002], "all-silent clip left for the pre-check")
+        var click = [Float](repeating: 0.002, count: 48_000); click[20_000] = 0.5
+        check(GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel: CloudAudio.prepare(WAVAudio.encodePCM16(click, sampleRate: 48_000)).peak ?? 1), "a lone click does not make a silent clip count as speech")
+        let word = [Float](repeating: 0.002, count: 24_000) + tone(seconds: 0.2, amplitude: 0.3) + [Float](repeating: 0.002, count: 24_000)
+        check(!GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel: CloudAudio.prepare(WAVAudio.encodePCM16(word, sampleRate: 48_000)).peak ?? 0), "a 0.2 s word is speech")
     }
 
     // MARK: Cloud transcription
@@ -283,6 +291,11 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         check(quiet.count == 0, "skipped silence sends no request")
         let tap = WAVAudio.encodePCM16(tone(seconds: 0.1, amplitude: 0.5), sampleRate: 48_000)
         await checkA(await CloudTranscription.run(provider: gemini, audioData: tap) == .noSpeech(skipped: true), "an accidental tap is skipped")
+        var custom = try! OpenAICompatibleTranscriptionProvider(baseURL: "https://stt.example.test", model: "whisper-large-v3-turbo", apiKey: testKey)
+        let whisperQuiet = MockTransport(HTTPResult(status: 200, body: Data(#"{"text":"Thank you."}"#.utf8)))
+        custom.transport = whisperQuiet
+        await checkA(await CloudTranscription.run(provider: custom, audioData: silence) == .noSpeech(skipped: true), "custom Whisper transcriber skips silence")
+        check(whisperQuiet.count == 0, "skipped silence sends no Whisper request")
 
         // Answer-suspected hold.
         let answer = MockTransport(HTTPResult(status: 200, body: geminiBody("Sure, here's a poem about the sea.")))
@@ -299,20 +312,36 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         _ = await CloudTranscription.run(provider: gemini, audioData: speech, vocabulary: ["Kubernetes", "Shelfmate"])
         check(plain.lastBody.contains("Kubernetes, Shelfmate"), "dictionary spellings reach cloud transcription")
 
-        // Whisper has no pre-check: silence is sent, and an empty result is "no speech".
+        // A transcriber without a pre-check: silence is sent, and an empty result is "no speech".
         let whisper = SpyTranscriber(.success("  "))
         await checkA(await CloudTranscription.run(provider: whisper, audioData: silence) == .noSpeech(skipped: false), "empty transcript is no speech")
-        check(whisper.calls == 1, "no pre-check for Whisper")
+        check(whisper.calls == 1, "no pre-check for a transcriber without one")
 
-        // Whisper echoes its prompt (the dictionary) on silence; the echo is not dictation.
+        // Vocabulary alone cannot distinguish speech from a prompt echo. Preserve provider text,
+        // including names, lists and literal discussion of vocabulary, on every cloud route.
         let vocab = ["Aakash", "spaceyboi", "Open Router"]
-        await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success("Aakash.")), audioData: silence, vocabulary: vocab) == .noSpeech(skipped: false), "a lone hint echo is no speech")
-        await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success(" Aakash, spaceyboi, open router.")), audioData: silence, vocabulary: vocab) == .noSpeech(skipped: false), "an echoed hint list is no speech")
-        check(CloudTranscription.stripHintEcho("Meet at three. Aakash.", vocabulary: vocab) == "Meet at three.", "trailing echo sentence dropped")
-        check(CloudTranscription.stripHintEcho("Meet at three, Aakash, spaceyboi", vocabulary: vocab) == "Meet at three", "trailing echo list dropped")
-        check(CloudTranscription.stripHintEcho("Thanks, Aakash.", vocabulary: vocab) == "Thanks, Aakash.", "a name ending a sentence is kept")
-        check(CloudTranscription.stripHintEcho("Ask Aakash about it.", vocabulary: vocab) == "Ask Aakash about it.", "a term mid-sentence is kept")
-        check(CloudTranscription.stripHintEcho("Aakash.", vocabulary: []) == "Aakash.", "no vocabulary, no stripping")
+        for spoken in ["Aakash.", "Aakash, spaceyboi, Open Router.", "Meet at three. Aakash.",
+                       "Call Aakash, spaceyboi", "Vocabulary: Aakash, spaceyboi.",
+                       "We adjusted the camera settings. Vocabulary is aakash, spaceyboi. Vocabulary is",
+                       "Thanks, Aakash.", "Ask Aakash about it."] {
+            let response = try! JSONSerialization.data(withJSONObject: ["text": spoken])
+            let customSpeech = MockTransport(HTTPResult(status: 200, body: response))
+            custom.transport = customSpeech
+            await checkA(await CloudTranscription.run(provider: custom, audioData: speech, vocabulary: vocab) == .transcript(spoken), "custom preserves spoken dictionary terms: \(spoken)")
+            check(!customSpeech.lastBody.contains("name=\"prompt\"") && !customSpeech.lastBody.contains("spaceyboi"), "custom request has no dictionary prompt")
+
+            gemini.transport = MockTransport(HTTPResult(status: 200, body: geminiBody(spoken)))
+            await checkA(await CloudTranscription.run(provider: gemini, audioData: speech, vocabulary: vocab) == .transcript(spoken), "Gemini LLM preserves spoken dictionary terms: \(spoken)")
+
+            var asr = GeminiTranscribeProvider(apiKey: testKey)
+            let result = try! JSONSerialization.data(withJSONObject: ["id": "v1_test", "status": "completed", "steps": [["type": "model_output", "content": [["type": "text", "text": spoken]]]]])
+            let structured = MockTransport(HTTPResult(status: 200, body: result))
+            asr.transport = structured
+            await checkA(await CloudTranscription.run(provider: asr, audioData: speech, vocabulary: vocab) == .transcript(spoken), "Gemini ASR preserves spoken dictionary terms: \(spoken)")
+            let body = try! JSONSerialization.jsonObject(with: Data(structured.lastBody.utf8)) as! [String: Any]
+            let config = (body["generation_config"] as? [String: Any])?["transcription_config"] as? [String: Any]
+            check(config?["custom_vocabulary"] as? [String] == vocab, "Gemini ASR keeps structured vocabulary")
+        }
 
         // Errors: one call, no retry, no other provider; audio kept for retry.
         let failing = SpyTranscriber(.failure(.authentication(.customAPI)))
@@ -331,6 +360,34 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         let rejected = await CloudTranscription.run(provider: rejectingGemini, audioData: speech)
         check(CloudTranscription.message(rejected).map { !$0.contains(secret) && $0.contains(ProviderError.authentication(.gemini).userMessage) } == true, "key never in transcription messages")
         await checkA(await CloudTranscription.run(provider: whisper, audioFile: URL(fileURLWithPath: "/nonexistent/\(UUID()).wav")) == .failed(message: CloudTranscription.unreadableAudio, keepAudio: true), "unreadable file keeps audio")
+    }
+
+    @MainActor static func dictionaryTranscriptionChecks(_ root: URL, _ defaults: UserDefaults) async throws {
+        let p = try ProcessingCoordinator(directory: root, defaults: defaults)
+        try p.dictionary.add(preferred: "Aakash", variants: ["Akash"])
+        try p.dictionary.add(preferred: "spaceyboi", variants: ["spacey boy"], source: .learned)
+        try p.dictionary.add(preferred: "Shelfmate", variants: [], source: .learned)
+        var settings = p.settings
+        settings.options = .faithful
+        try p.update(settings)
+        var provider = try OpenAICompatibleTranscriptionProvider(baseURL: "https://stt.example.test", model: "whisper-1", apiKey: testKey)
+        let speech = WAVAudio.encodePCM16(tone(seconds: 1, amplitude: 0.3), sampleRate: 48_000)
+        let raw = "Call Akash and spacey boy."
+        let response = try JSONSerialization.data(withJSONObject: ["text": raw])
+        let transport = MockTransport(HTTPResult(status: 200, body: response))
+        provider.transport = transport
+        let outcome = await CloudTranscription.run(provider: provider, audioData: speech, vocabulary: p.dictionary.vocabularyTerms)
+        guard case .transcript(let text) = outcome else { check(false, "custom transcript reaches dictionary"); return }
+        check(text == raw, "raw provider text remains available for history")
+        check(p.process(text) == .insert("Call Aakash and spaceyboi."), "manual and learned variants correct without ASR hints or cleanup")
+        check(!transport.lastBody.contains("name=\"prompt\"") && !transport.lastBody.contains("Shelfmate"), "whole dictionary stays out of custom ASR")
+        check(p.process("Send a shelf made report.") == .insert("Send a shelf made report."), "preferred-only learned entry does not make faithful correction fuzzy")
+        settings.route = .cloud; settings.options = .standard
+        try p.update(settings)
+        p.cloudCleaner = MockCleaner(.success("Send a Shelfmate report."))
+        await checkA(await p.processAsync("Send a shelf made report.") == .insert("Send a Shelfmate report."), "preferred-only learned spelling still corrected by guarded cleanup")
+        p.cloudCleaner = MockCleaner(.failure(.timeout(.gemini)))
+        await checkA(await p.processAsync(text) == .insert("Call Aakash and spaceyboi."), "cleanup failure keeps manual and learned exact corrections")
     }
 
     // MARK: Keys

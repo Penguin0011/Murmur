@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AppKit)
+import AppKit
+#endif
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -68,6 +71,12 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(probe.settings.route == .cloud && ProcessingSettings.load(from: defaults) == persisted, "transient probe settings do not change preferences")
         try localChecks(ProcessingCoordinator(directory: root.appendingPathComponent("local"), defaults: defaults))
         try await cloudChecks(ProcessingCoordinator(directory: root.appendingPathComponent("cloud"), defaults: defaults))
+        try await respellingChecks(root.appendingPathComponent("respelling"), defaults)
+        let recognized: Set<String> = ["Akash", "Alison", "Michele", "Robert", "Steven", "diner", "desert", "please", "review", "report"]
+        try preferredOnlyChecks(ProcessingCoordinator(directory: root.appendingPathComponent("preferred-only"), defaults: defaults, isCommonWord: { recognized.contains($0) }))
+        #if canImport(AppKit)
+        try nativeRespellingChecks(root.appendingPathComponent("native-respelling"), defaults)
+        #endif
         try punctuationChecks()
         try learningChecks(root.appendingPathComponent("learn"), defaults)
         try await sectionChecks(ProcessingCoordinator(directory: root.appendingPathComponent("sections"), defaults: defaults))
@@ -161,6 +170,106 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         settings.route = .local; settings.options = .standard
         try p.update(settings)
     }
+
+    @MainActor static func respellingChecks(_ root: URL, _ defaults: UserDefaults) async throws {
+        let common: Set<String> = ["send", "the", "report", "to", "and", "about", "call", "please", "ask", "nothing", "else", "remind", "me", "shelf", "made", "a", "boy", "Robert", "network"]
+        let p = try ProcessingCoordinator(directory: root, defaults: defaults, isCommonWord: { common.contains($0) })
+        try p.dictionary.add(preferred: "Aakash", variants: ["Akash"])
+        try p.dictionary.add(preferred: "spaceyboi", variants: ["spacey boy"], source: .learned)
+        let shelfmate = try p.dictionary.add(preferred: "Shelfmate", variants: [], source: .learned)
+        try p.dictionary.add(preferred: "Rupert", variants: [])
+        try p.dictionary.add(preferred: "Notion", variants: [])
+        try p.dictionary.add(preferred: "Network", variants: [])
+        try p.dictionary.add(preferred: "Postgres", variants: [])
+        var settings = p.settings; settings.options = .faithful
+        try p.update(settings, persist: false)
+        for raw in ["Send the shelfmate report to Akash and Spassyboy.", "Send the Shelfmed report to Akash and Spasiboy.", "Send the Shelfmet report to Akash and spacey boy."] {
+            check(p.process(raw) == .insert("Send the Shelfmate report to Aakash and spaceyboi."), "Faithful repairs measured single-word ASR misspellings: \(raw)")
+            check(p.dictionary.apply(to: raw) == raw.replacingOccurrences(of: "Akash", with: "Aakash").replacingOccurrences(of: "spacey boy", with: "spaceyboi"), "without a lexicon only explicit variants apply")
+        }
+        for raw in ["Ask Robert about the report.", "Ask robert about the report.", "Nothing else.", "the network", "PostgreSQL", "Send a shelf made report.", "Spassyboy's Shelfmet-based report", "Shelfmet2"] {
+            check(p.process(raw) == .insert(raw), "preserve known words, names, phrases and token boundaries: \(raw)")
+        }
+        let rival = try p.dictionary.add(preferred: "Shelfmet", variants: [])
+        check(p.process("Shelfmed") == .insert("Shelfmed"), "ambiguous near terms are never guessed")
+        check(p.process("Shelfmet") == .insert("Shelfmet"), "a dictionary's own preferred spelling beats a near term")
+        try p.dictionary.delete(id: rival.id)
+        var disabled = shelfmate; disabled.enabled = false; try p.dictionary.update(disabled)
+        check(p.process("Shelfmet") == .insert("Shelfmet"), "disabled terms cannot supply approximate corrections")
+        disabled.enabled = true; try p.dictionary.update(disabled)
+        let override = try p.dictionary.add(preferred: "Override", variants: ["Spassyboy"])
+        check(p.process("Spassyboy") == .insert("Override"), "explicit variant wins over an approximate term")
+        try p.dictionary.delete(id: override.id)
+        settings.route = .cloud; settings.options = .standard; try p.update(settings, persist: false)
+        p.cloudCleaner = MockCloudCleaner(.failure(.timeout(.gemini)))
+        await expect(p, "Send the Shelfmet report to Akash and Spassyboy.", .insert("Send the Shelfmate report to Aakash and spaceyboi."), "respelling survives cleanup provider failure")
+        check(p.ledger.evidence.isEmpty && p.dictionary.entries.allSatisfy { $0.variants.isEmpty || $0.preferred == "Aakash" || $0.preferred == "spaceyboi" }, "automatic respelling creates no learned aliases or evidence")
+    }
+
+    static func preferredOnlyChecks(_ p: ProcessingCoordinator) throws {
+        let name = try p.dictionary.add(preferred: "aakash", variants: [], source: .learned)
+        for term in ["allison", "michelle", "Rupert", "Roberto", "Stephen", "dinner", "dessert", "Aaron", "spaceyboi"] {
+            try p.dictionary.add(preferred: term, variants: [], source: .learned)
+        }
+        var settings = p.settings; settings.options = .faithful; try p.update(settings, persist: false)
+        let cleaner = SpyCleaner(.fail); p.localCleaner = cleaner
+        check(p.dictionary.apply(to: "Call Akash.") == "Call Akash.", "preferred-only correction requires a lexicon")
+        for (raw, expected) in [
+            ("Please ask Akash to review the report.", "Please ask aakash to review the report."),
+            ("Ask akash and Akash.", "Ask aakash and aakash."),
+            ("Akash will review it.", "Aakash will review it."),
+            ("Ask Alison and Michele.", "Ask allison and michelle."),
+            ("Call Akash and spaceyboi.", "Call aakash and spaceyboi.")
+        ] { check(p.process(raw) == .insert(expected), "preferred-only doubled-letter spelling without an alias: \(raw)") }
+        for raw in ["Ask Robert and Steven.", "Ask robert and steven.", "Ask Aron.", "Meet at the diner in the desert.", "Akash's report", "Akash-based report", "Akash2"] {
+            check(p.process(raw) == .insert(raw), "preferred-only correction preserves other names, ordinary words and boundaries: \(raw)")
+        }
+        let rival = try p.dictionary.add(preferred: "akaash", variants: [], source: .learned)
+        check(p.process("Call Akash.") == .insert("Call Akash."), "competing doubled-letter spellings require an explicit alias")
+        check(p.process("Call aakash.") == .insert("Call aakash."), "an existing preferred spelling is preserved despite near terms")
+        try p.dictionary.delete(id: rival.id)
+        let longer = try p.dictionary.add(preferred: "aaakash", variants: [], source: .learned)
+        check(p.process("Call Aakash.") == .insert("Call aakash."), "preferred spelling beats a further doubled letter")
+        try p.dictionary.delete(id: longer.id)
+        var disabled = name; disabled.enabled = false; try p.dictionary.update(disabled)
+        check(p.process("Call Akash.") == .insert("Call Akash."), "disabled preferred-only names cannot correct")
+        disabled.enabled = true; try p.dictionary.update(disabled)
+        try p.dictionary.add(preferred: "Override", variants: ["Akash"])
+        check(p.process("Call Akash.") == .insert("Call Override."), "explicit aliases beat preferred-only doubled-letter correction")
+        check(cleaner.calls == 0 && p.ledger.evidence.isEmpty && p.dictionary.entries.filter { $0.source == .learned }.allSatisfy { $0.variants.isEmpty }, "preferred-only correction makes no cleanup calls or persistent learned aliases")
+    }
+
+    #if canImport(AppKit)
+    @MainActor static func nativeRespellingChecks(_ root: URL, _ defaults: UserDefaults) throws {
+        let common: (String) -> Bool = { word in
+            NSSpellChecker.shared.checkSpelling(of: word, startingAt: 0, language: "en", wrap: false, inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound
+        }
+        try preferredOnlyChecks(ProcessingCoordinator(directory: root.appendingPathComponent("preferred-only"), defaults: defaults, isCommonWord: common))
+        let p = try ProcessingCoordinator(directory: root, defaults: defaults, isCommonWord: common)
+        try p.dictionary.add(preferred: "Aakash", variants: [], source: .learned)
+        try p.dictionary.add(preferred: "spaceyboi", variants: [], source: .learned)
+        for term in ["Shelfmate", "Notion", "Gemini", "Sean", "Jean", "Rupert", "Tyler", "OpenRouter", "Supabase", "Clouddev", "kubectl", "Kubernetes", "Tailscale", "Postgres", "Figma", "GitHub", "OpenAI", "API", "JSON", "allison", "michelle", "dinner", "dessert", "Roberto", "Stephen", "Aaron"] {
+            try p.dictionary.add(preferred: term, variants: [], source: .learned)
+        }
+        var settings = p.settings; settings.options = .faithful; try p.update(settings, persist: false)
+        for (raw, expected) in [
+            ("Send the shelfmate report to Akash and Spassyboy.", "Send the Shelfmate report to Aakash and spaceyboi."),
+            ("Please ask Akash to call Spasiboy about Shelfmet.", "Please ask Aakash to call spaceyboi about Shelfmate."),
+            ("Send the Shelfmed report.", "Send the Shelfmate report."),
+            ("Ask Robert and robert about Sean and Taylor.", "Ask Robert and robert about Sean and Taylor."),
+            ("I mean nothing else. Neither option works. Remind me to call dad.", "I mean nothing else. Neither option works. Remind me to call dad.")
+        ] { check(p.process(raw) == .insert(expected), "native English lexicon correction: \(raw)") }
+        let corpus = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: "app/cleanup-corpus.json"))) as! [[String: Any]]
+        var unintended: [String] = []
+        let started = Date()
+        for row in corpus {
+            let raw = row["input"] as! String
+            if p.process(raw) != .insert(p.dictionary.apply(to: raw)) { unintended.append("\(row["id"]!): \(raw) -> \(p.process(raw))") }
+        }
+        check(unintended.isEmpty, "native respelling leaves ordinary corpus unchanged: \(unintended)")
+        print("Native dictionary respelling: \(corpus.count) corpus inputs, \(unintended.count) unintended changes, \(String(format: "%.3f", Date().timeIntervalSince(started))) s")
+    }
+    #endif
 
     static func cloudChecks(_ p: ProcessingCoordinator) async throws {
         try p.addEntry(preferred: "Akme", variants: "acme")

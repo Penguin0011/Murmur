@@ -336,6 +336,13 @@ extension GeminiTranscriptionProvider: SilencePrecheckedTranscriber, LLMTranscri
     }
 }
 
+/// Whisper-style models invent "Thank you." or "Okay." for silence, so silent clips are not sent.
+extension OpenAICompatibleTranscriptionProvider: SilencePrecheckedTranscriber {
+    func shouldSkip(peakLevel: Float, durationSeconds: Double?) -> Bool {
+        GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel: peakLevel, durationSeconds: durationSeconds)
+    }
+}
+
 enum CloudTranscriptionOutcome: Equatable, Sendable {
     case transcript(String)
     /// An LLM transcriber's output looked like an answer: save it for recovery, never insert.
@@ -368,16 +375,15 @@ enum CloudTranscription {
         }
         if Task.isCancelled { return .cancelled }
         do {
-            let rawText: String
+            let text: String
             var suspected = false
             if let llm = provider as? LLMTranscriber {
                 let result = try await llm.transcribeChecked(prepared.payload)
-                rawText = result.text; suspected = result.answerSuspected
+                text = result.text; suspected = result.answerSuspected
             } else {
-                rawText = try await provider.transcribe(prepared.payload)
+                text = try await provider.transcribe(prepared.payload)
             }
             if Task.isCancelled { return .cancelled }
-            let text = stripHintEcho(rawText, vocabulary: vocabulary)
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .noSpeech(skipped: false) }
             return suspected ? .heldAnswerSuspected(text) : .transcript(text)
         } catch let error as ProviderError {
@@ -387,29 +393,6 @@ enum CloudTranscription {
             if Task.isCancelled { return .cancelled }
             return .failed(message: unknownFailure, keepAudio: true)
         }
-    }
-
-    /// Whisper-style models echo their prompt (the dictionary spellings) when they hear nothing or
-    /// trail off into silence. A transcript made only of hint terms is no speech; a trailing run of
-    /// hint terms is dropped when it is two or more terms or its own sentence ("... three. Aakash.").
-    /// A single term ending a sentence ("Thanks, Aakash.") is kept.
-    static func stripHintEcho(_ text: String, vocabulary: [String]) -> String {
-        let terms = Set(vocabulary.map { TermText.tokens($0).map(\.folded) }.filter { !$0.isEmpty })
-        guard !terms.isEmpty else { return text }
-        let chars = Array(text), tokens = TermText.tokens(chars)
-        let lengths = Set(terms.map(\.count)).sorted(by: >)
-        var cut = tokens.count, matched = 0
-        while let n = lengths.first(where: { $0 <= cut && terms.contains(tokens[(cut - $0)..<cut].map(\.folded)) }) {
-            cut -= n; matched += 1
-        }
-        guard matched > 0 else { return text }
-        if cut == 0 { return "" }
-        let start = tokens[cut].start
-        let before = chars[..<start].reversed().first { !$0.isWhitespace }
-        guard matched >= 2 || before.map({ ".!?".contains($0) }) == true else { return text }
-        var kept = String(chars[..<start])
-        while let last = kept.last, last.isWhitespace || last == "," || last == ";" { kept.removeLast() }
-        return kept
     }
 
     /// Text for the Error phase.
@@ -441,11 +424,32 @@ enum CloudAudio {
         guard let decoded = WAVAudio.decode(data), decoded.sampleRate > 0 else {
             return Prepared(payload: AudioPayload(data: data), peak: nil, duration: nil)
         }
-        let samples = WAVAudio.downsample(decoded.samples, from: decoded.sampleRate, to: targetRate)
         let rate = decoded.sampleRate > targetRate ? targetRate : decoded.sampleRate
-        let peak = decoded.samples.reduce(Float(0)) { max($0, $1.isFinite ? abs($1) : 0) }
+        let samples = trimTrailingSilence(WAVAudio.downsample(decoded.samples, from: decoded.sampleRate, to: targetRate), sampleRate: rate)
         return Prepared(payload: AudioPayload(data: WAVAudio.encodePCM16(samples, sampleRate: rate)),
-                        peak: min(peak, 1), duration: Double(decoded.samples.count) / Double(decoded.sampleRate))
+                        peak: min(level(decoded.samples, sampleRate: decoded.sampleRate), 1),
+                        duration: Double(decoded.samples.count) / Double(decoded.sampleRate))
+    }
+
+    /// The second-highest 100 ms window peak: speech fills several windows, while a lone click or
+    /// key bump during a silent hold fills one and would otherwise decide the whole pre-check.
+    /// ponytail: typing or repeated clicks during a silent hold still pass; a per-window energy
+    /// measure would catch those but needs calibrating against a real voice.
+    static func level(_ samples: [Float], sampleRate: Int) -> Float {
+        let window = max(sampleRate / 10, 1)
+        let peaks = stride(from: 0, to: samples.count, by: window).map { start in
+            samples[start..<min(start + window, samples.count)].reduce(Float(0)) { max($0, $1.isFinite ? abs($1) : 0) }
+        }.sorted(by: >)
+        return peaks.count > 1 ? peaks[1] : peaks.first ?? 0
+    }
+
+    /// Drops the silent tail (below the silence pre-check's level) after the last speech, keeping
+    /// `pad` seconds, because Whisper-style models transcribe a silent tail as "Thank you." An
+    /// all-silent clip is returned unchanged for the pre-check to judge. A click in the tail keeps
+    /// the tail from there on, which costs only the trim, never speech.
+    static func trimTrailingSilence(_ samples: [Float], sampleRate: Int, pad: Double = 0.5) -> [Float] {
+        guard let last = samples.lastIndex(where: { abs($0) >= GeminiTranscriptionProvider.defaultSilencePeak }) else { return samples }
+        return Array(samples.prefix(last + 1 + Int(pad * Double(sampleRate))))
     }
 }
 

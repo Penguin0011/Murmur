@@ -194,7 +194,7 @@ func checkKeychainStore() {
         let audioBytes = Data([0x52, 0x49, 0x46, 0x46, 0x00, 0xFF, 0x0D, 0x0A, 0x2D, 0x2D])
         let audio = AudioPayload(data: audioBytes, filename: "clip.wav", mimeType: "audio/wav", language: "en", vocabularyHint: "Akme, Penguin0011")
         let boundary = "TESTBOUNDARY"
-        let fw = OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "whisper-1", audio: audio, includePrompt: true, boundary: boundary)
+        let fw = OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "whisper-1", audio: audio, boundary: boundary)
         check(fw.httpMethod == "POST", "transcription POST")
         check(fw.url?.absoluteString == "https://stt.example.test/v1/audio/transcriptions", "transcription endpoint")
         check(fw.value(forHTTPHeaderField: "Authorization") == "Bearer \(fakeSecret)", "transcription bearer auth")
@@ -205,14 +205,21 @@ func checkKeychainStore() {
         check(parts["model"] == Data("whisper-1".utf8), "model field")
         check(parts["response_format"] == Data("json".utf8), "response_format field")
         check(parts["language"] == Data("en".utf8), "language field")
-        check(parts["prompt"] == Data("Akme, Penguin0011".utf8), "transcription sends vocabulary hint as prompt")
+        check(parts["prompt"] == nil, "custom transcription omits free-form dictionary prompts")
+        func promptPart(_ hint: String) -> Data? {
+            let request = OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "whisper-1",
+                                                                audio: AudioPayload(data: audioBytes, vocabularyHint: hint), boundary: boundary)
+            return splitMultipart(request.httpBody ?? Data(), boundary: boundary)["prompt"]
+        }
+        check(promptPart("Aakash\nspaceyboi, Aakash") == nil, "multiline dictionary never becomes decoder context")
+        check(promptPart(" ,\n ") == nil, "blank hint sends no prompt")
         check(parts["file"] == audioBytes, "file bytes intact, including CRLF and dashes")
         check(String(decoding: body, as: UTF8.self).contains("Content-Disposition: form-data; name=\"file\"; filename=\"clip.wav\"\r\nContent-Type: audio/wav\r\n\r\n"), "file part headers")
         check(body.suffix(18) == Data("\r\n--TESTBOUNDARY--\r\n".utf8.suffix(18)), "closing boundary")
 
 
         let hostile = AudioPayload(data: audioBytes, filename: "a\"\r\nX-Evil: 1.wav", mimeType: "audio/wav\r\nX: y", language: nil)
-        let hostileBody = String(decoding: OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "whisper-1", audio: hostile, includePrompt: true, boundary: boundary).httpBody!, as: UTF8.self)
+        let hostileBody = String(decoding: OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "whisper-1", audio: hostile, boundary: boundary).httpBody!, as: UTF8.self)
         check(!hostileBody.contains("\r\nX-Evil") && !hostileBody.contains("\r\nX: y"), "multipart header injection stripped")
         check(splitMultipart(Data(hostileBody.utf8), boundary: boundary)["language"] == nil, "nil language omitted")
     }
@@ -1105,15 +1112,21 @@ func checkCustomTranscription() async {
         let normalized = try! LocalEndpoint.normalize(address)
         check(request.url?.absoluteString == normalized.absoluteString + "/v1/audio/transcriptions", "custom speech request uses the configured host and prefix")
         let body = String(data: request.httpBody!, encoding: .utf8)!
-        check(body.contains("custom/whisper:latest") && body.contains("Murmur"), "custom speech sends the model and disclosed spelling hints")
+        check(body.contains("custom/whisper:latest") && !body.contains("Murmur") && !body.contains("name=\"prompt\""), "custom speech sends the model without dictionary decoder context")
         check((request.value(forHTTPHeaderField: "Authorization") != nil) == !address.contains("192.168"), "custom speech refuses to send keys over off-device http")
         check(provider.disclosure.staysOnThisMac == address.contains("localhost"), "custom speech locality disclosure")
+        check(provider.disclosure.staysOnDevice.contains("the dictionary") && !provider.disclosure.leavesDevice.joined().contains("spelling"), "custom disclosure keeps dictionary local to transcription")
         let transport = MockTransport(.success(result(200, #"{"text":"Synthetic custom provider transcript."}"#)))
         provider.transport = transport
         let text = try? await provider.transcribe(audio)
         check(text == "Synthetic custom provider transcript." && transport.requests.count == 1, "custom speech transcribes with one configured request")
         try? await provider.validate()
         check(transport.requests.last?.url == provider.server.modelsURL, "custom speech validation targets the configured server")
+    }
+    for model in ["whisper-1", "whisper-large-v3", "whisper-large-v3-turbo", "private-model-alias", "gpt-4o-transcribe"] {
+        let provider = try! OpenAICompatibleTranscriptionProvider(baseURL: "https://speech.example/v1", model: model, apiKey: key)
+        let fields = ProviderChecks.splitMultipart(provider.makeRequest(audio, boundary: "MODEL").httpBody!, boundary: "MODEL")
+        check(fields["prompt"] == nil && fields["model"] == Data(model.utf8), "custom model names never select a free-form vocabulary prompt")
     }
     let unkeyed = try! OpenAICompatibleTranscriptionProvider(baseURL: "http://localhost:8000", model: "whisper-1")
     check(unkeyed.makeRequest(audio).value(forHTTPHeaderField: "Authorization") == nil, "unkeyed custom speech sends no bearer")
