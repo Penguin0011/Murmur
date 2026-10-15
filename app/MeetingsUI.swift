@@ -138,7 +138,7 @@ struct MeetingsPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(meeting.title).font(.system(size: 22, weight: .bold)).tracking(-0.5).textSelection(.enabled)
-                mono("\(MeetingExport.clock(meeting.seconds)) · \(meeting.source.micOnly ? "My microphone only" : "Me and \(meeting.source.name)")", size: 11, color: Palette.ink70)
+                mono("\(MeetingExport.clock(meeting.seconds)) · \(meeting.source.micOnly ? "My microphone only" : "Me and \(meeting.source.name)") · \(meeting.transcribedBy.map { "Transcribed by \($0)" } ?? "Transcribed on this Mac")", size: 11, color: Palette.ink70)
                 HStack(spacing: 12) {
                     Button("Copy Transcript") { recorder.copyTranscript(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
                     Button("Save Markdown…") { recorder.saveMarkdown(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
@@ -190,6 +190,7 @@ struct MeetingLineRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(showEcho ? line.text : line.visibleText).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(line.isHidden ? Palette.ink45 : Palette.ink)
+                if line.localFallback == true { mono("Transcribed on this Mac: the cloud failed", size: 10, color: Palette.ink45) }
                 if showEcho && line.shown != nil { mono(line.isHidden ? "Hidden as echo" : "Echo partly hidden", size: 10, color: Palette.ink45) }
             }
         }
@@ -251,7 +252,7 @@ struct MeetingLiveView: View {
                 dot
                 mono("Recording \(MeetingExport.clock(recorder.elapsed))", size: 12)
                 Spacer()
-                if let live = recorder.live { mono(live.source.micOnly ? "Mic only" : live.source.name, size: 11, color: Palette.ink70).lineLimit(1) }
+                if let live = recorder.live { mono((live.source.micOnly ? "Mic only" : live.source.name) + (live.transcribedBy.map { " · " + $0 } ?? ""), size: 11, color: Palette.ink70).lineLimit(1) }
                 Button { collapsed = true } label: { Image(systemName: "chevron.up") }.buttonStyle(.plain).accessibilityLabel("Collapse to a small indicator")
             }
             HStack(spacing: 8) {

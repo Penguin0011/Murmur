@@ -162,7 +162,7 @@ struct SettingsView: View {
     /// API address and model apply when editing ends (Return or leaving the field), not per keystroke.
     @FocusState private var apiFieldFocused: Bool
 
-    private static let sections = ["General", "Transcription", "Cleanup", "Modes", "Dictionary", "History & Privacy", "API Keys", "Updates"]
+    private static let sections = ["General", "Transcription", "Cleanup", "Modes", "Dictionary", "History & Privacy", "API Keys", "Updates", "Meetings"]
     private static let ledes = [
         "The shortcut, how text is inserted, and what Murmur is allowed to do.",
         "Where your voice is turned into text. On this Mac by default.",
@@ -171,7 +171,8 @@ struct SettingsView: View {
         "Words Murmur should spell your way, in every mode.",
         "What Murmur saves, and for how long. Nothing leaves this Mac.",
         "Needed only for cloud routes. Stored in your Keychain.",
-        "Murmur checks for new versions. You install them yourself."
+        "Murmur checks for new versions. You install them yourself.",
+        "Where meeting audio is transcribed, apart from dictation."
     ]
 
     var body: some View {
@@ -469,7 +470,25 @@ struct SettingsView: View {
         case 4: dictionary
         case 5: privacy
         case 6: apiKeys
+        case 8: meetingSettings
         default: updates
+        }
+    }
+
+    /// Settings → Meetings (decision of October 15, 2026, amending Q2): the meeting transcription route.
+    private var meetingSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            eyebrow("Meeting transcription").padding(.top, 20)
+            segmented([(MeetingTranscription.local, "On this Mac (Parakeet)"), (MeetingTranscription.cloud, "Cloud (\(controller.cloudTranscriber.displayName))")], $controller.meetingTranscription)
+            if controller.meetingTranscription == .local {
+                help("Meeting audio is transcribed on this Mac and never leaves it. This is the default.")
+            } else if let cloud = controller.meetingCloudNote {
+                help(cloud.note, color: Palette.ink)
+                help(cloud.disclosure)
+            } else {
+                help("No cloud transcriber is set up. Choose one and save its key in Settings → Transcription and API Keys.", color: Palette.ink)
+            }
+            help("A change applies to meetings started afterwards; a meeting in progress keeps its route. Dictation’s route is set separately in Transcription.", color: Palette.ink64)
         }
     }
 

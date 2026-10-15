@@ -102,24 +102,71 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
 
         // The pump: one chunk in flight, recording order across streams, retry once, then keep the file.
         do {
-            var pending: [(URL, (String?) -> Void)] = []
+            var pending: [(URL, (ChunkText?) -> Void)] = []
             var delivered: [(MeetingStream, Double, String?)] = []
-            let pump = MeetingPump(transcribe: { url, done in pending.append((url, done)) }, deliver: { job, text in delivered.append((job.stream, job.start, text)) })
+            let pump = MeetingPump(transcribe: { url, done in pending.append((url, { done($0) })) }, deliver: { job, text in delivered.append((job.stream, job.start, text?.text)) })
             func job(_ stream: MeetingStream, _ start: Double) -> MeetingPump.Job { .init(stream: stream, url: URL(fileURLWithPath: "/x/\(stream)-\(start)"), start: start, duration: 15) }
             pump.enqueue(job(.me, 0)); pump.enqueue(job(.them, 30)); pump.enqueue(job(.them, 15))
             check(pending.count == 1, "only one chunk is with the helper")
             check(pump.backlog == 45, "backlog counts queued and in-flight audio")
-            pending.removeFirst().1("first")
+            pending.removeFirst().1(ChunkText(text: "first"))
             check(pending.count == 1 && pending[0].0.lastPathComponent == "them-15.0", "next is the earliest recorded, across streams")
             pending.removeFirst().1(nil)
             check(pending.count == 1 && pending[0].0.lastPathComponent == "them-15.0" && delivered.count == 1, "a failure is retried first")
             pending.removeFirst().1(nil)
             check(delivered.last.map { $0.2 == nil && $0.1 == 15 } == true, "a second failure is delivered as nil (file kept)")
-            pending.removeFirst().1("third")
+            pending.removeFirst().1(ChunkText(text: "third"))
             check(delivered.map(\.1) == [0, 15, 30] && pump.isIdle, "everything delivered in order")
             pump.enqueue(job(.me, 45)); pump.stop()
-            pending.removeFirst().1("late")
+            pending.removeFirst().1(ChunkText(text: "late"))
             check(delivered.count == 3 && pending.isEmpty, "after stop, answers are ignored and nothing new starts")
+        }
+
+        // Meeting transcription route (decision of October 15, 2026): local by default, fixed per meeting,
+        // a failed cloud chunk goes to this Mac and is marked, and a local chunk never goes to the cloud.
+        do {
+            let defaults = UserDefaults(suiteName: "murmur-meeting-route-" + UUID().uuidString)!
+            check(MeetingTranscription.load(defaults) == .local, "default is On this Mac")
+            defaults.set("cloud", forKey: MeetingTranscription.key)
+            check(MeetingTranscription.load(defaults) == .cloud, "Cloud is remembered")
+            defaults.set("bogus", forKey: MeetingTranscription.key)
+            check(MeetingTranscription.load(defaults) == .local, "an unknown value means local")
+
+            var cloudCalls = 0, localCalls = 0
+            var cloudAnswer = MeetingCloudResult.text("cloud words")
+            let cloud: MeetingRoute.Cloud = { _, done in cloudCalls += 1; done(cloudAnswer) }
+            let local: MeetingRoute.Local = { _, done in localCalls += 1; done("local words") }
+            var got: ChunkText?
+            let url = URL(fileURLWithPath: "/x/me-0.wav")
+            let localOnly = MeetingRoute.transcriber(cloud: nil, local: local)
+            localOnly(url) { got = $0 }
+            check(got == ChunkText(text: "local words") && cloudCalls == 0, "On this Mac never calls the cloud")
+            cloudAnswer = .failed
+            localOnly(url) { got = $0 }
+            check(cloudCalls == 0, "a local meeting stays local whatever the cloud would answer")
+            // The route is captured when the meeting starts; the setting changing later does not matter.
+            let cloudMeeting = MeetingRoute.transcriber(cloud: cloud, local: local)
+            defaults.set("local", forKey: MeetingTranscription.key)
+            cloudAnswer = .text("cloud words")
+            cloudMeeting(url) { got = $0 }
+            check(got == ChunkText(text: "cloud words") && cloudCalls == 1 && localCalls == 2, "a cloud meeting keeps its route after the setting changes")
+            cloudAnswer = .failed
+            cloudMeeting(url) { got = $0 }
+            check(got == ChunkText(text: "local words", localFallback: true) && cloudCalls == 2 && localCalls == 3, "a failed cloud chunk falls back to this Mac, marked")
+            cloudAnswer = .text("cloud again")
+            cloudMeeting(url) { got = $0 }
+            check(got == ChunkText(text: "cloud again"), "the next chunk tries the cloud again; the meeting is not switched")
+            cloudAnswer = .noSpeech
+            cloudMeeting(url) { got = $0 }
+            check(got == ChunkText(text: "") && localCalls == 3, "silence skipped by the cloud adds no line and no local call")
+
+            var meeting = Meeting(id: UUID().uuidString, recordedAt: Date(), source: .microphoneOnly)
+            meeting.insert(stream: .me, start: 0, end: 5, text: "Fallback line.", localFallback: true)
+            meeting.insert(stream: .me, start: 5, end: 9, text: "Cloud line.")
+            check(meeting.lines.map(\.localFallback) == [true, nil], "fallback lines are marked; others carry nothing")
+            let note = MeetingRoute.cloudNote(provider: "Gemini", host: "generativelanguage.googleapis.com", storesAudio: true)
+            check(note.contains("other participants") && note.contains("generativelanguage.googleapis.com") && note.contains("230 MB") && note.contains("stores audio") && note.contains("cost"), "cloud note names the host, the voices, the volume, cost and Google's storage")
+            check(!MeetingRoute.cloudNote(provider: "Custom Provider", host: "api.example.com", storesAudio: false).contains("Google"), "storage sentence only for Gemini")
         }
 
         // Limits (Q7).

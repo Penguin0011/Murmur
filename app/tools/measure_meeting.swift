@@ -124,7 +124,8 @@ final class Source {
         var meeting = Meeting(id: UUID().uuidString, recordedAt: Date(), source: .everything)
         var lags: [Double] = [], dictations: [Double] = [], failed = 0, maxBacklog = 0.0
         let began = Date()
-        let pump = MeetingPump(transcribe: { url, done in helper.transcribe(url, done) }, deliver: { job, text in
+        let pump = MeetingPump(transcribe: MeetingRoute.transcriber(cloud: nil, local: { url, done in helper.transcribe(url, done) }), deliver: { job, chunk in
+            let text = chunk?.text
             lock.withLock {
                 // Lag: wall time since the chunk's audio ended, in audio-clock seconds (meaningful at SPEED 1).
                 lags.append(Date().timeIntervalSince(began) - (job.start + job.duration) / speed)

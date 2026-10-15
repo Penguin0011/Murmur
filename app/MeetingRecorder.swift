@@ -76,15 +76,17 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
 
     /// Starts recording, or asks for consent first. Returns false when nothing started.
     @discardableResult
-    func start(_ source: MeetingSource) -> Bool {
+    /// `cloud`: the meeting's cloud transcriber, fixed for this meeting (nil means this Mac).
+    func start(_ source: MeetingSource, cloud: MeetingRoute.Cloud? = nil, cloudName: String? = nil) -> Bool {
         guard live == nil else { message = "A meeting is already being recorded."; return false }
         if MeetingConsent.needed(defaults) { consentPending = source; return false }
         guard let audioRoot, transcribe != nil else { message = "Meeting notes are unavailable: private storage could not be opened."; return false }
-        let meeting = Meeting(id: UUID().uuidString, recordedAt: Date(), source: source)
+        var meeting = Meeting(id: UUID().uuidString, recordedAt: Date(), source: source)
+        meeting.transcribedBy = cloud == nil ? nil : cloudName
         let folder = MeetingAudio.folder(audioRoot, meeting: meeting.id)
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
         catch { message = "Meeting notes could not create private storage."; return false }
-        let pump = makePump(meeting.id)
+        let pump = makePump(meeting.id, cloud: cloud)
         started = ProcessInfo.processInfo.systemUptime; lastVoice = started; lastSave = started
         systemAudioProblem = nil; warning = nil; askEnded = false; behind = false; elapsed = 0; message = nil
         callApp = source.bundleID; callWasUsingMic = false; micStopped = false; tapStopped = false
@@ -170,25 +172,27 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
 
     // MARK: Lines
 
-    private func makePump(_ id: String) -> MeetingPump {
+    /// Leftovers are always finished on this Mac (`cloud` nil): nothing falls back to the cloud.
+    private func makePump(_ id: String, cloud: MeetingRoute.Cloud? = nil) -> MeetingPump {
         let transcribe = transcribe
-        let pump = MeetingPump(transcribe: { url, done in
+        let local: MeetingRoute.Local = { url, done in
             guard let transcribe else { done(nil); return }
             transcribe(url, done)
-        }, deliver: { [weak self] job, text in
+        }
+        let pump = MeetingPump(transcribe: MeetingRoute.transcriber(cloud: cloud, local: local), deliver: { [weak self] job, text in
             DispatchQueue.main.async { self?.deliver(id, job, text) }
         })
         pumps[id] = pump
         return pump
     }
 
-    private func deliver(_ id: String, _ job: MeetingPump.Job, _ text: String?) {
-        guard let text else {
+    private func deliver(_ id: String, _ job: MeetingPump.Job, _ chunk: ChunkText?) {
+        guard let chunk else {
             meetingLog.notice("meeting-chunk-failed stream=\(job.stream.rawValue, privacy: .public)")
             refreshLeftovers(); settle(id); return
         }
-        let spelled = applyDictionary(text)
-        update(id) { $0.insert(stream: job.stream, start: job.start, end: job.start + job.duration, text: spelled) }
+        let spelled = applyDictionary(chunk.text)
+        update(id) { $0.insert(stream: job.stream, start: job.start, end: job.start + job.duration, text: spelled, localFallback: chunk.localFallback) }
         try? FileManager.default.removeItem(at: job.url)
         settle(id)
     }

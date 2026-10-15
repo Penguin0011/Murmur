@@ -532,7 +532,7 @@ Recording other people may require their consent where the user or the other par
   - records with no visible indicator, or keeps recording after Stop, after Cancel, or after Murmur quits. After a crash, capture is not resumed on relaunch (11.5).
   - joins a meeting as a participant or bot, connects to a meeting service's API, or reads the meeting service's own recordings or transcripts.
   - captures video or the screen.
-  - sends meeting audio off the Mac. Meetings are transcribed locally only (Q2, approved).
+  - sends meeting audio off the Mac unless the user chose Cloud in Settings → Meetings. The default is On this Mac (amended October 15, 2026; see 11.14).
   - posts, emails or shares notes on its own. Export is a user action (11.9).
   - records past the meeting cap: 3 hours, with a warning 10 minutes before (Q7, approved). This replaces the 5-minute dictation cap for meetings only (11.12).
 - **Info.plist:** `NSMicrophoneUsageDescription` currently says Murmur records "only while you activate the dictation shortcut". It must also name meeting notes. `NSAudioCaptureUsageDescription` is added, saying system audio is recorded only during meeting notes the user starts. [Certain]
@@ -645,7 +645,7 @@ Every result records machine model, RAM, macOS and app versions and raw numbers,
 - The 11.4 budgets on 1-hour and 2-hour meetings: memory over time, CPU, lag, dictation latency during a meeting, disk.
 - Crash mid-meeting (kill the process): transcribed lines kept, leftover chunks offered and transcribed, no capture on relaunch, chunks gone after 24 h.
 - Retention, per-meeting delete, Delete All Data (including during an active meeting), and History off.
-- Network: no requests during a meeting on the None or Apple notes route.
+- Network: no requests during a meeting with meeting transcription On this Mac and the None or Apple notes route. Automatic update checks are skipped while a meeting records.
 - `check_meetings.swift`: chunk ordering across streams, echo suppression on fixtures, cap and silence stops, storage, expiry, wipe.
 
 **W7b, notes:**
@@ -692,7 +692,7 @@ W7c and W7d touch different files and can run in parallel after W7a. W7b can run
 The user accepted every recommendation: "I accept all nine W7 recommendations (Q1–Q9)." [Certain]
 
 1. **Q1, what "Them" captures:** the call app when known (detected or picked). "All apps except Murmur" is used only when the user picks it, with a note that it includes music and notifications.
-2. **Q2, cloud transcription for meetings:** local only in W7. Meetings hold other people's voices, and Gemini stores audio requests (section 5).
+2. **Q2, cloud transcription for meetings:** local only in W7. Meetings hold other people's voices, and Gemini stores audio requests (section 5). Amended the same day by the user: a Cloud choice is allowed, with On this Mac the default (11.14).
 3. **Q3, default notes route:** ask at the first meeting's Stop, with None preselected. Apple Intelligence is offered as "on-device, less accurate" until its notes measurement passes. The cloud and custom routes carry their disclosure.
 4. **Q4, audio for speaker separation:** keep the Them stream (16 kHz mono) only until diarization finishes after Stop, at most 24 hours. Streaming diarization was declined: its best result in FluidAudio's AMI benchmarks is 20.7% DER (LS-EEND), against 10.6% offline (11.8).
 5. **Q5, browser calls:** offer on browser microphone use, worded as microphone use rather than a call. Read no window titles or URLs.
@@ -700,6 +700,21 @@ The user accepted every recommendation: "I accept all nine W7 recommendations (Q
 7. **Q7, meeting cap:** 3 hours, with a warning at 2 h 50 min, and an automatic stop after 10 minutes of silence on both streams.
 8. **Q8, consent reminder:** a one-time acknowledgement sheet, then the "Let others know" line with Copy notice at every meeting, rather than a confirmation dialog each time.
 9. **Q9, evidence bars:** the thresholds in 11.10 (echo, notes, diarization) are approved as written.
+
+### 11.14 Decision: meeting transcription route — October 15, 2026
+
+The user amended Q2 and the rule in 11.3 that meeting audio never leaves the Mac: "A toggle option should be there for users so select a local or a cloud model for the meeting dictation as long meetings can increase cost significantly." [Certain]
+
+- **Setting:** Settings → Meetings → Meeting transcription, separate from dictation's route. The options are **On this Mac (Parakeet)**, the default, and **Cloud**, which uses the cloud transcriber configured for dictation (Gemini or Custom Provider) with its existing key. An unconfigured Cloud choice refuses to start a meeting. It never starts on this Mac instead. [Certain]
+- **Fixed per meeting:** the route is chosen when a meeting starts. Changing the setting never switches a meeting in progress. [Certain]
+- **Disclosure and cost:** under Cloud, Settings shows the route's existing disclosure plus a note:
+  - all meeting audio goes to the named host, including other participants' voices;
+  - that is up to about 230 MB an hour with both streams, since chunks are 16 kHz mono 16-bit;
+  - long meetings can cost significantly.
+  No price is quoted, because per-minute prices are not verified for either route; the note says the price depends on the provider. When the transcriber is Gemini, the note says Google stores audio requests (section 5). [Certain]
+- **Failure:** a cloud chunk that fails is transcribed on this Mac, and its line is marked "Transcribed on this Mac: the cloud failed". Failures include a rate limit, a network error, or an answer-shaped LLM reply. The meeting stays on the cloud route, so the next chunk tries the cloud again. A local chunk never goes to the cloud. Leftover chunks after a crash are always finished on this Mac. [Certain]
+- **Vocabulary:** the same `CloudTranscription.run` path as dictation, so PR #45's rule holds: no dictionary prompt goes to custom transcription. [Certain]
+- **Evidence:** `check_meetings.swift` covers the default, persistence, the route fixed at start after the setting changes, the per-chunk fallback and its mark, no local-to-cloud fallback, silence adding no line, and the note's contents. No live cloud meeting has been run. [Certain]
 
 **Sources:**
 - Apple, "Capturing system audio with Core Audio taps": https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps

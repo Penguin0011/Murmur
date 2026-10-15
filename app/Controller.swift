@@ -1947,12 +1947,47 @@ final class PreStart: @unchecked Sendable {
             }
         }
     }
+    /// Settings → Meetings: where meeting audio is transcribed (decision of October 15, 2026). Applies
+    /// to meetings started after it changes; a meeting keeps the route it started with.
+    @Published var meetingTranscription = MeetingTranscription.load(.standard) {
+        didSet { UserDefaults.standard.set(meetingTranscription.rawValue, forKey: MeetingTranscription.key) }
+    }
+    /// The disclosure, volume and cost note for Cloud, or nil when no cloud transcriber is configured.
+    var meetingCloudNote: (disclosure: String, note: String)? {
+        var routes = routeSettings; routes.transcription = .cloud
+        let plan = RoutePlan.make(routes, cleanupSendsText: false) { _ in nil }
+        guard let disclosure = plan.stages.first(where: { $0.disclosure.stage == .transcription })?.disclosure else { return nil }
+        return (disclosure.summary, MeetingRoute.cloudNote(provider: disclosure.provider.displayName, host: disclosure.destinationHost, storesAudio: routes.cloudTranscriber == .gemini))
+    }
     /// Shows or hides the live meeting panel; set by the app delegate.
     var meetingPanelChanged: (() -> Void)?
     /// Start from the Meetings page, Home or the menu bar. Meetings need the local model (Q2).
     func startMeeting(_ source: MeetingSource) {
-        guard modelRow.isReady else { meetingRecorder.message = "Meeting notes transcribe on this Mac. Download the speech model in Settings → Transcription first."; screenRequest = "meetings"; openSettings?(); return }
-        if !meetingRecorder.start(source), meetingRecorder.consentPending != nil { screenRequest = "meetings"; openSettings?() }
+        var cloud: MeetingRoute.Cloud?, cloudName: String?
+        if meetingTranscription == .cloud {
+            // The configured cloud transcriber with its existing key; an unconfigured one refuses, never falls back.
+            var routes = appliedRoutes; routes.transcription = .cloud
+            let plan = routePlan(routes, cleanupSendsText: false)
+            guard let provider = plan.transcriber else {
+                meetingRecorder.message = (plan.refusal ?? "The cloud transcriber is not set up.") + " Set it up in Settings → Transcription, or choose On this Mac in Settings → Meetings."
+                screenRequest = "meetings"; openSettings?(); return
+            }
+            let vocabulary = processing?.dictionary.vocabularyTerms ?? []
+            cloudName = provider.id.displayName
+            cloud = { url, done in
+                Task {
+                    switch await CloudTranscription.run(provider: provider, audioFile: url, vocabulary: vocabulary) {
+                    case .transcript(let text): done(.text(text))
+                    case .noSpeech: done(.noSpeech)
+                    case .heldAnswerSuspected, .failed, .cancelled: done(.failed)
+                    }
+                }
+            }
+        } else if !modelRow.isReady {
+            meetingRecorder.message = "Meeting notes transcribe on this Mac. Download the speech model in Settings → Transcription first."
+            screenRequest = "meetings"; openSettings?(); return
+        }
+        if !meetingRecorder.start(source, cloud: cloud, cloudName: cloudName), meetingRecorder.consentPending != nil { screenRequest = "meetings"; openSettings?() }
     }
 
     // MARK: History cap and Delete All Data (R9, §6)

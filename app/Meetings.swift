@@ -17,6 +17,8 @@ struct MeetingLine: Codable, Equatable, Identifiable {
     /// Me lines only: the text with words that repeat the other side removed (PRD 11.2), or nil
     /// when nothing was removed. An empty string means the whole line is hidden.
     var shown: String? = nil
+    /// True when the meeting's cloud route failed for this chunk and this Mac transcribed it.
+    var localFallback: Bool? = nil
 
     var isHidden: Bool { shown == "" }
     /// What the transcript, exports and (later) notes use.
@@ -47,6 +49,8 @@ struct Meeting: Codable, Identifiable, Equatable {
     var gaps: [Double] = []
     /// False while recording, so a crash leaves a record that relaunch finishes.
     var finished = false
+    /// The cloud transcriber's name when the meeting used the cloud route; nil means this Mac.
+    var transcribedBy: String? = nil
 
     var title: String {
         let date = DateFormatter.localizedString(from: recordedAt, dateStyle: .medium, timeStyle: .short)
@@ -55,10 +59,11 @@ struct Meeting: Codable, Identifiable, Equatable {
     }
 
     /// Inserts a transcribed line in capture-time order and re-runs echo suppression near it.
-    mutating func insert(stream: MeetingStream, start: Double, end: Double, text: String) {
+    mutating func insert(stream: MeetingStream, start: Double, end: Double, text: String, localFallback: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let line = MeetingLine(id: (lines.map(\.id).max() ?? 0) + 1, stream: stream, start: start, end: end, text: trimmed)
+        var line = MeetingLine(id: (lines.map(\.id).max() ?? 0) + 1, stream: stream, start: start, end: end, text: trimmed)
+        if localFallback { line.localFallback = true }
         let index = lines.firstIndex { $0.start > start || ($0.start == start && $0.stream == .them && stream == .me) } ?? lines.endIndex
         lines.insert(line, at: index)
         seconds = max(seconds, end)
@@ -240,6 +245,58 @@ enum MeetingAudio {
 /// The PRD's 24-hour retry-audio window (section 6), restated here so this file stays Foundation-only.
 enum RetryWindow { static let lifetime: TimeInterval = 24 * 60 * 60 }
 
+// MARK: - Transcription route (decision of October 15, 2026, amending Q2)
+
+/// Settings → Meetings: where meeting audio is transcribed, separate from dictation's route.
+enum MeetingTranscription: String, Codable, CaseIterable {
+    case local, cloud
+    static let key = "meetingTranscription"
+    /// On this Mac unless the user chose Cloud.
+    static func load(_ defaults: UserDefaults) -> MeetingTranscription { MeetingTranscription(rawValue: defaults.string(forKey: key) ?? "") ?? .local }
+}
+
+/// One chunk's transcript; `localFallback` marks a chunk this Mac transcribed after the cloud failed.
+struct ChunkText: Equatable {
+    let text: String
+    var localFallback = false
+}
+
+enum MeetingCloudResult: Equatable { case text(String), noSpeech, failed }
+
+enum MeetingRoute {
+    typealias Local = (URL, @escaping (String?) -> Void) -> Void
+    typealias Cloud = (URL, @escaping (MeetingCloudResult) -> Void) -> Void
+
+    /// The pump's transcriber for one meeting. The route is fixed here, when the meeting starts, so
+    /// changing the setting never switches a meeting in progress. A cloud chunk that fails (rate
+    /// limit, network, an answer-shaped LLM reply) is transcribed on this Mac and marked; the route
+    /// itself never changes, and a local chunk never goes to the cloud.
+    static func transcriber(cloud: Cloud?, local: @escaping Local) -> (URL, @escaping (ChunkText?) -> Void) -> Void {
+        { url, done in
+            guard let cloud else { local(url) { done($0.map { ChunkText(text: $0) }) }; return }
+            cloud(url) { result in
+                switch result {
+                case .text(let text): done(ChunkText(text: text))
+                case .noSpeech: done(ChunkText(text: ""))
+                case .failed: local(url) { done($0.map { ChunkText(text: $0, localFallback: true) }) }
+                }
+            }
+        }
+    }
+
+    /// Chunks are 16 kHz mono 16-bit: 115.2 MB an hour per stream, so up to about 230 MB with both.
+    static let megabytesPerStreamHour = 115.2
+
+    /// The inline note under Cloud. No price is quoted: per-minute prices are not verified for
+    /// either route, so the note says the price depends on the provider.
+    static func cloudNote(provider: String, host: String, storesAudio: Bool) -> String {
+        var note = "Meetings send all of their audio, including other participants’ voices, to \(provider) at \(host): up to about \(Int((megabytesPerStreamHour * 2).rounded())) MB an hour with both streams. Long meetings can cost significantly; the price depends on the provider and model, so check its pricing before a long call."
+        if storesAudio { note += " Google stores audio requests (55 days on the paid tier, 1 day on the free tier)." }
+        note += " If a part fails, it is transcribed on this Mac instead and marked; the meeting stays on the cloud route."
+        return note
+    }
+}
+
 // MARK: - Transcription pump
 
 /// One queue for both streams' chunks. Only one chunk is with the warm helper at a time, so a
@@ -249,12 +306,12 @@ final class MeetingPump: @unchecked Sendable {
     struct Job: Equatable { let stream: MeetingStream; let url: URL; let start: Double; let duration: Double; var attempts = 0 }
     private let lock = NSLock()
     private var queued: [Job] = [], inFlight: Job?, stopped = false
-    private let transcribe: (URL, @escaping (String?) -> Void) -> Void
-    private let deliver: (Job, String?) -> Void
+    private let transcribe: (URL, @escaping (ChunkText?) -> Void) -> Void
+    private let deliver: (Job, ChunkText?) -> Void
     static let attempts = 2
 
     /// `transcribe(url, completion)` answers the text or nil; `deliver(job, text)` gets nil after the last attempt.
-    init(transcribe: @escaping (URL, @escaping (String?) -> Void) -> Void, deliver: @escaping (Job, String?) -> Void) {
+    init(transcribe: @escaping (URL, @escaping (ChunkText?) -> Void) -> Void, deliver: @escaping (Job, ChunkText?) -> Void) {
         self.transcribe = transcribe; self.deliver = deliver
     }
     func enqueue(_ job: Job) {
@@ -347,6 +404,7 @@ enum MeetingExport {
         var out = "# \(meeting.title)\n\n"
         out += "- Date: \(ISO8601DateFormatter().string(from: meeting.recordedAt))\n- Length: \(clock(meeting.seconds))\n"
         out += "- Audio: \(meeting.source.micOnly ? "my microphone only" : "my microphone and \(meeting.source.name)")\n"
+        out += "- Transcribed: \(meeting.transcribedBy.map { "by \($0)" } ?? "on this Mac")\n"
         let notes = meeting.myNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !notes.isEmpty { out += "\n## My notes\n\n\(notes)\n" }
         out += "\n## Transcript\n\n"
