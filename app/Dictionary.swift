@@ -245,13 +245,13 @@ final class DictionaryStore {
         return table
     }
 
-    /// Replaces whole-word variant phrases with preferred spellings. Matching is exact on the
-    /// stored variants after case folding: no fuzzy or phonetic matching, so similar-sounding
-    /// words are never touched. Words in a phrase must be separated by spaces/tabs only (a line
-    /// break or punctuation ends a phrase). At each position the longest phrase wins.
-    func apply(to text: String) -> String {
+    /// Explicit variants win. With a lexicon, an unfamiliar single word may also use one unique
+    /// phonetic term. Names also allow a single doubled letter; ordinary words stay unchanged.
+    /// Punctuation or a line break ends a phrase; the longest explicit phrase wins.
+    func apply(to text: String, isCommonWord: ((String) -> Bool)? = nil) -> String {
         let table = variantTable()
-        guard !table.isEmpty else { return text }
+        let terms = isCommonWord == nil ? [] : entries.filter { $0.enabled && $0.preferred.count >= 6 && $0.preferred.allSatisfy(\.isLetter) }
+        guard !table.isEmpty || !terms.isEmpty else { return text }
         let maxWords = table.keys.map { $0.split(separator: " ").count }.max() ?? 1
         let chars = Array(text)
         let words = TermText.tokens(chars)
@@ -264,7 +264,21 @@ final class DictionaryStore {
                 let span = words[i..<(i + length)]
                 guard Self.spacedPhrase(span, chars) else { continue }
                 let key = span.map(\.folded).joined(separator: " ")
-                guard let entry = table[key] else { continue }
+                var entry = table[key]
+                if entry == nil, length == 1, key.count >= 5, key.allSatisfy(\.isLetter),
+                   let common = isCommonWord, !common(key) {
+                    // Recognized names allow only one doubled letter, not broader phonetic swaps.
+                    let unfamiliar = key.count >= 6 && !common(key.capitalized)
+                    let exact = terms.filter { TermText.fold($0.preferred) == key }
+                    let candidates = exact.isEmpty ? terms.filter { term in
+                        (unfamiliar || Self.addsDoubledLetter(to: key, spelling: TermText.fold(term.preferred))) &&
+                        CorrectionFilter.phoneticKey(key) == CorrectionFilter.phoneticKey(term.preferred) &&
+                        CorrectionFilter.evaluate(source: words[i].text, target: term.preferred, isCommonWord: common)
+                            == .accepted(source: words[i].text, target: term.preferred)
+                    } : exact
+                    if candidates.count == 1 { entry = candidates[0] }
+                }
+                guard let entry else { continue }
                 let start = words[i].start, end = words[i + length - 1].end
                 output += String(chars[cursor..<start])
                 output += Self.cased(entry.preferred, original: String(chars[start..<end]),
@@ -278,6 +292,17 @@ final class DictionaryStore {
         }
         output += String(chars[cursor...])
         return output
+    }
+
+    private static func addsDoubledLetter(to source: String, spelling: String) -> Bool {
+        guard spelling.count == source.count + 1 else { return false }
+        let chars = Array(spelling)
+        for i in 1..<chars.count where chars[i] == chars[i - 1] {
+            var shorter = chars
+            shorter.remove(at: i)
+            if String(shorter) == source { return true }
+        }
+        return false
     }
 
     static let maxNearMatches = 10
@@ -298,7 +323,7 @@ final class DictionaryStore {
     /// or a variant occurs in the text as whole words, then up to `maxNearMatches` entries whose
     /// preferred spelling sounds like a 1–3 word span of the text (the learning filter's
     /// similarity rules), so a misheard term can still be corrected by cleanup. Never the whole
-    /// dictionary. `apply(to:)` stays exact; only the cleanup hint uses near matches.
+    /// dictionary. These broader phrase matches feed cleanup; local respelling is narrower.
     func relevantEntries(for text: String) -> [DictionaryEntry] {
         let exact = exactEntries(for: text)
         let exactIDs = Set(exact.map(\.id))
