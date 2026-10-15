@@ -164,11 +164,15 @@ struct MeetingStore {
         guard let cutoff else { return [] }
         let expired = try meetings().filter { $0.recordedAt <= cutoff }.map(\.id)
         for id in expired { try delete(id) }
+        try purgeUnreadable(cutoff: cutoff)
+        return expired
+    }
+    /// Damaged files still hold meeting text, so they expire by their modification date.
+    func purgeUnreadable(cutoff: Date) throws {
         let files = (try? FileManager.default.contentsOfDirectory(at: unreadable, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
         for url in files where ((try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantFuture) <= cutoff {
             try FileManager.default.removeItem(at: url)
         }
-        return expired
     }
 }
 

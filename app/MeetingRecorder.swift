@@ -52,6 +52,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     private var callApp: String?
     private var callWasUsingMic = false
     private var micStopped = false
+    private var tapStopped = false
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
@@ -86,7 +87,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         let pump = makePump(meeting.id)
         started = ProcessInfo.processInfo.systemUptime; lastVoice = started; lastSave = started
         systemAudioProblem = nil; warning = nil; askEnded = false; behind = false; elapsed = 0; message = nil
-        callApp = source.bundleID; callWasUsingMic = false; micStopped = false
+        callApp = source.bundleID; callWasUsingMic = false; micStopped = false; tapStopped = false
         live = meeting
         let me = Capture()
         let meFeed = MeetingStreamFeed(stream: .me, folder: folder, offset: 0, enqueue: pump.enqueue) { [weak self] in
@@ -143,7 +144,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         live = nil
         meetings.insert(meeting, at: 0)
         if persists { try? store?.save(meeting) }
-        if pumps[meeting.id]?.isIdle == false { finishing.insert(meeting.id) }
+        if pumps[meeting.id]?.isIdle == false { finishing.insert(meeting.id) } else { pumps[meeting.id] = nil }
         askEnded = false; warning = nil; meLevel = 0; themLevel = 0
         meetingLog.notice("meeting-stopped seconds=\(Int(meeting.seconds))")
         onLiveChange?(); refreshLeftovers()
@@ -240,6 +241,13 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
             warning = "The microphone stopped. Check that it is connected."
         } else if micStopped, capture?.engine.isRunning == true { micStopped = false; warning = nil }
         behind = (pumps[meeting.id]?.backlog ?? 0) > MeetingLimits.behind
+        // The aggregate device delivers buffers (silent or not) while the tap runs; none for 5 s means it stopped.
+        // ponytail: flagged with a gap, not restarted; restart once if live tests show taps stopping.
+        if let tap, let last = tap.queue.sync(execute: { tap.lastBuffer }), now - last > 5, !tapStopped {
+            tapStopped = true
+            var next = meeting; next.gaps.append(elapsed); live = next
+            warning = "The call's audio stopped arriving. Stop and start meeting notes again to resume it."
+        }
         if now - lastTapRefresh >= 2 {
             lastTapRefresh = now; tap?.refreshProcesses()
             if let callApp {
@@ -293,10 +301,23 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     }
 
     /// Expires meetings with History's retention, and chunk audio after 24 hours.
+    /// Meetings the History cap already deleted from disk.
+    func forget(_ ids: Set<String>) {
+        for id in ids { pumps.removeValue(forKey: id)?.stop(); finishing.remove(id) }
+        meetings.removeAll { ids.contains($0.id) }; purgeAudio()
+    }
+
+    /// Uses the meetings in memory, so the minute timer never re-reads every file.
     func purge(cutoff: Date?) {
-        if persists { _ = try? store?.purge(cutoff: cutoff) }
-        if let cutoff { meetings.removeAll { !persists && $0.recordedAt <= cutoff } }
-        reload()
+        if let cutoff {
+            for meeting in meetings where meeting.recordedAt <= cutoff {
+                pumps.removeValue(forKey: meeting.id)?.stop(); finishing.remove(meeting.id)
+                if persists { try? store?.delete(meeting.id) }
+            }
+            meetings.removeAll { $0.recordedAt <= cutoff }
+            try? store?.purgeUnreadable(cutoff: cutoff)
+        }
+        purgeAudio()
     }
 
     private func purgeAudio() {

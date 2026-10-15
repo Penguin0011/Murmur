@@ -1965,14 +1965,15 @@ final class PreStart: @unchecked Sendable {
         guard let store else { historyCapWarning = nil; return }
         // Meetings live inside the History folder, so they share the cap's oldest-first list.
         let entries = try store.entries()
-        let meetings = meetingRecorder.persists ? ((try meetingRecorder.store?.meetings()) ?? []).filter { $0.id != meetingRecorder.live?.id } : []
+        // The recorder's list mirrors the saved meetings (the live one excluded); no files are re-read.
+        let meetings = meetingRecorder.persists ? meetingRecorder.meetings : []
         let result: HistoryCapResult<CappedHistoryItem>
         if let meetingStore = meetingRecorder.store {
             result = try MeetingCap.enforce(entries: entries.map { ($0.id, $0.recordedAt) }, meetings: meetings, historyDirectory: store.directory, meetingStore: meetingStore,
                                             retention: HistoryRetention(rawValue: appliedRetention) ?? .thirtyDays) { id in
                 if let entry = entries.first(where: { $0.id == id }) { try store.delete(entry) }
             }
-            if result.dropped.contains(where: \.isMeeting) { meetingRecorder.reload() }
+            if result.dropped.contains(where: \.isMeeting) { meetingRecorder.forget(Set(result.dropped.filter(\.isMeeting).map(\.id))) }
         } else {
             let plain = try HistoryCap.enforce(entries: entries, directory: store.directory, retention: HistoryRetention(rawValue: appliedRetention) ?? .thirtyDays, delete: store.delete)
             result = HistoryCapResult(status: plain.status, dropped: [])

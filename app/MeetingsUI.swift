@@ -259,6 +259,7 @@ struct MeetingLiveView: View {
                 Spacer(minLength: 4)
                 Button("Copy Notice", action: recorder.copyNotice).buttonStyle(.link).font(.system(size: 13))
             }
+            if !recorder.persists { Text("History is off: this meeting is kept only until Murmur quits.").font(.system(size: 12)).foregroundStyle(Palette.accentDeep) }
             if let problem = recorder.systemAudioProblem {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(problem).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
