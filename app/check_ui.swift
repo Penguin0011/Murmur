@@ -101,6 +101,7 @@ import SwiftUI
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }
             if args.contains("--settings") || args.contains("--dictionary") { controller.screenRequest = "settings" }
+            if args.contains("--meeting-settings") { controller.meetingTranscription = args.contains("--cloud") ? .cloud : .local; controller.screenRequest = "meeting-settings" }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
             controller.message = CommandLine.arguments.contains("--credential-warning")

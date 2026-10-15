@@ -227,6 +227,7 @@ struct SettingsView: View {
         case "guide": WelcomeGuide.replay(.standard); guideStep = .microphone; screen = .setup
         case "insights": screen = .insights
         case "meetings": screen = .meetings
+        case "meeting-settings": section = 8; screen = .settings
         case "settings": screen = .settings
         default: screen = .home
         }
