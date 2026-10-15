@@ -810,8 +810,10 @@ final class PreStart: @unchecked Sendable {
             captureModeAndContext(aiCleanup: plan.cleaner != nil)
         }
         let wasListening = session.state == .listening
+        // An early capture already played its start sound when it began (onQueuedPress).
+        let adoptsEarly = session.early != nil
         session.receive(action, completed: done)
-        if action == .start, session.state == .listening { cue(.start) }
+        if action == .start, session.state == .listening, !adoptsEarly { cue(.start) }
         if wasListening, action == .finish || (action == .cancel && listener?.cancelIsExplicit == true) { cue(.stop) }
         if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
         if action == .cancel {
