@@ -246,7 +246,7 @@ final class DictionaryStore {
     }
 
     /// Explicit variants win. With a lexicon, an unfamiliar single word may also use one unique
-    /// phonetic term; recognized words/names, short words and unlisted phrases stay unchanged.
+    /// phonetic term. Names also allow a single doubled letter; ordinary words stay unchanged.
     /// Punctuation or a line break ends a phrase; the longest explicit phrase wins.
     func apply(to text: String, isCommonWord: ((String) -> Bool)? = nil) -> String {
         let table = variantTable()
@@ -265,11 +265,13 @@ final class DictionaryStore {
                 guard Self.spacedPhrase(span, chars) else { continue }
                 let key = span.map(\.folded).joined(separator: " ")
                 var entry = table[key]
-                if entry == nil, length == 1, key.count >= 6, key.allSatisfy(\.isLetter),
-                   let common = isCommonWord, !common(key), !common(key.capitalized) {
-                    // Check title case too: the English lexicon recognizes Robert, not robert.
+                if entry == nil, length == 1, key.count >= 5, key.allSatisfy(\.isLetter),
+                   let common = isCommonWord, !common(key) {
+                    // Recognized names allow only one doubled letter, not broader phonetic swaps.
+                    let unfamiliar = key.count >= 6 && !common(key.capitalized)
                     let exact = terms.filter { TermText.fold($0.preferred) == key }
                     let candidates = exact.isEmpty ? terms.filter { term in
+                        (unfamiliar || Self.addsDoubledLetter(to: key, spelling: TermText.fold(term.preferred))) &&
                         CorrectionFilter.phoneticKey(key) == CorrectionFilter.phoneticKey(term.preferred) &&
                         CorrectionFilter.evaluate(source: words[i].text, target: term.preferred, isCommonWord: common)
                             == .accepted(source: words[i].text, target: term.preferred)
@@ -290,6 +292,17 @@ final class DictionaryStore {
         }
         output += String(chars[cursor...])
         return output
+    }
+
+    private static func addsDoubledLetter(to source: String, spelling: String) -> Bool {
+        guard spelling.count == source.count + 1 else { return false }
+        let chars = Array(spelling)
+        for i in 1..<chars.count where chars[i] == chars[i - 1] {
+            var shorter = chars
+            shorter.remove(at: i)
+            if String(shorter) == source { return true }
+        }
+        return false
     }
 
     static let maxNearMatches = 10

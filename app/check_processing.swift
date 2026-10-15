@@ -72,6 +72,8 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try localChecks(ProcessingCoordinator(directory: root.appendingPathComponent("local"), defaults: defaults))
         try await cloudChecks(ProcessingCoordinator(directory: root.appendingPathComponent("cloud"), defaults: defaults))
         try await respellingChecks(root.appendingPathComponent("respelling"), defaults)
+        let recognized: Set<String> = ["Akash", "Alison", "Michele", "Robert", "Steven", "diner", "desert", "please", "review", "report"]
+        try preferredOnlyChecks(ProcessingCoordinator(directory: root.appendingPathComponent("preferred-only"), defaults: defaults, isCommonWord: { recognized.contains($0) }))
         #if canImport(AppKit)
         try nativeRespellingChecks(root.appendingPathComponent("native-respelling"), defaults)
         #endif
@@ -204,14 +206,49 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(p.ledger.evidence.isEmpty && p.dictionary.entries.allSatisfy { $0.variants.isEmpty || $0.preferred == "Aakash" || $0.preferred == "spaceyboi" }, "automatic respelling creates no learned aliases or evidence")
     }
 
+    static func preferredOnlyChecks(_ p: ProcessingCoordinator) throws {
+        let name = try p.dictionary.add(preferred: "aakash", variants: [], source: .learned)
+        for term in ["allison", "michelle", "Rupert", "Roberto", "Stephen", "dinner", "dessert", "Aaron", "spaceyboi"] {
+            try p.dictionary.add(preferred: term, variants: [], source: .learned)
+        }
+        var settings = p.settings; settings.options = .faithful; try p.update(settings, persist: false)
+        let cleaner = SpyCleaner(.fail); p.localCleaner = cleaner
+        check(p.dictionary.apply(to: "Call Akash.") == "Call Akash.", "preferred-only correction requires a lexicon")
+        for (raw, expected) in [
+            ("Please ask Akash to review the report.", "Please ask aakash to review the report."),
+            ("Ask akash and Akash.", "Ask aakash and aakash."),
+            ("Akash will review it.", "Aakash will review it."),
+            ("Ask Alison and Michele.", "Ask allison and michelle."),
+            ("Call Akash and spaceyboi.", "Call aakash and spaceyboi.")
+        ] { check(p.process(raw) == .insert(expected), "preferred-only doubled-letter spelling without an alias: \(raw)") }
+        for raw in ["Ask Robert and Steven.", "Ask robert and steven.", "Ask Aron.", "Meet at the diner in the desert.", "Akash's report", "Akash-based report", "Akash2"] {
+            check(p.process(raw) == .insert(raw), "preferred-only correction preserves other names, ordinary words and boundaries: \(raw)")
+        }
+        let rival = try p.dictionary.add(preferred: "akaash", variants: [], source: .learned)
+        check(p.process("Call Akash.") == .insert("Call Akash."), "competing doubled-letter spellings require an explicit alias")
+        check(p.process("Call aakash.") == .insert("Call aakash."), "an existing preferred spelling is preserved despite near terms")
+        try p.dictionary.delete(id: rival.id)
+        let longer = try p.dictionary.add(preferred: "aaakash", variants: [], source: .learned)
+        check(p.process("Call Aakash.") == .insert("Call aakash."), "preferred spelling beats a further doubled letter")
+        try p.dictionary.delete(id: longer.id)
+        var disabled = name; disabled.enabled = false; try p.dictionary.update(disabled)
+        check(p.process("Call Akash.") == .insert("Call Akash."), "disabled preferred-only names cannot correct")
+        disabled.enabled = true; try p.dictionary.update(disabled)
+        try p.dictionary.add(preferred: "Override", variants: ["Akash"])
+        check(p.process("Call Akash.") == .insert("Call Override."), "explicit aliases beat preferred-only doubled-letter correction")
+        check(cleaner.calls == 0 && p.ledger.evidence.isEmpty && p.dictionary.entries.filter { $0.source == .learned }.allSatisfy { $0.variants.isEmpty }, "preferred-only correction makes no cleanup calls or persistent learned aliases")
+    }
+
     #if canImport(AppKit)
     @MainActor static func nativeRespellingChecks(_ root: URL, _ defaults: UserDefaults) throws {
-        let p = try ProcessingCoordinator(directory: root, defaults: defaults, isCommonWord: { word in
+        let common: (String) -> Bool = { word in
             NSSpellChecker.shared.checkSpelling(of: word, startingAt: 0, language: "en", wrap: false, inSpellDocumentWithTag: 0, wordCount: nil).location == NSNotFound
-        })
-        try p.dictionary.add(preferred: "Aakash", variants: ["Akash"])
-        try p.dictionary.add(preferred: "spaceyboi", variants: ["spacey boy"], source: .learned)
-        for term in ["Shelfmate", "Notion", "Gemini", "Sean", "Jean", "Rupert", "Tyler", "OpenRouter", "Supabase", "Clouddev", "kubectl", "Kubernetes", "Tailscale", "Postgres", "Figma", "GitHub", "OpenAI", "API", "JSON"] {
+        }
+        try preferredOnlyChecks(ProcessingCoordinator(directory: root.appendingPathComponent("preferred-only"), defaults: defaults, isCommonWord: common))
+        let p = try ProcessingCoordinator(directory: root, defaults: defaults, isCommonWord: common)
+        try p.dictionary.add(preferred: "Aakash", variants: [], source: .learned)
+        try p.dictionary.add(preferred: "spaceyboi", variants: [], source: .learned)
+        for term in ["Shelfmate", "Notion", "Gemini", "Sean", "Jean", "Rupert", "Tyler", "OpenRouter", "Supabase", "Clouddev", "kubectl", "Kubernetes", "Tailscale", "Postgres", "Figma", "GitHub", "OpenAI", "API", "JSON", "allison", "michelle", "dinner", "dessert", "Roberto", "Stephen", "Aaron"] {
             try p.dictionary.add(preferred: term, variants: [], source: .learned)
         }
         var settings = p.settings; settings.options = .faithful; try p.update(settings, persist: false)
