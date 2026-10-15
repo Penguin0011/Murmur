@@ -82,8 +82,8 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 | # | Gap | BetterWispr | Murmur today | Plan | PRD impact | Size | W |
 |---|---|---|---|---|---|---|---|
 | 22 | Meeting notetaker | Mic as "Me", system audio as "Them" (Core Audio tap), live transcript, your own notes, AI title, summary, decisions and action items | None | **Spec proposed Oct 15, awaiting user approval:** [PRD section 11](PRD.md#11-meeting-notetaker-w7) (capture, consent, transcript, retention, notes; milestones W7a–W7b). Build after approval | Reverses the "no meeting recording at launch" boundary (PRD line 11) | L | W7 |
-| 23 | Meeting detection | Offers to start notes when Zoom, Meet, Teams and others start using the mic | None | After #22; spec in [PRD 11.7](PRD.md#117-meeting-detection-23) (milestone W7c), awaiting approval | Same | S | W7 |
-| 24 | Speaker separation | On-device diarization (Speaker 1, 2…) with renaming | None | After #22; spec in [PRD 11.8](PRD.md#118-speaker-separation-24) (offline FluidAudio diarization, about 21.6 MB, milestone W7d), awaiting approval | Same | M | W7 |
+| 23 | Meeting detection | Offers to start notes when Zoom, Meet, Teams and others start using the mic | None | After #22; spec in [PRD 11.7](PRD.md#117-meeting-detection-23) (milestone W7c), approved Oct 15 | Same | S | W7 |
+| 24 | Speaker separation | On-device diarization (Speaker 1, 2…) with renaming | None | After #22; spec in [PRD 11.8](PRD.md#118-speaker-separation-24) (offline FluidAudio diarization, about 21.6 MB, milestone W7d), approved Oct 15 | Same | M | W7 |
 
 ### Distribution (no change; recorded for completeness)
 
@@ -96,6 +96,6 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 2. **W2, Apple Intelligence cleanup (#1)** and **W4, learning (#9, #10, #12):** #11 waits for a decision. These run in parallel with W1. W2 adds a new cleaner file and its route. W4 touches `Learning.swift`, `Controller.swift` (watch loop) and the History UI.
 3. **W3, modes, tone and screen context (#6–8), done October 14, 2026:** `WritingMode` and `DictationStyle` in `Processing.swift`, `Tone` and `ScreenContext` in `Cleanup.swift`, Settings → Modes. See the three PRD decisions of the same date. Built alongside W2 rather than after it; see the PR for the integration points.
 4. **W5, recording experience (#13–18)**, done October 15, 2026 (see the PRD decision of the same date). **W6, Home/Insights (#19–21)**, done October 15, 2026 (see the PRD decision of the same date); it was independent of the cleanup work, but they share `UI.swift` and `Controller.swift`, so run them one after the other or carefully split by file.
-5. **W7, meetings (#22–24):** PRD section 11 proposed October 15, 2026 and awaiting user approval; then the build in four milestones: W7a capture and transcript, W7b notes, then W7c detection and W7d speaker separation, which can run in parallel. It is the largest piece; start it once the dictation gaps are closed or have their own owners.
+5. **W7, meetings (#22–24):** PRD section 11 approved by the user October 15, 2026 (all nine answers accepted); then the build in four milestones: W7a capture and transcript, W7b notes, then W7c detection and W7d speaker separation, which can run in parallel. It is the largest piece; start it once the dictation gaps are closed or have their own owners.
 
 Every workstream keeps the PRD's evidence rules: `check_*.swift` coverage, corpus thresholds for cleanup changes, and a documented decision for any rule it amends.

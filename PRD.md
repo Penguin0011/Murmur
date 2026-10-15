@@ -483,7 +483,7 @@ The user removed M1 performance from the required gates. M1/8 GB benchmarking an
 
 ## 11. Meeting notetaker (W7)
 
-**Status: Proposed — awaiting user approval (October 15, 2026).** Nothing in this section is built. It covers BetterWispr gaps #22 (notetaker), #23 (meeting detection) and #24 (speaker separation), brought into scope by the user's decision of October 14, 2026 (section 1). Each subsection says what is proposed. Open questions for the user are collected in 11.13, each with a recommendation. Until the user approves, the approved rules in sections 2–10 stand unchanged; the amendments this section would make are listed in 11.12. [Certain]
+**Status: Approved by the user, October 15, 2026.** All nine open questions were accepted as recommended (11.13). Nothing in this section is built yet; W7a is next. It covers BetterWispr gaps #22 (notetaker), #23 (meeting detection) and #24 (speaker separation), brought into scope by the user's decision of October 14, 2026 (section 1). Each subsection says what is proposed. Open questions for the user are collected in 11.13, each with a recommendation. Until the user approves, the approved rules in sections 2–10 stand unchanged; the amendments this section would make are listed in 11.12. [Certain]
 
 BetterWispr's meeting feature (its CHANGELOG, v0.1.0–v0.1.6) was used for scope only: "Me" and "Them" capture, a live transcript, notes, call detection and speaker labels. No code, prompts or numbers are taken from it. Murmur is MIT, and parts of BetterWispr derive from GPL-3.0 VoiceInk (BETTERWISPR_GAPS.md). [Certain]
 
@@ -493,24 +493,24 @@ A meeting is one recording the user starts on purpose. It has two streams:
 - **Me:** the microphone, through the existing `Capture` (the microphone setting, including Automatic, applies).
 - **Them:** the audio other apps play, through a Core Audio process tap (11.2).
 
-The two streams are transcribed separately with the local Parakeet model and shown as one transcript, line by line, labelled Me or Them (or Speaker 1, 2… once speaker separation runs, 11.8). After Stop, Murmur can write notes: a title, a summary, key points, decisions and action items (11.6). The transcript, the notes and anything the user types during the meeting are kept under the History policy. The audio is not (11.5). [Proposed]
+The two streams are transcribed separately with the local Parakeet model and shown as one transcript, line by line, labelled Me or Them (or Speaker 1, 2… once speaker separation runs, 11.8). After Stop, Murmur can write notes: a title, a summary, key points, decisions and action items (11.6). The transcript, the notes and anything the user types during the meeting are kept under the History policy. The audio is not (11.5). [Approved]
 
-Dictation keeps working during a meeting. Dictated speech also appears in the Me stream, since the user said it. Dictation requests go to the front of the warm helper's queue, ahead of meeting chunks (11.4). [Proposed]
+Dictation keeps working during a meeting. Dictated speech also appears in the Me stream, since the user said it. Dictation requests go to the front of the warm helper's queue, ahead of meeting chunks (11.4). [Approved]
 
 ### 11.2 Capture
 
-**API: a Core Audio process tap, not ScreenCaptureKit.** [Proposed]
+**API: a Core Audio process tap, not ScreenCaptureKit.** [Approved]
 - `AudioHardwareCreateProcessTap` takes a `CATapDescription` and returns a tap. The tap is added to a private aggregate device and read like a microphone. Apple documents this in "Capturing system audio with Core Audio taps". `AudioHardwareCreateProcessTap` and the `NSAudioCaptureUsageDescription` Info.plist key are available from macOS 14.2 (Apple docs, and `AudioHardwareTapping.h` in the macOS 27 SDK). Murmur's macOS 26 minimum covers it. [Certain]
 - **Permission:** "The first time you start recording from an aggregate device that contains a tap, the system prompts you to grant the app system audio recording permission" (Apple sample-code page). It needs `NSAudioCaptureUsageDescription` in Info.plist. [Certain] It should not need Screen Recording, since Apple names only system-audio permission; verify on the test Mac. [Likely] The System Settings pane where it is listed, and the label macOS 26 uses for it, must be recorded on the test Mac. [Likely]
 - **Why not ScreenCaptureKit:** its audio capture (`SCStreamConfiguration.capturesAudio`, macOS 13) runs inside a screen-capture stream. Apple's ScreenCaptureKit overview says to "request screen recording permission" with `NSScreenCaptureUsageDescription`. That is a broader grant than Murmur needs, for a stream it would throw away. Its microphone option (`captureMicrophone`, macOS 15) would not replace `Capture`, which already handles device changes. [Certain]
-- **Tap settings:** a private tap (visible only inside Murmur), `muteBehavior` unmuted, so the user still hears the call. The tap is converted to 16 kHz mono as it arrives, the format the model uses. [Proposed]
-- **Which apps are "Them":** [Proposed; open question Q1]
+- **Tap settings:** a private tap (visible only inside Murmur), `muteBehavior` unmuted, so the user still hears the call. The tap is converted to 16 kHz mono as it arrives, the format the model uses. [Approved]
+- **Which apps are "Them":** [Approved, Q1]
   - **The call app.** This is used when it is known: it was detected (11.7) or picked in the Start menu. The tap uses `init(stereoMixdownOfProcesses:)` on that app's audio processes. Call apps and browsers play audio from helper processes, so the process list includes every audio process whose bundle ID equals the app's or starts with it (for example `com.google.Chrome.helper`), resolved through `kAudioHardwarePropertyProcessObjectList`. A process that starts mid-meeting is added. For a browser, that means every tab.
   - **All apps except Murmur.** This is the choice when no call app is known: `init(stereoGlobalTapButExcludeProcesses:)` excludes Murmur and its helpers. It also captures music, videos and notification sounds, and the live view says so.
-- **Permission denied or the tap fails:** the meeting does not start silently with one stream. The live view says system audio is unavailable and why, with the fix, and offers "Record only my microphone". [Proposed]
-- **Device changes:** the Me stream keeps the W5 rule: capture restarts on the new device into the same stream. The tap is independent of the output device. A tap that stops is restarted once, and a gap is marked in the transcript. [Proposed]
+- **Permission denied or the tap fails:** the meeting does not start silently with one stream. The live view says system audio is unavailable and why, with the fix, and offers "Record only my microphone". [Approved]
+- **Device changes:** the Me stream keeps the W5 rule: capture restarts on the new device into the same stream. The tap is independent of the output device. A tap that stops is restarted once, and a gap is marked in the transcript. [Approved]
 
-**Echo of the other side through the speakers.** With speakers instead of headphones, the microphone also hears Them, so Them's words appear twice, once in each stream. [Certain] The approach is decided by measurement, not asserted: [Proposed]
+**Echo of the other side through the speakers.** With speakers instead of headphones, the microphone also hears Them, so Them's words appear twice, once in each stream. [Certain] The approach is decided by measurement, not asserted: [Approved]
 1. **Them is never altered.** The tap is a clean copy of what the app played.
 2. **Text-level suppression on Me.** A Me word run that repeats a Them run within a few seconds is hidden. It is never deleted. A Me line with nothing of its own left is hidden. "Show hidden echo" in the transcript reveals it. Hidden text is left out of notes input and exports.
 3. **Voice processing on the microphone is a candidate, not a plan.** Apple documents `AVAudioIONode.setVoiceProcessingEnabled(_:)` (macOS 10.15). Murmur has no source showing that it cancels another app's speaker output on macOS. It can also change the input format and duck other audio. It is adopted only if the echo measurement (11.10) shows a gain without harming dictation.
@@ -520,36 +520,36 @@ Dictation keeps working during a meeting. Dictated speech also appears in the Me
 
 Recording other people may require their consent where the user or the other participants are. Murmur does not give legal advice and makes no claim about any jurisdiction. [Certain]
 
-- **First meeting:** a one-time sheet explains that Murmur records the microphone and the call's audio, that recording others may require their consent, and that the user is responsible for telling them. Starting requires ticking "I'll let participants know". The acknowledgement is stored with a version, so a changed text asks again. [Proposed; open question Q8]
-- **Every meeting:** the live view's first line says "Let others know you're taking notes", with **Copy notice**. It copies a short neutral sentence for the user to paste into the call chat. Murmur never sends it itself. [Proposed]
-- **Visible while recording:** [Proposed]
+- **First meeting:** a one-time sheet explains that Murmur records the microphone and the call's audio, that recording others may require their consent, and that the user is responsible for telling them. Starting requires ticking "I'll let participants know". The acknowledgement is stored with a version, so a changed text asks again. [Approved, Q8]
+- **Every meeting:** the live view's first line says "Let others know you're taking notes", with **Copy notice**. It copies a short neutral sentence for the user to paste into the call chat. Murmur never sends it itself. [Approved]
+- **Visible while recording:** [Approved]
   - macOS shows its own microphone indicator. Whether it also shows one for a system-audio tap is to be recorded on the test Mac. [Likely]
   - The live view (11.9) is on screen for the whole meeting. It can be collapsed to a small pill with a red dot and the timer, but it cannot be hidden.
   - The menu bar icon shows a recording state.
   - This holds even when the menu bar icon and the Dock icon are hidden (amends R6, 11.12).
-- **Murmur never:** [Proposed]
+- **Murmur never:** [Approved]
   - starts a meeting without an explicit action each time: a click on Start, or on Take Notes in a detection offer. Detection only offers (11.7).
   - records with no visible indicator, or keeps recording after Stop, after Cancel, or after Murmur quits. After a crash, capture is not resumed on relaunch (11.5).
   - joins a meeting as a participant or bot, connects to a meeting service's API, or reads the meeting service's own recordings or transcripts.
   - captures video or the screen.
-  - sends meeting audio off the Mac. Meetings are transcribed locally only (open question Q2).
+  - sends meeting audio off the Mac. Meetings are transcribed locally only (Q2, approved).
   - posts, emails or shares notes on its own. Export is a user action (11.9).
-  - records past the meeting cap: 3 hours, with a warning 10 minutes before (open question Q7). This replaces the 5-minute dictation cap for meetings only (11.12).
+  - records past the meeting cap: 3 hours, with a warning 10 minutes before (Q7, approved). This replaces the 5-minute dictation cap for meetings only (11.12).
 - **Info.plist:** `NSMicrophoneUsageDescription` currently says Murmur records "only while you activate the dictation shortcut". It must also name meeting notes. `NSAudioCaptureUsageDescription` is added, saying system audio is recorded only during meeting notes the user starts. [Certain]
 
 ### 11.4 Live transcript
 
-**Engine:** the warm `ModelBench --serve` helper and `Chunker` (`module-one/capture/Capture.swift`), already used for long dictations. Each stream gets its own `Chunker`, which cuts at pauses near 15 s. Each chunk is sent to the warm helper, and the text is appended to the transcript as a line with the stream, start time and end time. No new model or download is needed for W7a. [Proposed]
-- **Why not W5's streaming helper:** live words run one extra helper while recording, for +0.3–0.6 GB of wired memory (section 10, W5 decision). A meeting would need one per stream, held for the whole meeting. Chunked offline text is the PRD's accuracy baseline. It costs about 1.25 s of compute per minute of speech (STREAMING_TRANSCRIPTION.md), so two streams over two hours need about 5 minutes of helper time. The price is lag: a line appears roughly one chunk after it starts. A live partial line from the streaming helper may be added after W7a if the measured lag is a problem. [Proposed]
-- **Queue:** one warm helper serves dictation and both meeting streams. Dictation jumps ahead of queued meeting chunks, so a dictation during a meeting is not delayed by a backlog. Meeting chunks run in order per stream. When the backlog passes 2 minutes of audio, the live view says the transcript is behind; nothing is dropped. [Proposed]
-- **Timing:** lines are ordered by capture time, not by when transcription finished. Each stream's sample clock is mapped to host time at the start of each chunk, so Me and Them lines interleave correctly. [Proposed]
-- **Vocabulary:** the dictionary and learned entries apply to meeting text as they do to dictation. Cleanup (fillers, corrections, lists, commands) does not run on meeting text. The transcript is what was said, so spoken commands are not executed. Learning never observes meeting text. [Proposed]
+**Engine:** the warm `ModelBench --serve` helper and `Chunker` (`module-one/capture/Capture.swift`), already used for long dictations. Each stream gets its own `Chunker`, which cuts at pauses near 15 s. Each chunk is sent to the warm helper, and the text is appended to the transcript as a line with the stream, start time and end time. No new model or download is needed for W7a. [Approved]
+- **Why not W5's streaming helper:** live words run one extra helper while recording, for +0.3–0.6 GB of wired memory (section 10, W5 decision). A meeting would need one per stream, held for the whole meeting. Chunked offline text is the PRD's accuracy baseline. It costs about 1.25 s of compute per minute of speech (STREAMING_TRANSCRIPTION.md), so two streams over two hours need about 5 minutes of helper time. The price is lag: a line appears roughly one chunk after it starts. A live partial line from the streaming helper may be added after W7a if the measured lag is a problem. [Approved]
+- **Queue:** one warm helper serves dictation and both meeting streams. Dictation jumps ahead of queued meeting chunks, so a dictation during a meeting is not delayed by a backlog. Meeting chunks run in order per stream. When the backlog passes 2 minutes of audio, the live view says the transcript is behind; nothing is dropped. [Approved]
+- **Timing:** lines are ordered by capture time, not by when transcription finished. Each stream's sample clock is mapped to host time at the start of each chunk, so Me and Them lines interleave correctly. [Approved]
+- **Vocabulary:** the dictionary and learned entries apply to meeting text as they do to dictation. Cleanup (fillers, corrections, lists, commands) does not run on meeting text. The transcript is what was said, so spoken commands are not executed. Learning never observes meeting text. [Approved]
 - **Long meetings (1–2 h):**
   - The transcript is appended to disk as lines arrive, so a crash keeps everything already transcribed.
   - Memory must stay flat. The live view keeps only its visible lines in memory, and chunks are deleted as they are transcribed (11.5).
   - The 3-hour cap applies (11.3).
-  - If both streams are silent for 5 minutes, or the detected call app stops using the microphone, the live view asks "Call ended?" with Stop. Murmur stops on its own only after 10 minutes of silence on both streams, because stopping a recording is the safe direction. [Proposed]
-- **Budgets on the M3 / 16 GB test Mac (targets to measure, not claims):** [Proposed]
+  - If both streams are silent for 5 minutes, or the detected call app stops using the microphone, the live view asks "Call ended?" with Stop. Murmur stops on its own only after 10 minutes of silence on both streams, because stopping a recording is the safe direction. [Approved]
+- **Budgets on the M3 / 16 GB test Mac (targets to measure, not claims):** [Approved]
   - Added resident memory during a 2-hour meeting: at most 400 MB beyond the idle app and warm helper, and no more than 10% growth between minute 10 and minute 120.
   - Average CPU of Murmur plus its helpers: at most 20% of one core over the meeting.
   - Transcript lag: p90 of at most 25 s from the end of speech to its line.
@@ -558,13 +558,13 @@ Recording other people may require their consent where the user or the other par
 
 ### 11.5 Storage, retention and deletion
 
-**Audio is not kept.** This keeps the approved rule "no permanent audio history" (section 6). [Proposed]
+**Audio is not kept.** This keeps the approved rule "no permanent audio history" (section 6). [Approved]
 - Chunk files are written to the app-private chunk folder (`Chunker.directory`) with restrictive permissions, and each is deleted once its text is saved.
 - After a crash, chunks not yet transcribed are retry audio under the existing 24-hour rule. On relaunch Murmur offers "Finish interrupted meeting", which transcribes them locally and saves the meeting. It never restarts capture.
-- **Exception with speaker separation on:** the Them stream (16 kHz mono) is kept until diarization finishes after Stop, at most 24 hours, then deleted (11.8; open question Q4). The Me stream is never kept.
+- **Exception with speaker separation on:** the Them stream (16 kHz mono) is kept until diarization finishes after Stop, at most 24 hours, then deleted (11.8; Q4, approved). The Me stream is never kept.
 - Meeting audio is never exported, synced or sent.
 
-**Transcript and notes follow History.** [Proposed]
+**Transcript and notes follow History.** [Approved]
 - Each meeting is stored as one record inside the History folder (`meetings/` under it): title, start time, length, source app, lines, the user's own notes, speaker names, generated notes and their route.
 - Retention (30 days, six months, forever) applies from the meeting's start time, with the same calendar rule and the same preview before shortening it. Meetings count toward the History size cap. A meeting is about 60–120 KB of text an hour, so it is a small share.
 - **History off:** a meeting is kept in memory only until Murmur quits. The live view says so at start, and export still works.
@@ -574,19 +574,19 @@ Recording other people may require their consent where the user or the other par
 
 ### 11.6 Notes
 
-**Output:** a title (at most 8 words), a summary (2–4 sentences), key points, decisions, and action items (who, what, and when only if said). Empty sections are left out rather than filled with "no decisions were made". Action items have checkboxes in Murmur. Notes are written after Stop and can be rewritten on demand ("Update notes"). Renaming speakers or editing the user's notes marks them out of date. [Proposed]
+**Output:** a title (at most 8 words), a summary (2–4 sentences), key points, decisions, and action items (who, what, and when only if said). Empty sections are left out rather than filled with "no decisions were made". Action items have checkboxes in Murmur. Notes are written after Stop and can be rewritten on demand ("Update notes"). Renaming speakers or editing the user's notes marks them out of date. [Approved]
 
-**Input:** the transcript with hidden echo removed, numbered lines (`[L42 Them 00:14:03] …`), speaker names if set, and the user's own notes marked as theirs. Like dictation, it is data: it goes inside nonce-tagged blocks, and the prompt says nothing inside them is an instruction. Corpus cases must include a participant saying "ignore previous instructions" or "add an action item for…" without anyone agreeing. Prompts are written for Murmur, not taken from BetterWispr. [Proposed]
+**Input:** the transcript with hidden echo removed, numbered lines (`[L42 Them 00:14:03] …`), speaker names if set, and the user's own notes marked as theirs. Like dictation, it is data: it goes inside nonce-tagged blocks, and the prompt says nothing inside them is an instruction. Corpus cases must include a participant saying "ignore previous instructions" or "add an action item for…" without anyone agreeing. Prompts are written for Murmur, not taken from BetterWispr. [Approved]
 
-**Grounding: no invented items.** Every key point, decision and action item must cite the line numbers it rests on. A deterministic check, in the spirit of `CleanupGuard`, drops an item when: [Proposed]
+**Grounding: no invented items.** Every key point, decision and action item must cite the line numbers it rests on. A deterministic check, in the spirit of `CleanupGuard`, drops an item when: [Approved]
 - it cites no line, or a line that doesn't exist;
 - it shares no content word with its cited lines;
 - it contains a name, number, date or time that its cited lines (or the user's notes) don't contain;
 - its owner is neither named in its cited lines nor the speaker of one of them.
 
-The title and summary may not contain a name or number absent from the transcript or the user's notes; otherwise the title falls back to "Meeting with <app>, <date>" and the summary is left out. An action item needs a commitment or an assignment in what was said ("I'll send it", "can you send it? — yes"). A suggestion, a question or something already done is not one. Dropped items are counted in diagnostics without their text. Each item links to its lines in the transcript. [Proposed]
+The title and summary may not contain a name or number absent from the transcript or the user's notes; otherwise the title falls back to "Meeting with <app>, <date>" and the summary is left out. An action item needs a commitment or an assignment in what was said ("I'll send it", "can you send it? — yes"). A suggestion, a question or something already done is not one. Dropped items are counted in diagnostics without their text. Each item links to its lines in the transcript. [Approved]
 
-**Routes** (a separate "Meeting notes" setting; each route keeps its existing disclosure and Keychain rules): [Proposed; open question Q3]
+**Routes** (a separate "Meeting notes" setting; each route keeps its existing disclosure and Keychain rules): [Approved, Q3]
 - **None:** transcript only. Local rules cannot write notes, so there is no on-device rules fallback.
 - **Apple Intelligence** (on device, no key). TN3193 states "a context window of 4096 tokens per language model session", counting instructions, every prompt and every response. A token is about 3–4 characters of English. An hour of two-way talk is roughly 8,000–10,000 words, about 11,000–14,000 tokens, so long meetings must be chunked:
   - **Map:** a fresh `LanguageModelSession` per chunk of about 1,500 words of lines (sized so instructions, the chunk and the reply fit, checked with `tokenCount(for:)` where available). It extracts cited points, decisions and action items.
@@ -597,22 +597,22 @@ The title and summary may not contain a name or number absent from the transcrip
 
 ### 11.7 Meeting detection (#23)
 
-**What it does:** when a known call app, or a browser, starts using the microphone, Murmur shows an offer in the bubble: "Zoom is using the microphone. Take meeting notes?" with **Take Notes**, **Not now** and **Never for Zoom**. It never starts recording automatically. Take Notes starts a meeting with that app as the Them source (11.2). [Proposed]
+**What it does:** when a known call app, or a browser, starts using the microphone, Murmur shows an offer in the bubble: "Zoom is using the microphone. Take meeting notes?" with **Take Notes**, **Not now** and **Never for Zoom**. It never starts recording automatically. Take Notes starts a meeting with that app as the Them source (11.2). [Approved]
 
 **How:** Core Audio's process objects. Murmur listens to `kAudioHardwarePropertyProcessObjectList` and reads each process's `kAudioProcessPropertyBundleID` and `kAudioProcessPropertyIsRunningInput` (documented in `AudioHardware.h`; the properties are in the macOS 26 and 27 SDKs). This needs no extra permission, reads no window or screen, and stores nothing. [Likely: the exact listener behaviour must be checked on the test Mac.]
 - **Known call apps:** a built-in bundle-ID list (Zoom, Microsoft Teams, Slack, Webex, FaceTime, Discord, WhatsApp, Signal, Telegram), with each ID verified when it is implemented. A helper process maps to its app by bundle-ID prefix.
-- **Browsers** (Safari, Chrome, Arc, Edge, Brave, Firefox): microphone use is ambiguous. It may be a call, a page's voice input or voice search. The offer says "<Browser> is using the microphone" and does not claim a call. Murmur does not read window titles or page URLs to tell them apart. That would be a new Accessibility read the modes decision does not cover (open question Q5).
+- **Browsers** (Safari, Chrome, Arc, Edge, Brave, Firefox): microphone use is ambiguous. It may be a call, a page's voice input or voice search. The offer says "<Browser> is using the microphone" and does not claim a call. Murmur does not read window titles or page URLs to tell them apart. That would be a new Accessibility read the modes decision does not cover (Q5, approved).
 - **Filters:**
   - Murmur's own processes (the app and its helpers) never trigger an offer.
   - Input must run for 5 seconds before the offer, which filters short voice searches.
   - One offer per app per microphone session.
   - The offer disappears after 30 seconds.
   - No offer while a meeting or dictation is recording.
-- **Turning it off:** Settings → Meetings → "Offer to take notes when a call starts", plus per-app "Never" with a list to undo it. Proposed default: on, because it only offers and runs locally (open question Q6).
+- **Turning it off:** Settings → Meetings → "Offer to take notes when a call starts", plus per-app "Never" with a list to undo it. Proposed default: on, because it only offers and runs locally (Q6, approved).
 
 ### 11.8 Speaker separation (#24)
 
-**Model:** FluidAudio's offline pipeline (`OfflineDiarizerManager`: pyannote community-1 segmentation, WeSpeaker embeddings, PLDA and VBx clustering), run once on the Them stream after Stop. Me stays "Me". People in the same room as the user share the microphone and are not separated, which is a known limit. [Proposed]
+**Model:** FluidAudio's offline pipeline (`OfflineDiarizerManager`: pyannote community-1 segmentation, WeSpeaker embeddings, PLDA and VBx clustering), run once on the Them stream after Stop. Me stays "Me". People in the same room as the user share the microphone and are not separated, which is a known limit. [Approved]
 - **Why offline:** FluidAudio's own benchmarks on the AMI SDM 16-meeting test set (`Documentation/Benchmarks.md` at FluidAudio `0b1f462`) give these average DERs: [Certain]
   - offline (pyannote community-1 with VBx): 10.62%, on an M5 Pro, July 3, 2026;
   - LS-EEND streaming: 20.7%, on an M4 Max CPU;
@@ -622,21 +622,21 @@ The title and summary may not contain a name or number absent from the transcrip
   Its docs say streaming is "a lot more fragile to clustering" and that "offline is more than enough for most applications". AMI is far-field room audio, not call audio, and none of these Macs is the test Mac, so these numbers are not Murmur's. The 10.62% table used `--threshold 0.7` under the old semantics, which is about 0.775 today; the default is 0.6. W7d therefore sets the clustering threshold explicitly and records it with its results. [Certain]
 - **Download:** optional, about 21.6 MB: `Segmentation.mlmodelc`, `FBank.mlmodelc`, `Embedding.mlmodelc`, `PldaRho.mlmodelc` and `plda-parameters.json` from `FluidInference/speaker-diarization-coreml` (sizes from the Hugging Face API on October 15, 2026). These are pinned with sizes and hashes in `artifact-pins.json`, like the other models. The revision must be the one FluidAudio `0b1f462` resolves. The repository's current `main` (`7eab74f`) differs from the revision its provenance link names (`df2625a`), so the pin is resolved before W7d starts. The online pipeline's files (`pyannote_segmentation`, `wespeaker_v2`) are not used. [Certain about sizes and names; Proposed for the choice]
 - **License:** the repository's NOTICE scopes CC-BY-4.0 to exactly those offline files. THIRD_PARTY_NOTICES and the download sheet must credit pyannote, WeSpeaker, BUT Speech@FIT and Fluid Inference, link CC-BY-4.0, and say the files are modified Core ML conversions. [Certain]
-- **Assigning lines:** each Them line goes to the speaker whose segments overlap it most. Chunks run about 15 s, so on calls with several remote speakers many lines will cross a speaker change. Such a line is split at the change using word timings. FluidAudio's `ASRResult` has `tokenTimings`, but `ModelBench --serve` returns plain text today, so W7d must pass the timings through first. The fallback is to re-transcribe each speaker segment from the kept Them audio. Speakers are numbered in order of first speech. [Proposed]
-- **Renaming:** per meeting. A speaker can be renamed, two speakers merged, or one line reassigned. Names are stored with the meeting and expire with it. Renaming marks notes out of date (11.6). [Proposed]
-- **Never kept:** voice embeddings are discarded after the meeting is processed. Murmur does not recognise people across meetings, because that would be stored biometric data. [Proposed]
+- **Assigning lines:** each Them line goes to the speaker whose segments overlap it most. Chunks run about 15 s, so on calls with several remote speakers many lines will cross a speaker change. Such a line is split at the change using word timings. FluidAudio's `ASRResult` has `tokenTimings`, but `ModelBench --serve` returns plain text today, so W7d must pass the timings through first. The fallback is to re-transcribe each speaker segment from the kept Them audio. Speakers are numbered in order of first speech. [Approved]
+- **Renaming:** per meeting. A speaker can be renamed, two speakers merged, or one line reassigned. Names are stored with the meeting and expire with it. Renaming marks notes out of date (11.6). [Approved]
+- **Never kept:** voice embeddings are discarded after the meeting is processed. Murmur does not recognise people across meetings, because that would be stored biometric data. [Approved]
 
 ### 11.9 UI
 
-- **Meetings page:** a new screen beside Home, Insights and History (the `Screen` enum in `UI.swift`). It lists meetings with title, date, length, source app and notes status. Search covers titles and transcript text. "Start Meeting Notes" opens a menu: the detected or running call apps, then "All apps". A meeting's page has Notes, Transcript and My notes tabs. The transcript shows labels, timestamps and the "Show hidden echo" toggle. Citations in notes jump to their lines. [Proposed]
-- **Other ways to start:** a Home button and a menu bar item, "Start Meeting Notes", plus the detection offer. No global shortcut in W7. [Proposed]
-- **Live view:** a floating panel docked to a screen edge (right by default) that does not take focus unless clicked. It shows a red dot, "Recording" and the timer, Me and Them level meters, the source app, the latest transcript lines, a My notes field, and Stop and Cancel (Cancel asks before discarding). It collapses to a pill but cannot be hidden (11.3). It follows Reduce Motion and Reduce Transparency, and VoiceOver announces start, stop, permission problems and "transcript is behind". [Proposed]
-- **After Stop:** the meeting is saved at once with its transcript. The page then shows "Finishing transcript", then "Separating speakers" and "Writing notes" where those are on. Each step can fail on its own without losing the transcript. [Proposed]
-- **Export:** Copy notes, Copy transcript, and Save as Markdown (a save panel; title, date, length, speakers, notes, then transcript; hidden echo left out). Nothing is uploaded. [Proposed]
+- **Meetings page:** a new screen beside Home, Insights and History (the `Screen` enum in `UI.swift`). It lists meetings with title, date, length, source app and notes status. Search covers titles and transcript text. "Start Meeting Notes" opens a menu: the detected or running call apps, then "All apps". A meeting's page has Notes, Transcript and My notes tabs. The transcript shows labels, timestamps and the "Show hidden echo" toggle. Citations in notes jump to their lines. [Approved]
+- **Other ways to start:** a Home button and a menu bar item, "Start Meeting Notes", plus the detection offer. No global shortcut in W7. [Approved]
+- **Live view:** a floating panel docked to a screen edge (right by default) that does not take focus unless clicked. It shows a red dot, "Recording" and the timer, Me and Them level meters, the source app, the latest transcript lines, a My notes field, and Stop and Cancel (Cancel asks before discarding). It collapses to a pill but cannot be hidden (11.3). It follows Reduce Motion and Reduce Transparency, and VoiceOver announces start, stop, permission problems and "transcript is behind". [Approved]
+- **After Stop:** the meeting is saved at once with its transcript. The page then shows "Finishing transcript", then "Separating speakers" and "Writing notes" where those are on. Each step can fail on its own without losing the transcript. [Approved]
+- **Export:** Copy notes, Copy transcript, and Save as Markdown (a save panel; title, date, length, speakers, notes, then transcript; hidden echo left out). Nothing is uploaded. [Approved]
 
 ### 11.10 Acceptance evidence
 
-Every result records machine model, RAM, macOS and app versions and raw numbers, as section 8 requires. Thresholds marked "proposed" are approved by the user before the run, not fitted after it. Real-call recordings need every participant's consent and stay off the repository. [Proposed]
+Every result records machine model, RAM, macOS and app versions and raw numbers, as section 8 requires. Thresholds marked "proposed" are approved by the user before the run, not fitted after it. Real-call recordings need every participant's consent and stay off the repository. [Approved]
 
 **W7a, capture and transcript:**
 - Tap capture from Zoom, Teams, Meet in Chrome and Safari, FaceTime, and "All apps", with headphones and with speakers. Record the permission prompt, the System Settings entry and the macOS indicators.
@@ -667,7 +667,7 @@ Every result records machine model, RAM, macOS and app versions and raw numbers,
 
 ### 11.11 Phasing
 
-Each milestone is its own pull request with its own evidence (11.10) and live-test checklist. The size uses the BETTERWISPR_GAPS.md scale. [Proposed]
+Each milestone is its own pull request with its own evidence (11.10) and live-test checklist. The size uses the BETTERWISPR_GAPS.md scale. [Approved]
 
 | Milestone | Scope | Depends on | Size |
 |---|---|---|---|
@@ -678,7 +678,7 @@ Each milestone is its own pull request with its own evidence (11.10) and live-te
 
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
-### 11.12 Amendments this section would make (on approval)
+### 11.12 Amendments (approved October 15, 2026, in effect)
 
 - **Section 1, line 11:** the "without meeting recording" boundary was already replaced on October 14, 2026. This section is the documented meetings decision that decision asked for.
 - **Section 3, 5-minute cap:** it applies to dictation only. Meetings have a 3-hour cap.
@@ -687,19 +687,19 @@ W7c and W7d touch different files and can run in parallel after W7a. W7b can run
 - **Section 6, Delete All Data, and R9:** both cover meetings.
 - **R6:** while a meeting records, its live view stays visible even when the menu bar and Dock icons are hidden.
 
-### 11.13 Open questions for the user
+### 11.13 Questions answered (user, October 15, 2026)
 
-Each one has a recommendation. Implementation of W7a starts after Q1, Q2, Q7 and Q8 are answered. The others can wait for their milestone. [Proposed]
+The user accepted all nine recommendations as written ("Accept all nine W7 recommendations (Q1–Q9)"). Each answer below is the approved decision. [Certain]
 
-1. **Q1, what "Them" captures.** Recommendation: the call app when known (detected or picked), and "All apps except Murmur" only when the user picks it, with a note that it includes music and notifications.
-2. **Q2, cloud transcription for meetings.** Recommendation: local only in W7. Meetings hold other people's voices, and Gemini stores audio requests (section 5).
-3. **Q3, default notes route.** Recommendation: ask at the first meeting's Stop, with None preselected. Apple Intelligence is offered as "on-device, less accurate" until its notes measurement passes. The cloud and custom routes carry their disclosure.
-4. **Q4, audio for speaker separation.** Recommendation: keep the Them stream (16 kHz mono) only until diarization finishes after Stop, at most 24 hours. The alternative, streaming diarization during the meeting, keeps no audio. Its best result in FluidAudio's AMI benchmarks is 20.7% DER (LS-EEND), against 10.6% offline (11.8).
-5. **Q5, browser calls.** Recommendation: offer on browser microphone use, worded as microphone use rather than a call, and read no window titles or URLs.
-6. **Q6, detection default.** Recommendation: on, since it only offers and runs locally, with per-app "Never" and a global switch.
-7. **Q7, meeting cap.** Recommendation: 3 hours, a warning at 2 h 50 min, and an automatic stop after 10 minutes of silence on both streams.
-8. **Q8, consent reminder.** Recommendation: a one-time acknowledgement sheet, then the "Let others know" line with Copy notice at every meeting, rather than a confirmation dialog each time.
-9. **Q9, evidence bars.** Approve or change the proposed thresholds in 11.10 (echo, notes, diarization) before the runs.
+1. **Q1, what "Them" captures.** Approved: the call app when known (detected or picked), and "All apps except Murmur" only when the user picks it, with a note that it includes music and notifications.
+2. **Q2, cloud transcription for meetings.** Approved: local only in W7. Meetings hold other people's voices, and Gemini stores audio requests (section 5).
+3. **Q3, default notes route.** Approved: ask at the first meeting's Stop, with None preselected. Apple Intelligence is offered as "on-device, less accurate" until its notes measurement passes. The cloud and custom routes carry their disclosure.
+4. **Q4, audio for speaker separation.** Approved: keep the Them stream (16 kHz mono) only until diarization finishes after Stop, at most 24 hours. The alternative, streaming diarization during the meeting, keeps no audio. Its best result in FluidAudio's AMI benchmarks is 20.7% DER (LS-EEND), against 10.6% offline (11.8).
+5. **Q5, browser calls.** Approved: offer on browser microphone use, worded as microphone use rather than a call, and read no window titles or URLs.
+6. **Q6, detection default.** Approved: on, since it only offers and runs locally, with per-app "Never" and a global switch.
+7. **Q7, meeting cap.** Approved: 3 hours, a warning at 2 h 50 min, and an automatic stop after 10 minutes of silence on both streams.
+8. **Q8, consent reminder.** Approved: a one-time acknowledgement sheet, then the "Let others know" line with Copy notice at every meeting, rather than a confirmation dialog each time.
+9. **Q9, evidence bars.** The proposed thresholds in 11.10 (echo, notes, diarization) are approved as written.
 
 **Sources:**
 - Apple, "Capturing system audio with Core Audio taps": https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps
