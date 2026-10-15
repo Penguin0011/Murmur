@@ -73,9 +73,9 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 
 | # | Gap | BetterWispr | Murmur today | Plan | PRD impact | Size | W |
 |---|---|---|---|---|---|---|---|
-| 19 | Home and Insights | Home: shortcut, readiness, recent dictations. Insights: WPM against typing, time saved, words cleaned, streak calendar, apps used | Settings and History only | Home page computed from local History only; no telemetry | None (local only) | M | W6 |
-| 20 | Theme and Dock icon | System, Light or Dark; show in Dock | Follows the system; menu bar toggle | Add both settings | None | S | W6 |
-| 21 | Welcome guide | Full-window onboarding: permissions, model, first dictation; can be replayed | Setup screen | Turn the setup screen into a replayable guide with a test dictation | None | S | W6 |
+| 19 | ✅ Done (W6, Oct 15) — Home and Insights | Home: shortcut, readiness, recent dictations. Insights: WPM against typing, time saved, words cleaned, streak calendar, apps used | Settings and History only | Home is the first screen (shortcut, Start Dictation, readiness with fixes, latest dictations). Insights from local History only: pace against 51.56 WPM typing (Dhakal et al., CHI 2018), time saved, words changed, apps, streak calendar; says so when History is off or empty. History entries now record length and target app | None (local only) | M | W6 |
+| 20 | ✅ Done (W6, Oct 15) — Theme and Dock icon | System, Light or Dark; show in Dock | Follows the system; menu bar toggle | System (default), Light or Dark for Murmur's window only; the bubble follows macOS. Show in Dock, off by default, applies at once | Amends R6 (decision, Oct 15) | S | W6 |
+| 21 | ✅ Done (W6, Oct 15) — Welcome guide | Full-window onboarding: permissions, model, first dictation; can be replayed | Setup screen | Five steps with a test-dictation field; resumes at the saved step; completion stored as guide version 1; replay from the menu or Home | None | S | W6 |
 
 ### Meetings (in scope per the user, Oct 14)
 
@@ -95,7 +95,7 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 1. **W1, cleanup rules (#2–5), done October 14, 2026:** the "Spoken commands and numbers" option (`RuleCleaner.spokenCommands`, the `CleanupGuard` second pass, prompt lines). See the PRD decision of the same date. Was pure `Cleanup.swift` work, so it has the fewest dependencies. Ship it first so W2 and W3 build on the new guard rules.
 2. **W2, Apple Intelligence cleanup (#1)** and **W4, learning (#9, #10, #12):** #11 waits for a decision. These run in parallel with W1. W2 adds a new cleaner file and its route. W4 touches `Learning.swift`, `Controller.swift` (watch loop) and the History UI.
 3. **W3, modes, tone and screen context (#6–8), done October 14, 2026:** `WritingMode` and `DictationStyle` in `Processing.swift`, `Tone` and `ScreenContext` in `Cleanup.swift`, Settings → Modes. See the three PRD decisions of the same date. Built alongside W2 rather than after it; see the PR for the integration points.
-4. **W5, recording experience (#13–18)**, done October 15, 2026 (see the PRD decision of the same date). **W6, Home/Insights (#19–21):** independent of the cleanup work, but they share `UI.swift` and `Controller.swift`, so run them one after the other or carefully split by file.
+4. **W5, recording experience (#13–18)**, done October 15, 2026 (see the PRD decision of the same date). **W6, Home/Insights (#19–21)**, done October 15, 2026 (see the PRD decision of the same date); it was independent of the cleanup work, but they share `UI.swift` and `Controller.swift`, so run them one after the other or carefully split by file.
 5. **W7, meetings (#22–24):** PRD section first, then the build. It is the largest piece; start it once the dictation gaps are closed or have their own owners.
 
 Every workstream keeps the PRD's evidence rules: `check_*.swift` coverage, corpus thresholds for cleanup changes, and a documented decision for any rule it amends.
