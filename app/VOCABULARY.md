@@ -19,7 +19,15 @@ Any intentional replacement must explicitly address this decision, provide provi
 
 The user's result is qualitative testing of the installed build, not a controlled benchmark. The provider/model, audio samples, echo counts, and recognition error rates were not recorded in the report. Improvement across all providers is not established. [Certain]
 
-## Controlled follow-up — acceptance failed
+## Faithful spelling regression addressed
+
+The user requested addressing the measured spelling cost. `DictionaryStore.apply` now optionally uses the existing English lexicon and phonetic/semantic learning guard to recover a uniquely matching unfamiliar single word locally, before cleanup. Explicit variants remain authoritative; recognized lowercase/title-case words and names, short words, ambiguity, disabled terms and unlisted phrases stay unchanged. It records no new variant or learning evidence. [Certain]
+
+Reprocessing all 60 stored raw provider outputs with the native lexicon restores the no-prompt Faithful score from 6/18 to **18/18 exact preferred spellings**, matching the prompted control, without any model cleanup. The native 21-term dictionary also leaves all 425 ordinary corpus inputs unchanged beyond explicit variants. Fresh checks and the signed build passed. See [the updated results](../PR45_TEST_RESULTS.md) for evidence and limits. [Certain]
+
+This addresses the failing post-transcription stage; it does not change ASR requests or restore a vocabulary output filter. Unknown real names remain a possible false match, and words recognized by the lexicon or unlisted phrases still require explicit variants or optional model cleanup. Preserve these limits and the corpus checks in future merges. [Certain]
+
+## Original controlled run — acceptance failed before local correction
 
 The fresh [PR #45 test results](../PR45_TEST_RESULTS.md) record 30 paired synthetic-audio comparisons on the actual candidate `fb55557`, using Groq `whisper-large-v3-turbo`, plus six real Standard cleanup calls on Cerebras `gpt-oss-120b`. All 60 ASR calls succeeded without retries, and the deterministic checks, build and signature verification passed. [Certain]
 
@@ -27,7 +35,7 @@ Prompt removal reduced unspoken dictionary additions on direct silence/noise cal
 
 For the rare-term fixtures, Faithful-mode exact preferred spellings fell from 18/18 with the prompt to 6/18 without it; ignoring capitalization, the comparison was 18/18 versus 9/18. Standard model cleanup recovered the unprompted outputs to 18/18 word spellings ignoring capitalization and 16/18 exact preferred spellings, without guard fallback. [Certain]
 
-The handoff's no-loss acceptance criterion failed. Keep the prompt/filter-removal policy intact as requested, but hold the merge decision for review of the Faithful-mode spelling cost. The user's positive local test does not erase this measured tradeoff, and successful Standard cleanup cannot be assumed in Faithful mode or during cleanup failure. [Certain]
+The original handoff's no-loss acceptance criterion failed before the local correction fix above. That historical result prompted the follow-up; keep the prompt/filter-removal policy intact. The user's positive local test does not erase this measured tradeoff, and successful Standard cleanup cannot be assumed in Faithful mode or during cleanup failure. [Certain]
 
 ## Decision
 
@@ -48,9 +56,9 @@ Whisper prompt conditioning is the likely cause of the reported labeled echo, ra
 | Gemini audio LLM | Preferred spellings in system instructions, limited to 1,000 characters, explicitly for words actually spoken. JSON transcript parsing and answer detection remain. [Certain] |
 | Custom OpenAI-compatible, including Whisper | Audio, model, language, response format and temperature; **no dictionary prompt or invented vocabulary field**. [Certain] |
 
-After transcription, the controller saves raw provider text to History, then `ProcessingCoordinator.prepare` applies exact whole-word/phrase dictionary variants in every mode, including Faithful. It collects relevant preferred spellings (exact matches plus at most ten near matches) for optional model cleanup. The cleanup guard permits plausible respellings and rejects unrelated edits; provider failure falls back to local processing of the dictionary-applied text. [Certain]
+After transcription, the controller saves raw provider text to History, then `ProcessingCoordinator.prepare` applies explicit dictionary variants and the narrow lexicon-guarded single-word respelling rule in every mode, including Faithful. It collects relevant preferred spellings (exact matches plus at most ten near matches) for optional model cleanup. The cleanup guard permits plausible respellings and rejects unrelated edits; provider failure falls back to local processing of the dictionary-applied text. [Certain]
 
-Thus `Akash → Aakash` and learned `spacey boy → spaceyboi` variants still work without ASR hints, without cleanup, and on cleanup failure. A preferred-only learned `Shelfmate` can still correct `shelf made` through model cleanup. Faithful/local-only processing deliberately does not make that near-match replacement. [Certain]
+Thus `Akash → Aakash` and learned `spacey boy → spaceyboi` variants still work without ASR hints, without cleanup, and on cleanup failure. A preferred-only learned `Shelfmate` can still correct `shelf made` through model cleanup. Faithful/local-only processing still does not replace an unlisted multiword phrase such as `shelf made`; unfamiliar single-word forms such as `Shelfmet` can use the guarded local correction. [Certain]
 
 ## Why remove rather than reword the Whisper prompt?
 

@@ -1,8 +1,37 @@
 # PR #45 test results
 
-**Overall: FAIL — the handoff's no-loss spelling criterion is not met.** A fresh run completed all 30 audio pairs and six real guarded-cleanup calls on the correct candidate. All deterministic checks, the build, and strict signature verification passed. [Certain]
+**Current status: PASS for the measured spelling regression, frozen-response replay, and required checks/build.** The pre-fix live provider benchmark below remains preserved as historical evidence. [Certain]
 
-## Decision
+## Faithful spelling follow-up — `cc5326e`
+
+The fix reuses the app's English lexicon and the existing phonetic/semantic learning guard locally, before optional cleanup. An unlisted correction is restricted to a single alphabetic source word and target of at least six letters, a shared phonetic key, one enabled matching term, and an unfamiliar lowercase/title-case source. Explicit variants retain priority; recognized words/names, ambiguity, short words, unlisted phrases and disabled terms are preserved. No prompt or output deletion filter was restored, and no alias/evidence is automatically persisted. [Certain]
+
+Replayed all **60 saved raw provider responses** from the exact controlled audio run below through the actual revised `ProcessingCoordinator`, using native `NSSpellChecker` and the same isolated three-entry dictionary. The control processor omitted the lexicon and reproduced the old exact-only result. No new ASR or cleanup calls were needed: provider requests and the raw responses under test are unchanged. [Certain]
+
+| Faithful exact preferred spellings on C07/C08 | Original prompt A | No prompt B |
+|---|---:|---:|
+| Exact-only control | 18/18 [Certain] | 6/18 [Certain] |
+| Fixed native-lexicon processor | 18/18 [Certain] | **18/18** [Certain] |
+
+No additional changes occurred on the ordinary C01/C02 provider outputs. Separately, a 21-term manual/learned dictionary with the native English lexicon produced **zero unintended changes across all 425 cleanup-corpus inputs** relative to exact-variant-only processing. Native tests also cover known-name collisions, `PostgreSQL`/`Postgres`, explicit alias priority, disabled and ambiguous terms, punctuation/possessive boundaries, and correction when cleanup fails. [Certain]
+
+The first implementation's edit-distance path shortened `PostgreSQL` to `Postgres` in the corpus; the final implementation requires matching phonetic keys and preserves it. This counterexample is retained as a regression check. [Certain]
+
+Fresh checks after the fix: 592 provider assertions, 169 route checks, **158 processing checks on macOS**, 177 dictionary checks, and the complete 425-utterance cleanup suite passed. `app/build.sh` and its strict code-signature verification passed; `git diff --check` passed. [Certain]
+
+Follow-up evidence directory: `/Users/aakash/.codex/worktrees/833a/Murmur/runtime/pr45-spelling-fix/`. `Replay.swift`, `replayed-outputs.json`, `replay-summary.json`, and `build.log` retain the replay and build evidence. `app/check_processing.swift` contains the persistent mock/native regression tests and corpus check. The replay took about 0.60 seconds for all 60 stored outputs on this Mac. [Certain]
+
+**Limits:** this is reprocessing of the saved synthetic-audio outputs, not a new human-speech or live UI experiment. Without an English lexicon, correction stays exact-only. Short terms, known words/names and unlisted phrases still need explicit variants or optional model cleanup. An unfamiliar real name can still be mistaken for a uniquely matching dictionary term; the native lexicon and ambiguity checks reduce that risk but cannot prove intent. [Certain]
+
+PR #45 remains unmerged. The installed/running app was not replaced by this follow-up; the freshly built development bundle is `runtime/Murmur.app`. [Certain]
+
+## Historical pre-fix provider benchmark
+
+The sections below describe the original `fb55557` run and its failure before the local correction fix; their raw outputs and counts are unchanged. The current follow-up above supersedes that run's merge recommendation. [Certain]
+
+**Pre-fix status: FAIL — the handoff's no-loss spelling criterion was not met.** A fresh run completed all 30 audio pairs and six real guarded-cleanup calls on the correct candidate. All deterministic checks, the build, and strict signature verification passed. [Certain]
+
+## Pre-fix decision
 
 Keep PR #45 unmerged pending a decision on the Faithful-mode spelling regression. Preserve the user-selected no-prompt/no-deletion policy while evaluating that regression; this test makes no production changes and does not authorize restoring the old prompt or filter.
 
@@ -88,4 +117,4 @@ One synthetic voice, one transcription model/provider, and one cleanup mode do n
 
 Production code, real dictionary/history/settings, installed app and normal running app were not changed. Only this report and linked review notes are intended repository edits; bulky synthetic evidence stays local in the directory above. [Certain] PR #45 must remain unmerged for the user to review these results.
 
-**Recommendation:** treat the test as a completed failure of the no-loss acceptance criterion, not a build or regression-suite failure. Retain the user-selected no-prompt/no-deletion implementation while deciding how to handle useful rare spellings in Faithful mode. Standard cleanup recovered all tested word spellings, but cannot be assumed available in Faithful mode or on cleanup failure. [Certain]
+**Original recommendation (superseded by the follow-up above):** treat the test as a completed failure of the no-loss acceptance criterion, not a build or regression-suite failure. Retain the user-selected no-prompt/no-deletion implementation while deciding how to handle useful rare spellings in Faithful mode. Standard cleanup recovered all tested word spellings, but cannot be assumed available in Faithful mode or on cleanup failure. [Certain]

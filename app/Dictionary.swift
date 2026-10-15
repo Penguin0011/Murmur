@@ -310,7 +310,7 @@ final class DictionaryStore {
     /// or a variant occurs in the text as whole words, then up to `maxNearMatches` entries whose
     /// preferred spelling sounds like a 1–3 word span of the text (the learning filter's
     /// similarity rules), so a misheard term can still be corrected by cleanup. Never the whole
-    /// dictionary. `apply(to:)` stays exact; only the cleanup hint uses near matches.
+    /// dictionary. These broader phrase matches feed cleanup; local respelling is narrower.
     func relevantEntries(for text: String) -> [DictionaryEntry] {
         let exact = exactEntries(for: text)
         let exactIDs = Set(exact.map(\.id))
