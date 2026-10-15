@@ -259,6 +259,10 @@ final class ShortcutListener {
             }
         }
     }
+    /// True while a cancel the user asked for (Escape, the menu) is being handled, as opposed to a
+    /// lone tap expiring or a lost event stream.
+    private(set) var cancelIsExplicit = false
+    func cancelByUser() { cancelIsExplicit = true; defer { cancelIsExplicit = false }; emit(machine.cancel()) }
     func replayQueued() {
         guard machine.state == .idle, !queued.isEmpty else { return }
         let events = queued; queued.removeAll()
@@ -370,7 +374,7 @@ final class ShortcutListener {
         if type == .keyDown && key == 53 {
             if !queued.isEmpty { cancelQueued(); return } // Cancels only the queued recording.
             if machine.state == .processing && event.getIntegerValueField(.keyboardEventAutorepeat) == 0 { onEscapeWhileProcessing?() }
-            emit(machine.cancel()); return
+            cancelByUser(); return
         }
         guard key == binding.keyCode else { return }
         let time = Double(event.timestamp) / 1_000_000_000

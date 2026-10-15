@@ -259,6 +259,8 @@ final class PreStart: @unchecked Sendable {
     @Published var automaticInsertion: Bool
     /// One press starts recording and the next press stops it, instead of hold-to-record.
     @Published var pressToToggle: Bool
+    /// Short system sounds when recording starts and stops (gap #15); none on insertion.
+    @Published var recordingSounds: Bool
     @Published var retention: String
     // Cleanup and learning settings, applied as soon as they change like the others.
     @Published var cleanupFillers: Bool
@@ -454,6 +456,7 @@ final class PreStart: @unchecked Sendable {
         intelligentLeadingSpace = defaults.bool(forKey: "intelligentLeadingSpace")
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         pressToToggle = defaults.bool(forKey: "pressToToggle")
+        recordingSounds = defaults.object(forKey: "recordingSounds") as? Bool ?? true
         retention = defaults.string(forKey: "retention") ?? "30-days"
         appliedRetention = defaults.string(forKey: "retention") ?? "30-days"
         let processingSettings = ProcessingSettings.load(from: defaults)
@@ -644,6 +647,7 @@ final class PreStart: @unchecked Sendable {
         let defaults = UserDefaults.standard
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
+        defaults.set(recordingSounds, forKey: "recordingSounds")
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
         defaults.set(inputDeviceUID, forKey: "inputDeviceUID"); Capture.preferredInputUID = inputDeviceUID.isEmpty ? nil : inputDeviceUID
         defaults.set(retention, forKey: "retention")
@@ -713,7 +717,7 @@ final class PreStart: @unchecked Sendable {
             guard let self, self.sessionAvailable, !IsSecureEventInputEnabled() else { return false }
             let shown = (self.phase, self.message)
             guard self.session.startEarly() else { return false }
-            self.phaseBeforeEarly = shown; return true
+            self.phaseBeforeEarly = shown; self.cue(.start); return true
         }
         next.onQueuedCancel = { [weak self] in
             guard let self else { return }
@@ -793,7 +797,10 @@ final class PreStart: @unchecked Sendable {
             destinationScreen = screenForDestination(destination)
             captureModeAndContext(aiCleanup: plan.cleaner != nil)
         }
+        let wasListening = session.state == .listening
         session.receive(action, completed: done)
+        if action == .start, session.state == .listening { cue(.start) }
+        if wasListening, action == .finish || (action == .cancel && listener?.cancelIsExplicit == true) { cue(.stop) }
         if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
         if action == .cancel { destination = nil; setPhase("Ready", "Recording canceled."); bubble.hide() }
         else if action == .start && session.state == .idle { setPhase("Error", "The microphone could not start. Check the selected input device.") }
@@ -889,8 +896,12 @@ final class PreStart: @unchecked Sendable {
     func stopRecording() { guard let listener else { return }; listener.emit(listener.machine.finish()) }
     func cancelRecording() {
         if cloudRequest.isActive { cancelCloudRequest(); return }
-        guard let listener else { return }; listener.emit(listener.machine.cancel())
+        guard let listener else { return }; listener.cancelByUser()
     }
+    private enum Cue: String { case start = "Tink", stop = "Pop" }
+    /// Measured October 15, 2026: both cues mixed at full level into a recording added no words,
+    /// and a recording of only the cues transcribed as empty, so the stop cue can play at release.
+    private func cue(_ cue: Cue) { if recordingSounds && !preview { NSSound(named: cue.rawValue)?.play() } }
     /// Escape or Cancel during a cloud request cancels its Task (and HTTP request); nothing from
     /// this session is inserted. Audio is deleted, as for a canceled recording; a transcript that
     /// was already saved stays in History.
