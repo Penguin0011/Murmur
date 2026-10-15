@@ -425,7 +425,8 @@ BetterWispr gaps #13–#18 (W5), in scope per the user's decision of October 14,
   - **How:** a second helper (`ModelBench LIVE_FOLDER --stream RATE`) starts with each recording and exits at release or cancel. Audio goes to it over a pipe and never to disk; when it falls behind, buffers are dropped rather than queued. The warm helper is untouched. [Certain]
   - **Download:** optional. The `live_files` list in `artifact-pins.json` holds the pinned int8 [70, 13, 13] streaming encoder plus the decoder, joint and vocabulary it loads with: 13 files, 609 MB, in their own folder. It is hash-verified once per launch and compiled in the background before its first use. Without it, the bubble is unchanged and dictation is unaffected. The Settings toggle is on by default. [Certain]
   - **Measured on the M3 / 16 GB:**
-    - The streaming encoder adds 0.5–1.2 GB of wired memory while it is loaded, which is held only while recording.
+    - In one process with the offline model, the streaming encoder added 0.5–1.2 GB of wired memory.
+    - With the built helper, three runs measured +317 to +573 MB of wired memory while it ran. Three seconds after it exited, memory was back within the noise of the starting value (±260 MB; system-wide readings are noisy).
     - A warm helper is ready 0.12–0.15 s after launch; the first load on a new binary compiles for about 10 s.
     - Each 1.04 s window takes about 0.05 s, and partial text lags speech by about 2 s.
     - Offline transcription running alongside took 0.21 s, against 0.19 s alone.

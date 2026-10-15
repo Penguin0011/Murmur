@@ -230,6 +230,50 @@ import AVFoundation
         print("Controller dismissal checks passed (idle recovery, configured shortcut, busy exclusion, history/audio preservation).")
         try warmRunnerChecks()
         try chunkChecks()
+        try liveStreamChecks()
+    }
+
+    /// Live words (gap #13) with fake helpers: text reaches the app, closing stdin ends a helper,
+    /// and one that never reads neither blocks capture nor outlives stop() by more than its watchdog.
+    @MainActor static func liveStreamChecks() throws {
+        signal(SIGPIPE, SIG_IGN)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("live-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func script(_ name: String, _ body: String) throws -> URL {
+            let url = dir.appendingPathComponent(name)
+            try ("#!/bin/sh\n" + body).write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+            return url
+        }
+        func helpers() -> Int32 {
+            let ps = Process(); ps.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep"); ps.arguments = ["-f", dir.path]
+            ps.standardOutput = FileHandle.nullDevice; try? ps.run(); ps.waitUntilExit(); return ps.terminationStatus
+        }
+        func pump(_ seconds: Double, until: () -> Bool = { false }) {
+            let end = Date().addingTimeInterval(seconds)
+            while Date() < end && !until() { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        }
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024)!; buffer.frameLength = 1024
+        var text = ""
+        let reader = try script("reader", "echo '{\"partial\":\"Synthetic words\"}'\ncat > /dev/null\n")
+        guard let stream = LiveStream(helper: reader, folder: dir, sampleRate: 48_000, onText: { text = $0 }) else { preconditionFailure("live helper starts") }
+        for _ in 0..<20 { stream.feed(buffer) }
+        pump(3) { text == "Synthetic words" }
+        precondition(text == "Synthetic words", "the helper's partial text reaches the app")
+        stream.stop(); stream.stop()
+        pump(1.5) { helpers() != 0 }
+        precondition(helpers() != 0, "closing stdin ends a reading helper")
+        let stuck = try script("stuck", "sleep 30\n")
+        guard let blocked = LiveStream(helper: stuck, folder: dir, sampleRate: 48_000, onText: { _ in }) else { preconditionFailure("stuck helper starts") }
+        let fed = Date()
+        for _ in 0..<2_000 { blocked.feed(buffer) }
+        precondition(Date().timeIntervalSince(fed) < 0.5, "feeding a helper that never reads does not block capture")
+        blocked.stop()
+        pump(3) { helpers() != 0 }
+        precondition(helpers() != 0, "a helper that never reads is terminated within the watchdog")
+        print("Live words checks passed (text, exit on stdin close, no blocking, watchdog).")
     }
 
     /// A fake helper speaks the --serve protocol: ready line, one answer per path, "die" exits.

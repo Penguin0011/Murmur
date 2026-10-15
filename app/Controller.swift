@@ -259,25 +259,25 @@ final class LiveStream: @unchecked Sendable {
         guard let samples = buffer.floatChannelData, buffer.frameLength > 0 else { return }
         let data = Data(bytes: samples[0], count: Int(buffer.frameLength) * MemoryLayout<Float>.size)
         let accepted: Bool = lock.withLock {
-            guard backlog < Self.maxBacklog else { return false }
+            guard !closed, backlog < Self.maxBacklog else { return false }
             backlog += 1; return true
         }
         guard accepted else { return }
         queue.async { [self] in
-            if !closed { _ = try? input.write(contentsOf: data) }
+            if !lock.withLock({ closed }) { _ = try? input.write(contentsOf: data) }
             lock.withLock { backlog -= 1 }
         }
     }
-    /// Queue-owned.
+    /// Lock-guarded.
     private var closed = false
 
-    /// Ends the helper: closing its stdin makes it exit; a stuck one is terminated.
+    /// Ends the helper: closing its stdin makes it exit. The terminate watchdog is armed here, not
+    /// behind the writes: a helper that stopped reading blocks the queue on a full pipe, and
+    /// terminating it fails that write (EPIPE), so its memory is never held past the recording.
     func stop() {
-        queue.async { [self] in
-            guard !closed else { return }
-            closed = true; try? input.close()
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [task] in if task.isRunning { task.terminate() } }
-        }
+        guard lock.withLock({ defer { closed = true }; return !closed }) else { return }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [task] in if task.isRunning { task.terminate() } }
+        queue.async { [input] in try? input.close() }
     }
 }
 
@@ -1791,19 +1791,21 @@ final class PreStart: @unchecked Sendable {
 
     /// Checks the live folder's hashes once per launch, then loads the model once with no audio, so
     /// its first compile (about 10 s) happens now rather than in a recording. Off the main thread.
+    private var preparingLiveWords = false
     private func prepareLiveWords() {
-        guard !preview, !liveWordsVerified, liveWordsRow.isReady, let folder = liveWordsDownloader?.target,
+        guard !preview, !liveWordsVerified, !preparingLiveWords, liveWordsRow.isReady, let folder = liveWordsDownloader?.target,
               let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"),
               let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
+        preparingLiveWords = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard (try? ModelVerificationCache.shared.verify(folder, manifest: manifest, list: liveWordsFileList)) != nil else {
-                DispatchQueue.main.async { self?.liveWordsMessage = "Live words failed verification. Remove them and download again." }
+                DispatchQueue.main.async { self?.preparingLiveWords = false; self?.liveWordsMessage = "Live words failed verification. Remove them and download again." }
                 return
             }
             let compile = Process(); compile.executableURL = helper; compile.arguments = [folder.path, "--stream", "16000"]
             compile.standardInput = FileHandle.nullDevice; compile.standardOutput = FileHandle.nullDevice; compile.standardError = FileHandle.nullDevice
             if (try? compile.run()) != nil { compile.waitUntilExit() }
-            DispatchQueue.main.async { self?.liveWordsVerified = true }
+            DispatchQueue.main.async { self?.preparingLiveWords = false; self?.liveWordsVerified = true }
         }
     }
     private func startLiveWords() {
@@ -1811,6 +1813,7 @@ final class PreStart: @unchecked Sendable {
         guard liveWords, liveWordsVerified, !preview, let capture, let rate = capture.recordingFormat?.sampleRate,
               let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let folder = liveWordsDownloader?.target else { return }
         let token = generation
+        liveText = ""
         guard let stream = LiveStream(helper: helper, folder: folder, sampleRate: rate, onText: { [weak self] text in
             guard let self, self.generation == token, self.live != nil else { return }
             self.liveText = text
@@ -1819,9 +1822,10 @@ final class PreStart: @unchecked Sendable {
         capture.setTee { stream.feed($0) }
         bubble.show(phase: phase, message: message, screen: destinationScreen)
     }
+    /// Keeps the last text up until the Processing bubble replaces it; the next start clears it.
     private func stopLiveWords() {
         capture?.setTee(nil)
-        live?.stop(); live = nil; liveText = ""
+        live?.stop(); live = nil
     }
     func downloadLiveWords() {
         guard let liveWordsDownloader else { liveWordsMessage = ModelDownloadError.invalidManifest.userMessage; return }

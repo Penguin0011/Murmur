@@ -104,7 +104,7 @@ enum LiveWordsFacts {
     static func summary(downloadSize: Int64) -> String {
         "Parakeet Unified streaming · \(ModelFacts.formatBytes(downloadSize)) download · \(ModelFacts.location)"
     }
-    static let explanation = "Shows your words in the bubble while you speak. Display only: the inserted text still comes from the whole recording. While you record, a second on-device model uses about 0.5–1 GB more memory; it quits when you stop."
+    static let explanation = "Shows your words in the bubble while you speak. Display only: the inserted text still comes from the whole recording. While you record, a second on-device model uses up to about 1 GB more memory; it quits when you stop."
     static func confirmation(downloadSize: Int64, license: ModelLicenseInfo, folder: URL) -> (title: String, body: String) {
         ("Download live words (\(ModelFacts.formatBytes(downloadSize)))?",
          "Murmur downloads \(ModelFacts.formatBytes(downloadSize)) from Hugging Face and checks every file against its pinned checksum. It is saved in \(folder.path).\n\nLicense:\n\(ModelFacts.licenseText(license))")
