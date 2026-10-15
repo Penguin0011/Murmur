@@ -169,6 +169,22 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(!MeetingRoute.cloudNote(provider: "Custom Provider", host: "api.example.com", storesAudio: false).contains("Google"), "storage sentence only for Gemini")
         }
 
+        // Stream health: a stall is reported once, rebuilt every few seconds, and recovery needs the new stream's own audio.
+        do {
+            var watch = StreamWatch(now: 0)
+            check(watch.update(count: 100, now: 1) == .none && watch.update(count: 200, now: 2) == .none, "flowing audio: nothing to do")
+            check(watch.update(count: 200, now: 4.9) == .none, "under 3 s without audio is not a stall")
+            check(watch.update(count: 200, now: 5) == .stalled, "3 s without audio is a stall (one gap)")
+            watch.rebuilt(now: 5)
+            check(watch.update(count: 0, now: 6) == .none && watch.update(count: 0, now: 7.9) == .none, "no second gap, and no rebuild before 3 s")
+            check(watch.update(count: 0, now: 8) == .rebuild, "still nothing: rebuild again")
+            watch.rebuilt(now: 8)
+            if case .recovered(let after) = watch.update(count: 50, now: 9) { check(abs(after - 7) < 0.001, "recovery reports how long the stream was stalled") } else { check(false, "the new stream's audio recovers it") }
+            check(watch.update(count: 60, now: 10) == .none && watch.stalledSince == nil, "back to normal")
+            var fresh = StreamWatch(now: 0)
+            check(fresh.update(count: 0, now: 2.9) == .none && fresh.update(count: 0, now: 3) == .stalled, "a stream that never starts is a stall too")
+        }
+
         // Limits (Q7).
         do {
             check(MeetingLimits.action(elapsed: 60, silentFor: 0) == .none, "short meeting: nothing")

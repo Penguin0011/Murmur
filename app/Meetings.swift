@@ -348,6 +348,41 @@ final class MeetingPump: @unchecked Sendable {
     }
 }
 
+// MARK: - Stream health
+
+/// Watches one stream's delivered audio (a frame or buffer count) and decides when it has stalled
+/// and must be rebuilt (PRD 11.2). A call app turning on voice processing, or a headset switching to
+/// its call mode, can stop a microphone engine or a tap's aggregate device without an error; the
+/// first FaceTime test lost both streams that way. A stall is reported once (one gap), then the
+/// stream is rebuilt every `rebuildEvery` seconds until audio flows again.
+struct StreamWatch {
+    static let stallAfter: TimeInterval = 3
+    static let rebuildEvery: TimeInterval = 3
+    enum Action: Equatable { case none, stalled, rebuild, recovered(after: Double) }
+
+    private var lastCount: Int64 = 0
+    private var lastProgress: TimeInterval
+    private var lastRebuild = -TimeInterval.infinity
+    private(set) var stalledSince: TimeInterval?
+
+    init(now: TimeInterval) { lastProgress = now }
+
+    mutating func update(count: Int64, now: TimeInterval) -> Action {
+        if count > lastCount {
+            lastCount = count; lastProgress = now
+            guard let since = stalledSince else { return .none }
+            stalledSince = nil
+            return .recovered(after: now - since)
+        }
+        guard now - lastProgress >= Self.stallAfter else { return .none }
+        if stalledSince == nil { stalledSince = lastProgress; return .stalled }
+        return now - lastRebuild >= Self.rebuildEvery ? .rebuild : .none
+    }
+
+    /// A new capture or tap counts from zero; only its own audio counts as progress.
+    mutating func rebuilt(now: TimeInterval) { lastCount = 0; lastRebuild = now }
+}
+
 // MARK: - Limits
 
 /// The 3-hour cap and the silence rules (PRD 11.3 and 11.4, Q7).

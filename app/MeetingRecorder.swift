@@ -51,8 +51,12 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     private var lastTapRefresh: TimeInterval = 0
     private var callApp: String?
     private var callWasUsingMic = false
-    private var micStopped = false
-    private var tapStopped = false
+    /// The live meeting's chunk folder, pump and source, for rebuilding a stream.
+    private var folder: URL?
+    private var livePump: MeetingPump?
+    private var meWatch = StreamWatch(now: 0), themWatch = StreamWatch(now: 0)
+    /// The default output device when the tap was built; a change rebuilds the tap.
+    private var outputUID: String?
 
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
@@ -89,29 +93,46 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         let pump = makePump(meeting.id, cloud: cloud)
         started = ProcessInfo.processInfo.systemUptime; lastVoice = started; lastSave = started
         systemAudioProblem = nil; warning = nil; askEnded = false; behind = false; elapsed = 0; message = nil
-        callApp = source.bundleID; callWasUsingMic = false; micStopped = false; tapStopped = false
+        callApp = source.bundleID; callWasUsingMic = false
+        meWatch = StreamWatch(now: started); themWatch = StreamWatch(now: started)
+        self.folder = folder; livePump = pump
         live = meeting
-        let me = Capture()
-        let meFeed = MeetingStreamFeed(stream: .me, folder: folder, offset: 0, enqueue: pump.enqueue) { [weak self] in
-            DispatchQueue.main.async { self?.streamFailed(.me) }
-        }
-        do {
-            try me.start(url: nil, fixedFormat: SystemAudioTap.format, chunkFolder: folder, current: false)
-            _ = me.attachChunks(meFeed.receive)
-            capture = me
-        } catch {
-            live = nil; try? FileManager.default.removeItem(at: folder)
+        if let error = startMe() {
+            live = nil; self.folder = nil; livePump = nil; pumps[meeting.id] = nil; try? FileManager.default.removeItem(at: folder)
+            meetingLog.notice("meeting-mic-start-failed error=\(String(describing: error), privacy: .public)")
             message = "The microphone could not start. Check Microphone access in System Settings."
             return false
         }
-        if !source.micOnly { startTap(source, folder: folder, pump: pump) }
+        if !source.micOnly, let error = startTap(source) {
+            systemAudioProblem = "The call's audio could not be recorded (\(error)). Allow Murmur under System Audio Recording in System Settings → Privacy & Security, then start again."
+        }
         save(force: true)
         meetingLog.notice("meeting-started mic-only=\(source.micOnly, privacy: .public) all-apps=\(source.allApps, privacy: .public)")
         onLiveChange?()
         return true
     }
 
-    private func startTap(_ source: MeetingSource, folder: URL, pump: MeetingPump) {
+    /// Starts (or, after a stall, rebuilds) the microphone stream; its chunks continue the same
+    /// stream from the meeting's current time. The old capture is stopped first, which flushes its last chunk.
+    private func startMe() -> Error? {
+        guard let folder, let pump = livePump else { return CaptureError("No meeting") }
+        capture?.stop(); capture = nil
+        let me = Capture()
+        let feed = MeetingStreamFeed(stream: .me, folder: folder, offset: ProcessInfo.processInfo.systemUptime - started, enqueue: pump.enqueue) { [weak self] in
+            DispatchQueue.main.async { self?.streamFailed(.me) }
+        }
+        do {
+            try me.start(url: nil, fixedFormat: SystemAudioTap.format, chunkFolder: folder, current: false)
+            _ = me.attachChunks(feed.receive)
+            capture = me
+            return nil
+        } catch { return error }
+    }
+
+    /// Starts (or rebuilds) the call's stream: a new tap and aggregate device on the current processes and output device.
+    private func startTap(_ source: MeetingSource) -> Error? {
+        guard let folder, let pump = livePump else { return CaptureError("No meeting") }
+        tap?.stop(); tap = nil
         let clients = AudioProcessList.all().map(\.bundleID)
         let target: TapTarget
         if let id = source.bundleID {
@@ -125,10 +146,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
             DispatchQueue.main.async { self?.streamFailed(.them) }
         }
         tap.attachChunks(feed.receive)
-        do { try tap.start(target); self.tap = tap }
-        catch {
-            systemAudioProblem = "The call's audio could not be recorded (\(error)). Allow Murmur under System Audio Recording in System Settings → Privacy & Security, then start again."
-        }
+        outputUID = AudioProcessList.defaultOutputUID()
+        do { try tap.start(target); self.tap = tap; return nil } catch { return error }
     }
 
     /// Continues with the microphone only after the call's audio failed.
@@ -140,7 +159,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     /// Stops capture; the last chunks are still transcribed into the saved meeting.
     func stop() {
         guard var meeting = live else { return }
-        capture?.stop(); tap?.stop(); capture = nil; tap = nil
+        capture?.stop(); tap?.stop(); capture = nil; tap = nil; folder = nil; livePump = nil
         meeting.seconds = max(meeting.seconds, ProcessInfo.processInfo.systemUptime - started)
         meeting.finished = true
         live = nil
@@ -155,7 +174,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     /// Discards the meeting being recorded: capture, queued chunks, audio and record.
     func cancel() {
         guard let meeting = live else { return }
-        capture?.stop(); tap?.stop(); capture = nil; tap = nil
+        capture?.stop(); tap?.stop(); capture = nil; tap = nil; folder = nil; livePump = nil
         pumps.removeValue(forKey: meeting.id)?.stop()
         if let audioRoot { try? FileManager.default.removeItem(at: MeetingAudio.folder(audioRoot, meeting: meeting.id)) }
         try? store?.delete(meeting.id)
@@ -191,6 +210,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
             meetingLog.notice("meeting-chunk-failed stream=\(job.stream.rawValue, privacy: .public)")
             refreshLeftovers(); settle(id); return
         }
+        // Content-free: how many words a chunk gave, so an all-silent stream shows up as words=0.
+        meetingLog.notice("meeting-line stream=\(job.stream.rawValue, privacy: .public) words=\(chunk.text.split(separator: " ").count) fallback=\(chunk.localFallback, privacy: .public)")
         let spelled = applyDictionary(chunk.text)
         update(id) { $0.insert(stream: job.stream, start: job.start, end: job.start + job.duration, text: spelled, localFallback: chunk.localFallback) }
         try? FileManager.default.removeItem(at: job.url)
@@ -222,10 +243,42 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
 
     func setNotes(_ text: String, for id: String) { update(id) { $0.myNotes = text } }
 
+    /// A chunk file could not be written: mark the gap and rebuild the stream with a new chunker.
     private func streamFailed(_ stream: MeetingStream) {
+        guard live != nil else { return }
+        gap(stream, reason: "write-failed")
+        rebuild(stream, reason: "write-failed")
+    }
+
+    private func gap(_ stream: MeetingStream, reason: String) {
         guard var meeting = live else { return }
         meeting.gaps.append(elapsed); live = meeting
-        warning = stream == .me ? "Your microphone's transcript stopped: Murmur could not write its audio." : "The call's transcript stopped: Murmur could not write its audio."
+        meetingLog.notice("meeting-gap stream=\(stream.rawValue, privacy: .public) reason=\(reason, privacy: .public) at=\(self.elapsed, format: .fixed(precision: 1))")
+    }
+
+    private func rebuild(_ stream: MeetingStream, reason: String) {
+        guard let meeting = live else { return }
+        let error: Error?
+        if stream == .me { error = startMe(); meWatch.rebuilt(now: ProcessInfo.processInfo.systemUptime) }
+        else { error = startTap(meeting.source); themWatch.rebuilt(now: ProcessInfo.processInfo.systemUptime) }
+        meetingLog.notice("meeting-rebuild stream=\(stream.rawValue, privacy: .public) reason=\(reason, privacy: .public) ok=\(error == nil, privacy: .public) error=\(error.map { String(describing: $0) } ?? "-", privacy: .public)")
+    }
+
+    /// Applies one stream's watch result. A stall marks one gap and rebuilds; until audio flows
+    /// again it rebuilds every few seconds; recovery clears the warning.
+    private func watch(_ stream: MeetingStream, _ action: StreamWatch.Action) {
+        let name = stream == .me ? "Your microphone" : "The call's audio"
+        switch action {
+        case .none: break
+        case .stalled:
+            gap(stream, reason: "no-audio-\(Int(StreamWatch.stallAfter))s")
+            warning = "\(name) stopped arriving. Murmur is restarting it."
+            rebuild(stream, reason: "no-audio")
+        case .rebuild: rebuild(stream, reason: "still-no-audio")
+        case .recovered(let after):
+            meetingLog.notice("meeting-recovered stream=\(stream.rawValue, privacy: .public) after=\(after, format: .fixed(precision: 1))")
+            if warning?.hasPrefix(name) == true { warning = nil }
+        }
     }
 
     // MARK: Ticks
@@ -238,26 +291,27 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         meLevel = capture.map { c in c.queue.sync { c.level } } ?? 0
         themLevel = tap.map { t in t.queue.sync { t.level } } ?? 0
         if max(meLevel, themLevel) > MeetingLimits.silenceLevel { lastVoice = now; askEnded = false }
-        // The meeting-only Capture is not the controller's; it restarts on a new device here (W5 rule).
-        if let capture, !capture.engine.isRunning, !capture.restart(), !micStopped {
-            micStopped = true
-            var next = meeting; next.gaps.append(elapsed); live = next
-            warning = "The microphone stopped. Check that it is connected."
-        } else if micStopped, capture?.engine.isRunning == true { micStopped = false; warning = nil }
+        // The meeting-only Capture is not the controller's: it restarts in place on a device change
+        // (W5 rule); if audio still stops, the watch rebuilds it with a new engine.
+        if let capture, !capture.engine.isRunning, !capture.restart() {
+            meetingLog.notice("meeting-mic-restart-failed at=\(self.elapsed, format: .fixed(precision: 1))")
+        }
+        watch(.me, meWatch.update(count: capture.map { c in c.queue.sync { Int64(c.frames) } } ?? 0, now: now))
+        if live == nil { return }
+        if meeting.source.micOnly == false && systemAudioProblem == nil {
+            watch(.them, themWatch.update(count: tap.map { t in t.queue.sync { t.buffers } } ?? 0, now: now))
+        }
         behind = (pumps[meeting.id]?.backlog ?? 0) > MeetingLimits.behind
         // A denied tap may deliver silence rather than an error (PRD 11.10): say so after 60 s without call audio.
         if let tap, systemAudioProblem == nil, elapsed > 60, !tap.queue.sync(execute: { tap.heardSignal }), warning == nil {
             warning = "No call audio yet. If the call is playing, check that Murmur is allowed under System Audio Recording in System Settings → Privacy & Security."
         } else if let tap, warning?.hasPrefix("No call audio") == true, tap.queue.sync(execute: { tap.heardSignal }) { warning = nil }
-        // The aggregate device delivers buffers (silent or not) while the tap runs; none for 5 s means it stopped.
-        // ponytail: flagged with a gap, not restarted; restart once if live tests show taps stopping.
-        if let tap, let last = tap.queue.sync(execute: { tap.lastBuffer }), now - last > 5, !tapStopped {
-            tapStopped = true
-            var next = meeting; next.gaps.append(elapsed); live = next
-            warning = "The call's audio stopped arriving. Stop and start meeting notes again to resume it."
-        }
         if now - lastTapRefresh >= 2 {
             lastTapRefresh = now; tap?.refreshProcesses()
+            // A call can switch the output device (a headset entering call mode); the aggregate is built on it.
+            if tap != nil, let current = AudioProcessList.defaultOutputUID(), current != outputUID {
+                gap(.them, reason: "output-device-changed"); rebuild(.them, reason: "output-device-changed")
+            }
             if let callApp {
                 let using = AudioProcessList.all().contains { $0.input && ($0.bundleID == callApp || $0.bundleID.hasPrefix(callApp + ".")) }
                 if callWasUsingMic && !using { askEnded = true }
