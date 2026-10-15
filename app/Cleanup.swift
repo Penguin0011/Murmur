@@ -404,7 +404,8 @@ enum CleanupGuard {
         "cleaned transcript", "transcript:", "<transcript", "</transcript",
     ]
 
-    static let listMarkerWords: Set<String> = ["number", "step", "item", "and", "then"]
+    /// Nouns that make a preceding ordinal part of a phrase, not a list marker ("first impressions", "second nature").
+    static let ordinalPhraseNouns: Set<String> = ["impression", "impressions", "chance", "chances", "nature", "thought", "thoughts", "opinion", "aid"]
     /// Discourse fillers polish may remove without commas, with the fillers option. "like" is one
     /// unless it follows a word that makes it a verb or a comparison ("I like", "it's like").
     static let polishFillers: Set<String> = ["yeah", "yep", "yup", "basically", "literally"]
@@ -784,6 +785,22 @@ enum CleanupGuard {
         if Double(deletions + insertions) > maxEdit * Double(a.count) + 1 { return .fail(.editDistance) }
 
         let window = options.corrections ? correctionWindow(raw, loose: options.professional) : []
+        // A correction is applied whole or not at all: a dropped cue takes the word it corrects with it,
+        // so "for 2, no, 3 people" never becomes "for 2, 3 people". A cue that reaches no word before it
+        // ("I mean the quarterly one") drops alone.
+        var cueSpans: [Range<Int>] = []
+        for i in a.indices {
+            for cue in correctionCues where i + cue.count <= a.count && Array(a[i..<(i + cue.count)]) == cue && (i..<(i + cue.count)).allSatisfy(window.contains) {
+                cueSpans.append(i..<(i + cue.count))
+            }
+        }
+        let cueWords = Set(cueSpans.flatMap { $0 })
+        for span in cueSpans where span.contains(where: { !matchedRaw.contains($0) }) {
+            var k = span.lowerBound - 1, m = span.upperBound
+            while k >= 0, cueWords.contains(k) || CleanupText.hesitations.contains(a[k]) { k -= 1 }
+            while m < a.count, cueWords.contains(m) || CleanupText.hesitations.contains(a[m]) { m += 1 }
+            if k >= 0, m < a.count, window.contains(k), matchedRaw.contains(k), matchedRaw.contains(m) { return .fail(.unexplainedDeletion) }
+        }
         var markerValues = options.lists ? listMarkerValues(cleaned) : []
         // Professional may write spoken markers ("item one milk item two eggs") as an inline list:
         // they count as markers when the raw counts 1, 2, ... with them.
@@ -825,37 +842,65 @@ enum CleanupGuard {
             return false
         }
         let hasListMarkers = !markerValues.isEmpty
+        // A list starts only where the speaker announces one (the prompt's rule, and `RuleCleaner.formatList`'s):
+        // a list noun before the first marker in its sentence ("my list", "the steps are"), a colon just before
+        // that sentence, or a list noun in the sentence before it ("Here's the checklist. First, ...").
+        func announced(_ i: Int) -> Bool {
+            var start = i
+            while start > 0, !rawWords[start].sentenceStart { start -= 1 }
+            if (start..<i).contains(where: { RuleCleaner.strongListCues.contains(a[$0]) }) { return true }
+            guard start > 0 else { return false }
+            if !rawWords[start - 1].endAfter { return true }
+            guard start == i else { return false }
+            var lead = start - 1
+            while lead > 0, !rawWords[lead].sentenceStart { lead -= 1 }
+            return (lead..<start).contains { RuleCleaner.strongListCues.contains(a[$0]) }
+        }
+        // Professional also takes digits, as speech recognition often writes them ("item 1 milk").
+        func spokenMarker(_ i: Int) -> Int? {
+            guard i > 0, ["number", "step", "item"].contains(a[i - 1]) else { return nil }
+            return CleanupText.cardinals[a[i]] ?? (options.professional ? Int(a[i]) : nil)
+        }
+        // Ordinals inside a fixed phrase are prose ("Remember: first impressions matter, second chances are rare").
+        // ponytail: a closed list; an unlisted phrase can still pass as a list.
+        func ordinalMarker(_ i: Int) -> Int? {
+            guard let n = CleanupText.ordinals[a[i]] else { return nil }
+            if i + 1 < a.count, !rawWords[i].commaAfter, ordinalPhraseNouns.contains(a[i + 1]) { return nil }
+            // A date's day ("May first", "June second") is never a list marker.
+            if i > 0, RuleCleaner.months.union(["may"]).contains(a[i - 1]) { return nil }
+            return n
+        }
+        // A marker counts inside a counted sequence ("first ... second") that starts at an announced first
+        // marker, so "First, preheat the oven" and "Step one was easy; step two took all night" stay prose.
+        // Professional's prompt also lists spoken markers without an announcement, so they need only the sequence.
+        // Its prompt also allows unannounced ordinals; the guard does not, so prose such as "First we went home,
+        // second we ate" stays prose there too.
+        func inSequence(_ i: Int, _ marker: (Int) -> Int?, markerWords: Int, announce: Bool) -> Bool {
+            guard let n = marker(i) else { return false }
+            let values = a.indices.compactMap(marker)
+            guard values.contains(n + 1) || values.contains(n - 1) else { return false }
+            return !announce || (0...i).contains { marker($0) == 1 && announced($0 - markerWords) }
+        }
         // Enumeration words a list may replace with "N." markers: ordinals, "number/step/item"
         // plus a cardinal, and an "and"/"then" joining the next marker.
         func isMarkerWord(_ i: Int) -> Bool {
             guard options.lists && hasListMarkers else { return false }
             let w = a[i]
-            // Professional: an ordinal is a marker only inside a counted sequence ("first ... second"), never
-            // a lone date ordinal ("May first") beside a spoken list.
-            if let n = CleanupText.ordinals[w] {
-                if !options.professional { return true }
-                // Only in an announced list ("my list", "the steps", a colon): "first floor ... second floor" is prose.
-                // The cue sits in the ordinal's own sentence, or in the sentence just before it, ended by a colon.
-                var start = i
-                while start > 0, !rawWords[start].sentenceStart { start -= 1 }
-                var lead = start
-                if start > 0, !rawWords[start - 1].endAfter { lead = start - 1; while lead > 0, !rawWords[lead].sentenceStart { lead -= 1 } }
-                let announced = (lead..<i).contains { RuleCleaner.strongListCues.contains(a[$0]) } || lead < start
-                if !announced { return false }
-                // A date's day ("May first", "June second") is never a list marker.
-                if i > 0, RuleCleaner.months.union(["may"]).contains(a[i - 1]) { return false }
-                let others = a.compactMap { CleanupText.ordinals[$0] }
-                return others.contains(n + 1) || others.contains(n - 1)
-            }
-            // Professional also takes digits, as speech recognition often writes them ("item 1 milk").
-            func cardinal(_ x: String) -> Bool { CleanupText.cardinals[x] != nil || (options.professional && Int(x) != nil) }
-            if cardinal(w), i > 0, listMarkerWords.contains(a[i - 1]), a[i - 1] != "and", a[i - 1] != "then" { return true }
-            if ["number", "step", "item"].contains(w), i + 1 < a.count, cardinal(a[i + 1]) { return true }
+            if CleanupText.ordinals[w] != nil { return inSequence(i, ordinalMarker, markerWords: 0, announce: true) }
+            if spokenMarker(i) != nil { return inSequence(i, spokenMarker, markerWords: 1, announce: !options.professional) }
+            if ["number", "step", "item"].contains(w), i + 1 < a.count, spokenMarker(i + 1) != nil { return isMarkerWord(i + 1) }
             if w == "and" || w == "then", i + 1 < a.count, isMarkerWord(i + 1) { return true }
             // Professional: also across a filler ("eggs and yeah item three").
             if options.professional, w == "and" || w == "then", i + 2 < a.count,
                CleanupText.hesitations.contains(a[i + 1]) || polishFillers.contains(a[i + 1]), isMarkerWord(i + 2) { return true }
             return false
+        }
+        // A new "N." line needs a spoken enumeration of at least two items that reaches N: never a lone
+        // "1. First, preheat the oven", nor more items than the speaker counted.
+        let addedMarkers = listMarkerValues(cleaned).subtracting(listMarkerValues(raw)).compactMap { Int($0) }
+        if !addedMarkers.isEmpty {
+            let spokenCount = a.indices.filter { (CleanupText.ordinals[a[$0]] != nil || CleanupText.cardinals[a[$0]] != nil || Int(a[$0]) != nil) && isMarkerWord($0) }.count
+            if spokenCount < 2 || addedMarkers.max()! > spokenCount { return .fail(.structureAdded) }
         }
 
         // Professional: "one" as a pronoun ("the quarterly one not the monthly one") may go.

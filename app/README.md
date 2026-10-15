@@ -232,7 +232,11 @@ Treat these numbers with caution:
 Known gaps:
 - After a removed hesitation, comma handling uses a word list. This misses introductory phrases ("To be honest, um, I…") and over-keeps after a capitalized first word ("Please, um, don't…").
 - Corrections need an explicit cue set off by punctuation and either a same-category swap (weekday, month, number, time, color, name) or a phrase restarted with the same function word. These stay unchanged: "Order three pizzas, sorry, four", "Add salt, no wait, add sugar", and corrections inside list items.
-- "Remember: first impressions matter, second chances are rare" becomes a list.
+- "Remember: first impressions matter, second chances are rare" becomes a list. Since October 14, 2026 the guard rejects that list on every route, using a short list of nouns that make an ordinal part of a phrase ("first impressions"), so the dictation falls back to the transcript's own words. A phrase missing from that list can still become a list. [Certain]
+- Guard tightening, October 14, 2026 (all routes and styles):
+  - A dropped correction cue must take the word it corrects with it, so "Book it for 2, no, 3 people" → "Book it for 2, 3 people" is rejected. [Certain]
+  - A new "N." line needs an announced, counted enumeration of at least two items that reaches N. "Announced" means a list noun, a colon, or a list-noun sentence just before it, the same rule the Strict and Polish prompts state. Professional's spoken markers ("item one … item two") need no announcement, as its prompt says. Professional ordinals still do, which is stricter than its prompt. [Certain]
+  - Corpus: 426 utterances, 0/237 false rejects, 2382/2382 adversarial outputs rejected in every style. [Certain]
 - The guard does not convert number words; "twenty five" vs "25" is rejected.
 - No real ASR transcripts are in the corpus. [Certain]
 
