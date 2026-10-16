@@ -55,7 +55,7 @@ Whisper prompt conditioning is the likely cause of the reported labeled echo, ra
 
 ## Murmur's flow
 
-`CorrectionLedger.settle` creates a preferred-only learned entry after one consistent session and adds a heard-form variant after two. `DictionaryStore.vocabularyTerms` collects enabled preferred spellings, manual first, deduplicated and with commas removed. The controller passes these to `CloudTranscription.run`, which puts them in `AudioPayload.vocabularyHint`; each provider decides whether to serialize them. Variants are not cloud ASR hints. [Certain]
+`CorrectionLedger.settle` creates a learned entry with the heard form as a variant after one settled session (October 16, 2026; older ledgers may still hold preferred-only hint entries, which gain the variant at their next fix). `DictionaryStore.vocabularyTerms` collects enabled preferred spellings, manual first, deduplicated and with commas removed. The controller passes these to `CloudTranscription.run`, which puts them in `AudioPayload.vocabularyHint`; each provider decides whether to serialize them. Variants are not cloud ASR hints. [Certain]
 
 | Route | Vocabulary input after this change |
 |---|---|

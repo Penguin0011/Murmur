@@ -1677,8 +1677,14 @@ final class PreStart: @unchecked Sendable {
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
     }
     private func announceLearned(_ entry: DictionaryEntry) {
-        bubble.showLearned(entry.preferred, screen: destinationScreen)
+        bubble.showLearned(entry.preferred, entryID: entry.id, screen: destinationScreen)
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: "Added \(entry.preferred) to your dictionary.", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+    }
+    /// The learned notice's Undo: the replacement stops and is tombstoned (see `CorrectionLedger.undoLearned`).
+    func undoLearned(_ entryID: UUID) {
+        bubble.hide()
+        do { try processing?.ledger.undoLearned(entryID: entryID) } catch { message = "Could not undo the learned word." }
+        refreshDictionary()
     }
     private func stopWatching() {
         watchTimer?.invalidate(); watchTimer = nil; watch = nil

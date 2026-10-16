@@ -121,7 +121,7 @@ import SwiftUI
                 controller.showNotPasted(.insertionOff, saved: "Saved to History.", entryID: entries.first?.id, text: "Synthetic dictation saved with Insert at the cursor off.")
             }
             if CommandLine.arguments.contains("--undo") { controller.bubble.showUndo(screen: nil) }
-            if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", screen: nil) }
+            if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", entryID: UUID(), screen: nil) }
             // Meeting detection (PRD 11.7): --call-offer shows Zoom's offer, --call-offer-browser Arc's. The fixture's
             // defaults persist, so the switch and Never list are reset every run; --never seeds the list.
             UserDefaults.standard.removeObject(forKey: CallDetectionSettings.enabledKey)
@@ -131,7 +131,7 @@ import SwiftUI
                let app = CallDetector.app(for: id) { controller.callOffers.show(CallOffer(app: app)) }
             if CommandLine.arguments.contains("--keep-notice") {
                 Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
-                    MainActor.assumeIsolated { controller.bubble.showLearned("Aakash", screen: nil) }
+                    MainActor.assumeIsolated { controller.bubble.showLearned("Aakash", entryID: UUID(), screen: nil) }
                 }
             }
             // Meeting notes (PRD 11.9): --meetings shows the page, --meeting-live the live panel, --consent the sheet.
