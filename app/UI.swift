@@ -2085,6 +2085,8 @@ final class BubblePresenter {
     }
 
     func hide() { notice = nil; panel.orderOut(nil) }
+    /// Whether the bubble shows anything (a status, Undo, a card); the meeting offer waits for it.
+    var isVisible: Bool { panel.isVisible }
 
     private var notice: UUID?
     /// The Undo card; it leaves with the "Recording canceled" status (5 s) or when anything else is shown.

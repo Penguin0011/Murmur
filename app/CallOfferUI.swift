@@ -40,8 +40,13 @@ private final class OfferPanel: NSPanel {
     func tick() {
         guard let controller else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        let meetingLive = controller.meetingRecorder.live != nil, dictating = controller.isBusy
-        if offer != nil, meetingLive || dictating || now - shownAt >= CallDetector.offerLifetime { hide() }
+        let meetingLive = controller.meetingRecorder.live != nil
+        // Dictation, or anything the bubble shows after it (a text to copy, Undo), defers the offer.
+        let dictating = controller.isBusy || controller.bubble.isVisible
+        if let shown = offer, meetingLive || dictating || now - shownAt >= CallDetector.offerLifetime {
+            if dictating && !meetingLive && now - shownAt < CallDetector.offerLifetime { detector.rearm(shown.app.bundleID) }
+            hide()
+        }
         guard now - lastPoll >= 1 else { return }
         lastPoll = now
         // With the switch off nothing is read at all.

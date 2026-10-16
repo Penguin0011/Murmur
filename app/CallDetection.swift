@@ -74,6 +74,9 @@ struct CallDetector {
         return id == own || id.hasPrefix(own + ".")
     }
 
+    /// An offer hidden because dictation started is offered again once dictation ends.
+    mutating func rearm(_ bundleID: String) { sessions[bundleID]?.offered = false }
+
     /// Called about once a second with the bundle IDs of processes whose input is running.
     /// Returns an offer at most once per app per microphone session.
     mutating func update(inputs: [String], now: TimeInterval, _ conditions: Conditions) -> CallOffer? {

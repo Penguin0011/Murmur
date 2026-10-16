@@ -67,6 +67,8 @@ func run(_ detector: inout CallDetector, _ inputs: [String], from: Int, to: Int,
             var dictating = own; dictating.dictating = true
             check(run(&e, ["us.zoom.xos"], from: 0, to: 20, dictating).isEmpty, "no offer while Murmur is dictating")
             check(run(&e, ["us.zoom.xos"], from: 21, to: 21, own) == ["Zoom"], "the deferred offer comes once dictation ends")
+            e.rearm("us.zoom.xos")
+            check(run(&e, ["us.zoom.xos"], from: 22, to: 22, dictating).isEmpty && run(&e, ["us.zoom.xos"], from: 23, to: 40, own) == ["Zoom"], "an offer hidden by dictation comes back once, after it")
         }
 
         // "Never" and the global switch.
