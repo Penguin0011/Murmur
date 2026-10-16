@@ -55,6 +55,15 @@ func segment(_ speaker: String, _ start: Double, _ end: Double) -> SpeakerSegmen
             check(meeting.lines[0].start == 100 && meeting.lines[1].start == 106 && meeting.lines[1].end == 115, "piece times come from the word times")
             check(meeting.lines.allSatisfy { $0.words == nil }, "word times are dropped once used")
 
+            var mixed = Meeting(id: UUID().uuidString, recordedAt: Date(), source: call)
+            mixed.speakers = SpeakerSeparation(state: .pending)
+            mixed.insert(stream: .them, start: 100, end: 115, text: "First voice talks. Second voice answers.",
+                         words: [[0, 1], [1, 2], [2, 3], [6, 7], [7, 8], [8, 9]])
+            mixed.insert(stream: .me, start: 103, end: 105, text: "Right.")
+            MeetingSpeakers.apply([segment("b", 100, 103.5), segment("a", 105.5, 110)], to: &mixed)
+            check(mixed.lines.map(\.start) == [100, 103, 106], "a split piece after a Me interjection stays in capture-time order")
+            check(mixed.lines.map(\.speaker) == [1, nil, 2], "numbering follows that order")
+
             var cloud = Meeting(id: UUID().uuidString, recordedAt: Date(), source: call)
             cloud.speakers = SpeakerSeparation(state: .pending)
             cloud.insert(stream: .them, start: 0, end: 15, text: "Cloud lines have no word times at all.")

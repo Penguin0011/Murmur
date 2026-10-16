@@ -68,6 +68,9 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     var speakerModel: URL?
     /// Set by AppController: the ModelBench helper, which also runs diarization.
     var helper: URL?
+    /// Set by SpeakerModelSettings: false once the switch is off or the model is removed. Finished
+    /// meetings still waiting are then skipped, so their call audio is not kept for nothing.
+    var speakersWanted = true
     /// Set by SpeakerModelSettings: checks the model folder against its pins (cached by fingerprint).
     var verifySpeakerModel: () -> Bool = { false }
     /// Set by AppController: transcribe a Them chunk with word times (the warm helper's timed request).
@@ -474,7 +477,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         guard FileManager.default.fileExists(atPath: audio.path), (try? SpeakerAudio.finish(audio)) != nil else {
             finishSeparation(id, nil, reason: "no-call-audio"); return
         }
-        guard let helper, let models = speakerModel else { return }
+        guard let helper, let models = speakerModel else { if !speakersWanted { skipSeparation(id) }; return }
         separating.insert(id)
         meetingLog.notice("speakers-started")
         speakerRunner.run(id, helper: helper, models: models, audio: audio, check: verifySpeakerModel, threshold: meeting.speakers?.threshold ?? MeetingSpeakers.threshold) { [weak self] segments in
@@ -580,6 +583,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     func refresh() {
         guard let recorder, !preview else { return }
         recorder.speakerModel = enabled && verified ? downloader?.target : nil
+        let wanted = enabled && (row.isReady || inFlight)
+        if recorder.speakersWanted != wanted { recorder.speakersWanted = wanted; if !wanted { recorder.reload() } }
         guard enabled, !verified, !verifying, !inFlight, row.isReady else { return }
         verifying = true
         let check = recorder.verifySpeakerModel
@@ -629,7 +634,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         verified = false; refresh()
         do { try downloader.remove(); message = "Speaker separation was removed." }
         catch { message = (error as? ModelDownloadError)?.userMessage ?? ModelDownloadError.fileSystem.userMessage }
-        status = downloader.status()
+        status = downloader.status(); refresh()
     }
 
     // Download text; the credits come from SpeakerFacts.

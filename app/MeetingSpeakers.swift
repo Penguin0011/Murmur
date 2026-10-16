@@ -77,14 +77,19 @@ enum MeetingSpeakers {
                 out.append(part)
             }
         }
+        // A split piece can start after a Me line inside its chunk: keep capture-time order (Me first on a tie, as insert does).
+        out = out.enumerated().sorted { a, b in
+            a.element.start != b.element.start ? a.element.start < b.element.start
+                : a.element.stream != b.element.stream ? a.element.stream == .me : a.offset < b.offset
+        }.map(\.element)
         var numbers: [String: Int] = [:]
         for i in out.indices {
             guard let speaker = raw[out[i].id] else { out[i].speaker = nil; continue }
             if numbers[speaker] == nil { numbers[speaker] = numbers.count + 1 }
             out[i].speaker = numbers[speaker]
         }
+        // Them words are unchanged, so echo suppression's results on Me lines still hold.
         meeting.lines = out
-        MeetingEcho.apply(&meeting.lines, near: -.infinity, to: .infinity)
         var separation = meeting.speakers ?? SpeakerSeparation(state: .done)
         separation.state = .done
         meeting.speakers = separation
