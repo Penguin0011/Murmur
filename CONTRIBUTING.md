@@ -75,7 +75,7 @@ app/check_ui.sh --meetings --compact --light
 app/check_ui.sh --meeting-live
 app/check_ui.sh --meetings --meeting-notes --meeting-settings --never --light --speaker-settings --ready
 app/check_ui.sh --call-offer --saved --bubble-only
-app/check_ui.sh --meetings --speakers
+app/check_ui.sh --meetings --speakers --meeting-notes
 app/check_ui.sh --meetings --separating
 ```
 

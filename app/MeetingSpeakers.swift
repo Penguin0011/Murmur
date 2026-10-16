@@ -36,7 +36,15 @@ enum MeetingSpeakers {
     /// "Speaker 2", or the name the user gave; Me and unassigned Them lines keep their stream label.
     static func label(_ line: MeetingLine, in meeting: Meeting) -> String {
         guard line.stream == .them, let number = line.speaker else { return MeetingExport.label(line.stream) }
-        return meeting.speakers?.names[number] ?? "Speaker \(number)"
+        return label(number, in: meeting)
+    }
+
+    static func label(_ number: Int, in meeting: Meeting) -> String { meeting.speakers?.names[number] ?? "Speaker \(number)" }
+
+    /// `text` with every whole-word `label` replaced: "Speaker 2" never matches inside "Speaker 20".
+    static func replace(_ label: String, with new: String, in text: String) -> String {
+        guard !label.isEmpty, let pattern = try? NSRegularExpression(pattern: "(?<![\\p{L}\\p{N}])" + NSRegularExpression.escapedPattern(for: label) + "(?![\\p{L}\\p{N}])") else { return text }
+        return pattern.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: NSRegularExpression.escapedTemplate(for: new))
     }
 
     /// Speaker numbers in use in this meeting, ascending.
@@ -134,27 +142,46 @@ enum MeetingSpeakers {
 // MARK: - Editing (per meeting)
 
 extension Meeting {
-    /// An empty name goes back to "Speaker N".
+    /// An empty name goes back to "Speaker N". Notes already written get the new name in place.
     mutating func renameSpeaker(_ number: Int, to name: String) {
         guard speakers != nil else { return }
+        let old = MeetingSpeakers.label(number, in: self)
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         speakers?.names[number] = trimmed.isEmpty ? nil : String(trimmed.prefix(60))
         speakers?.editedAt = Date()
+        relabelNotes(old, as: MeetingSpeakers.label(number, in: self), number: number)
     }
 
     /// Every line of `from` goes to `into`; `from`'s name is dropped. Other numbers stay as they are.
     mutating func mergeSpeaker(_ from: Int, into: Int) {
         guard speakers != nil, from != into else { return }
+        let old = MeetingSpeakers.label(from, in: self)
         for i in lines.indices where lines[i].speaker == from { lines[i].speaker = into }
         speakers?.names[from] = nil
         speakers?.editedAt = Date()
+        relabelNotes(old, as: MeetingSpeakers.label(into, in: self), number: into)
     }
 
-    /// Moves one Them line to another speaker, or to a new one when `to` is not in use.
+    /// Moves one Them line to another speaker, or to a new one when `to` is not in use. Which items
+    /// rested on that line's speaker is the model's reading, so notes are only marked out of date.
     mutating func reassignLine(_ id: Int, to speaker: Int) {
         guard speakers != nil, speaker > 0, let i = lines.firstIndex(where: { $0.id == id && $0.stream == .them }) else { return }
         lines[i].speaker = speaker
         speakers?.editedAt = Date()
+        if notes != nil { notes?.outdated = true }
+    }
+
+    /// Replaces `old` with `new` in written notes (title, summary, item text and owners). When the
+    /// new label is another speaker's too, the notes can no longer tell them apart: out of date instead.
+    private mutating func relabelNotes(_ old: String, as new: String, number: Int) {
+        guard var written = notes, old != new else { return }
+        let others = MeetingSpeakers.numbers(self).filter { $0 != number }.map { MeetingSpeakers.label($0, in: self) } + ["Me", "Them"]
+        if others.contains(new) { notes?.outdated = true; return }
+        func swap(_ text: String) -> String { MeetingSpeakers.replace(old, with: new, in: text) }
+        func swap(_ items: [NoteItem]) -> [NoteItem] { items.map { var item = $0; item.text = swap(item.text); item.owner = item.owner.map(swap); return item } }
+        written.title = written.title.map(swap); written.summary = written.summary.map(swap)
+        written.keyPoints = swap(written.keyPoints); written.decisions = swap(written.decisions); written.actions = swap(written.actions)
+        notes = written
     }
 }
 
