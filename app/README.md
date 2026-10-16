@@ -104,13 +104,13 @@ swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check
 /tmp/murmur-updates-check
 swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check
 /tmp/murmur-insights-check
-swiftc app/Retention.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_meetings.swift -o /tmp/murmur-meetings-check
+swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_meetings.swift -o /tmp/murmur-meetings-check
 /tmp/murmur-meetings-check
-swiftc app/Retention.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/CallDetection.swift app/check_call_detection.swift -o /tmp/murmur-detection-check
+swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/CallDetection.swift app/check_call_detection.swift -o /tmp/murmur-detection-check
 /tmp/murmur-detection-check
-swiftc app/Retention.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_speakers.swift -o /tmp/murmur-speakers-check
+swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_speakers.swift -o /tmp/murmur-speakers-check
 /tmp/murmur-speakers-check
-SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk swiftc -swift-version 5 spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/check_speaker_flow.swift -o /tmp/murmur-speaker-flow-check
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk swiftc -swift-version 5 spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/check_speaker_flow.swift -o /tmp/murmur-speaker-flow-check
 /tmp/murmur-speaker-flow-check
 ```
 

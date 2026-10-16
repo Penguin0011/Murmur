@@ -255,7 +255,7 @@ struct Draft: Equatable {
 /// The deterministic check (PRD 11.6), in the spirit of CleanupGuard: an item survives only if
 /// the lines it cites support it. Each reason is content-free, for diagnostics.
 enum NotesGrounding {
-    enum Reason: String, CaseIterable { case noCitation, unknownLine, addressedToNotes, noSharedWord, invented, unknownOwner, noCommitment, noAgreement }
+    enum Reason: String, CaseIterable { case noCitation, unknownLine, addressedToNotes, noSharedWord, invented, polarityChanged, unknownOwner, noCommitment, noAgreement }
 
     struct Source {
         /// L number → the line's text and its speaker label.
@@ -291,6 +291,7 @@ enum NotesGrounding {
         // Names, numbers, dates and times must come from the cited lines or the user's own notes.
         let said = citedText + "\n" + source.myNotes
         if !facts(in: source.withoutLabels([item.text, item.owner ?? "", item.due ?? ""].joined(separator: ". ")), supportedBy: said) { return .invented }
+        if polarityChanged(item.text, cited: citedText) { return .polarityChanged }
         switch kind {
         case .point: break
         case .decision: if !has(agreements, in: citedText) { return .noAgreement }
@@ -342,6 +343,59 @@ enum NotesGrounding {
         let (short, long) = a.count <= b.count ? (a, b) : (b, a)
         if short.count >= 4 && long.hasPrefix(short) { return true }
         return short.count >= 5 && long.prefix(5) == short.prefix(5)
+    }
+
+    // MARK: Polarity
+
+    /// Each content word with whether a negation governs it. A negation (`CleanupText.isNegation`:
+    /// "no", "not", "never", "none", "n't") reaches the words after it up to the end of its clause:
+    /// punctuation or a conjunction, so "No, Friday works" does not negate "Friday".
+    static func polarity(_ text: String) -> [(word: String, negated: Bool)] {
+        var out: [(word: String, negated: Bool)] = []
+        for clause in text.lowercased().components(separatedBy: CharacterSet(charactersIn: ".,;:!?()\n")) {
+            var negated = false
+            for token in tokens(clause) {
+                if CleanupText.isNegation(token) { negated = true; continue }
+                if clauseBreaks.contains(token) { negated = false; continue }
+                out += contentWords(token).map { ($0, negated) }
+            }
+        }
+        return out
+    }
+    static let clauseBreaks: Set<String> = ["and", "but", "or", "so", "because", "while", "though", "although", "whereas", "unless", "if", "then", "instead"]
+
+    /// Directional opposites, each side with its inflections. Short on purpose: start/end, in/out
+    /// or send/receive are paraphrased in ordinary notes, so `Learning.antonyms` is too broad here.
+    static let opposites: [(Set<String>, Set<String>)] = [
+        (["more"], ["less", "fewer"]),
+        (["higher", "highest"], ["lower", "lowest"]),
+        (["warmer", "warmest", "hotter", "hottest"], ["cooler", "coolest", "colder", "coldest"]),
+        (["increase", "increases", "increased", "increasing"], ["decrease", "decreases", "decreased", "decreasing"]),
+        (["above"], ["below"]),
+        (["bigger", "biggest", "larger", "largest"], ["smaller", "smallest"]),
+        (["faster", "fastest"], ["slower", "slowest"]),
+    ]
+
+    /// True when the item reverses its cited lines (PRD 11.6): it uses one side of an opposite pair
+    /// that the lines only say the other way, or its shared words are negated where the lines' are
+    /// not, or the reverse. A word counts as flipped only when every cited use disagrees with every
+    /// use in the item; the item fails on two flipped words, or on one when it is half its shared words.
+    /// ponytail: clause-scoped word lists, not a parser. "We're not doing the launch" → "skip the
+    /// launch" passes (one shared word); a flip spread across clauses passes too. Tune on real calls.
+    static func polarityChanged(_ item: String, cited: String) -> Bool {
+        let mine = Set(tokens(item.lowercased())), theirs = Set(tokens(cited.lowercased()))
+        for (a, b) in opposites + opposites.map({ ($0.1, $0.0) })
+        where !mine.isDisjoint(with: a) && mine.isDisjoint(with: b) && !theirs.isDisjoint(with: b) && theirs.isDisjoint(with: a) { return true }
+        let ours = polarity(item), said = polarity(cited)
+        var shared = 0, flipped = 0
+        for word in Set(contentWords(item)) {
+            let here = Set(ours.filter { $0.word == word }.map(\.negated))
+            let there = Set(said.filter { related(word, $0.word) }.map(\.negated))
+            guard !there.isEmpty else { continue }
+            shared += 1
+            if here.isDisjoint(with: there) { flipped += 1 }
+        }
+        return flipped >= 2 || (shared >= 2 && flipped * 2 >= shared)
     }
 
     // MARK: Names, numbers, dates
