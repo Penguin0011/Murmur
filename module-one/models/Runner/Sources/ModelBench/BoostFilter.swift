@@ -14,6 +14,18 @@ import Foundation
 /// The output is the raw transcript with only the kept replacements applied, so punctuation the
 /// rescorer drops around a replacement ("I mean," -> "I Sean") is never lost.
 enum BoostFilter {
+    /// The model's unknown-token piece. Parakeet's 1,024-piece vocabulary has no accented letters
+    /// (only £ € ¥ outside ASCII), so "El Niño" decodes as "El Ni<unk>o" and the letter cannot be
+    /// recovered. The piece is dropped with the gap it would leave: "El Nio", "hi <unk>." -> "hi.".
+    static let unknown = "<unk>"
+    static func withoutUnknown(_ text: String) -> String {
+        guard text.contains(unknown) else { return text }
+        return text.replacingOccurrences(of: unknown, with: "")
+            .replacingOccurrences(of: " {2,}", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: " ([.,!?;:])", with: "$1", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
     struct Word { let start: String.Index; let end: String.Index; let folded: String }
 
     static func words(_ text: String) -> [Word] {

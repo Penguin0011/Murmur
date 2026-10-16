@@ -183,10 +183,11 @@ import Foundation
         }
         // A token starting with a space ("▁" in the vocabulary) begins a word.
         var words: [[Double]] = []
-        for token in raw.tokenTimings {
+        for token in raw.tokenTimings where token.token.trimmingCharacters(in: .whitespaces) != BoostFilter.unknown {
             if token.token.hasPrefix(" ") || words.isEmpty { words.append([token.startTime, token.endTime]) }
             else { words[words.count - 1][1] = token.endTime }
         }
+        text = BoostFilter.withoutUnknown(text)
         guard words.count == text.split(whereSeparator: \.isWhitespace).count else { return ["text": text] }
         return ["text": text, "words": words]
     }
@@ -226,8 +227,18 @@ import Foundation
         return samples
     }
 
+    /// Every line the app reads goes through here, so no transcript, partial or boundary
+    /// replacement (dictation or meeting) ever carries the model's "<unk>" piece.
     static func emit(_ object: [String: Any]) throws {
-        print(String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self))
+        func scrubbed(_ value: Any) -> Any {
+            switch value {
+            case let text as String: return BoostFilter.withoutUnknown(text)
+            case let list as [Any]: return list.map(scrubbed)
+            case let object as [String: Any]: return object.mapValues(scrubbed)
+            default: return value
+            }
+        }
+        print(String(decoding: try JSONSerialization.data(withJSONObject: scrubbed(object), options: [.sortedKeys]), as: UTF8.self))
         fflush(stdout)
     }
 }

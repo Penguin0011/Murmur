@@ -40,6 +40,11 @@ private func f(_ raw: String, _ rescored: String, aliases: Set<String> = []) -> 
         check(f("Nor does it support offline mode.", "Nor does it support offline mode") == "Nor does it support offline mode.", "punctuation the rescorer dropped is kept")
         check(f("Bring it, I mean, if you can.", "Bring it, I Sean if you can.") == "Bring it, I mean, if you can.", "punctuation around a reverted span is kept")
         check(f("", "") == "", "empty")
+        // The model's unknown piece never reaches dictation or meeting text.
+        for (heard, written) in [("El Ni<unk>o", "El Nio"), ("<unk> hi", "hi"), ("hi <unk>", "hi"), ("a <unk> b", "a b"), ("hi <unk>.", "hi."),
+                                 ("<unk><unk>", ""), ("<unk>", ""), ("No unknown here.", "No unknown here.")] {
+            check(BoostFilter.withoutUnknown(heard) == written, "unknown piece: \(heard)")
+        }
         print("\(passes) checks passed, \(failures) failed")
         if failures > 0 { exit(1) }
     }

@@ -1,5 +1,5 @@
 // Meeting notes W7a checks (PRD section 11). No audio, no taps, no network.
-// swiftc app/Retention.swift app/Meetings.swift app/MeetingSpeakers.swift app/MeetingNotes.swift app/check_meetings.swift -o /tmp/murmur-meetings-check && /tmp/murmur-meetings-check
+// swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingSpeakers.swift app/MeetingNotes.swift app/check_meetings.swift -o /tmp/murmur-meetings-check && /tmp/murmur-meetings-check
 import Foundation
 
 nonisolated(unsafe) var failures = 0
@@ -317,6 +317,34 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(NotesGrounding.numbers("What about twelve? Twelve feels small") == ["12"], "number word runs end at punctuation")
             check(NotesGrounding.names("Finalize the deck with Dana. Sam will review it. I'll ship on Monday.") == ["dana", "sam"], "names, not imperatives, pronouns or weekdays")
             check(NotesGrounding.dates("We may ship in May") == ["may"], "may is a month only when capitalized")
+            // Polarity (October 16, 2026, a real call): an item may not reverse what its lines say.
+            var weather = Meeting(id: "w", recordedAt: Date(timeIntervalSince1970: 0), source: MeetingSource(name: "Zoom", bundleID: "us.zoom.xos"))
+            weather.insert(stream: .them, start: 0, end: 9, text: "Much of the northern part of the country is expected to get less snow. And no states are expected to be cooler than average.")
+            let weatherSource = NotesGrounding.source(MeetingNotesPrompt.number(weather), myNotes: "")
+            check(NotesGrounding.check(Item(text: "Northern states expected to be cooler than average", lines: [1]), kind: .point, in: weatherSource) == .polarityChanged, "an item that drops its line's negation is dropped")
+            check(NotesGrounding.check(Item(text: "No states are expected to be cooler than average", lines: [1]), kind: .point, in: weatherSource) == nil, "the same claim with its negation stands")
+            check(NotesGrounding.check(Item(text: "Northern states expected to get more snow", lines: [1]), kind: .point, in: weatherSource) == .polarityChanged, "less inverted to more is dropped")
+            check(NotesGrounding.check(Item(text: "Less snow expected in the north", lines: [1]), kind: .point, in: weatherSource) == nil, "a paraphrase keeping less stands")
+            func flipped(_ item: String, _ line: String) -> Bool { NotesGrounding.polarityChanged(item, cited: line) }
+            check(flipped("Budget approved", "The budget was not approved."), "a dropped not before a verb")
+            check(flipped("Sam will not send the contract", "Sam will send the contract today."), "an added negation")
+            check(flipped("Prices go higher next quarter", "Prices go lower next quarter."), "higher for lower")
+            check(flipped("Usage increased in March", "Usage decreased in March."), "increased for decreased")
+            check(flipped("Revenue came in above plan", "Revenue came in below plan."), "above for below")
+            check(flipped("Next week is warmer", "Next week will be cooler."), "warmer for cooler")
+            check(!flipped("Sam won't ship by Friday", "Sam said he won't be able to ship by Friday."), "both sides negated")
+            check(!flipped("Skip the launch", "We're not doing the launch."), "an antonym paraphrase of not is not a flip")
+            check(!flipped("Friday works for the launch", "No, Friday works for the launch."), "an answering no does not negate the clause after it")
+            check(!flipped("Do less manual testing", "We need more automation and less manual testing."), "an item using one side where the line has both")
+            check(!flipped("Ship Friday and tell the client", "We won't ship Thursday, and Sam will tell the client on Friday."), "a negation ends at its clause")
+            check(!flipped("Dana owns the rollout plan", "Dana owns the rollout plan, not Sam."), "a trailing not names someone else")
+            check(!flipped("Never miss the Friday deploy window again", "We should never miss the Friday deploy window again."), "a kept never")
+            check(!flipped("Team isn't ready to launch", "We aren't ready to launch yet."), "n't on both sides")
+            check(!flipped("Launch moves to Friday", "We can't launch Thursday, let's do Friday."), "a reschedule away from a negated day")
+            check(!flipped("Launch the beta Friday", "We can't launch the beta Thursday, let's do Friday."), "a reschedule sharing two negated words")
+            check(!flipped("Friday works", "Thursday doesn't work for me, Friday does."), "the negated clause is about another day")
+            check(!flipped("Deck due Friday", "Send the deck no later than Friday."), "no later than is a deadline")
+            check(!flipped("Login problem is fixed", "No problem, the login fix is in."), "a one-word negated clause is not compared")
 
             // The writer: one request when it fits; grounding applied; citations stored as line ids.
             let reply = """
