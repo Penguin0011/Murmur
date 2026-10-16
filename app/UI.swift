@@ -315,7 +315,7 @@ struct SettingsView: View {
 
     private func toggleRow(_ title: String, _ detail: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) { titled(title, detail) }.toggleStyle(MurmurToggleStyle())
-            .padding(.vertical, 18)
+            .padding(.vertical, 10)
     }
 
     private func segmented<T: Hashable>(_ options: [(T, String)], _ selection: Binding<T>, size: CGFloat = 15) -> some View {
@@ -461,9 +461,9 @@ struct SettingsView: View {
     private var settings: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text(Self.sections[section]).font(WindowType.display(64)).tracking(-1.28)
-                Text(Self.ledes[section]).font(WindowType.body(16)).foregroundStyle(Palette.ink70)
-                    .lineSpacing(4).padding(.top, 10).padding(.bottom, 20)
+                Text(Self.sections[section]).font(WindowType.display(40)).tracking(-0.8)
+                Text(Self.ledes[section]).font(WindowType.body(14)).foregroundStyle(Palette.ink70)
+                    .lineSpacing(2).padding(.top, 6).padding(.bottom, 8)
                 sectionBody.disabled(controller.isBusy)
                 Toggle("Show detailed info", isOn: $showDetailedSettingsInfo)
                     .font(WindowType.body(13)).toggleStyle(.checkbox).padding(.top, 32)
@@ -514,18 +514,18 @@ struct SettingsView: View {
 
     private var general: some View {
         VStack(alignment: .leading, spacing: 0) {
-            eyebrow("Shortcut").padding(.top, 20)
-            VStack(alignment: .leading, spacing: 12) {
+            eyebrow("Shortcut").padding(.top, 12)
+            VStack(alignment: .leading, spacing: 8) {
                 segmented([("right-option", "Right Option"), ("fn", "Fn / Globe"), ("ctrl-option-space", "Control–Option–Space")], $controller.shortcut)
                 ShortcutRecorder(controller: controller)
                 help(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop, or hold it and release. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
             }
-            .padding(.vertical, 16).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
+            .padding(.vertical, 12).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
             toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
             toggleRow("Start and stop sounds", "A short sound when recording starts and when it stops or is canceled. No sound when text is inserted.", isOn: $controller.recordingSounds)
             toggleRow(LiveWordsFacts.displayName, LiveWordsFacts.explanation, isOn: $controller.liveWords)
             if controller.liveWords {
-                liveWordsModel.padding(.vertical, 18)
+                liveWordsModel.padding(.vertical, 10)
                 toggleRow("Show live words on cloud routes", "Off: when transcription runs in the cloud, the bubble shows only the level meter and the extra model does not start. The preview always runs on this Mac.", isOn: $controller.liveWordsOnCloud)
             }
             toggleRow("Insert at the cursor", "Types into whichever field has the cursor when dictation finishes. Press ⌃⌘V to paste the last dictation again if it is missing; check the field first to avoid a duplicate. The previous clipboard is restored unless you copy something newer. Automatic paste is marked transient; other software may still read or retain it. Murmur never sends a message.", isOn: $controller.automaticInsertion)
@@ -534,10 +534,10 @@ struct SettingsView: View {
             toggleRow("Show in Dock", "Adds Murmur to the Dock and the app switcher. With both icons hidden, reopen Murmur from Finder or Spotlight.", isOn: $controller.showInDock)
             toggleRow("Open at login", "Starts Murmur in the background when you log in, so the shortcut is ready.", isOn: Binding(get: { controller.openAtLogin }, set: controller.setOpenAtLogin))
 
-            eyebrow("Microphone").padding(.top, 28)
+            eyebrow("Microphone").padding(.top, 20)
             microphonePicker.padding(.top, 8)
 
-            eyebrow("Permissions").padding(.top, 28)
+            eyebrow("Permissions").padding(.top, 20)
             VStack(spacing: 0) {
                 permissionRow("Microphone", allowed: controller.microphoneAuthorized, actionTitle: "Allow", action: controller.requestMicrophone)
                 permissionRow("Accessibility", allowed: controller.accessibilityAuthorized, actionTitle: "Open Settings…") { controller.openPermissionSettings("accessibility") }
@@ -547,7 +547,7 @@ struct SettingsView: View {
             Button("Refresh Permissions", action: controller.refreshPermissionsAndShortcut)
                 .buttonStyle(InkButtonStyle(kind: .outline)).padding(.top, 16)
 
-            eyebrow("Appearance").padding(.top, 28)
+            eyebrow("Appearance").padding(.top, 20)
             segmented([("system", "System"), ("light", "Light"), ("dark", "Dark")], $appearance).padding(.top, 8)
             help("Murmur’s windows only. The dictation bubble always follows macOS.").padding(.top, 8)
         }

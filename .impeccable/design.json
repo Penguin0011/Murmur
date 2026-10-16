@@ -53,7 +53,8 @@
         "setup": "5:7 split on paper with 24pt insets; five numbered steps with selected underline; monochrome mark. [Certain]",
         "historyActions": "ViewThatFits keeps a horizontal action row when all labels fit; otherwise it stacks Copy Text, Copy Raw, Edit, and Delete vertically. [Certain]",
         "windowGutters": "24pt horizontal; 12pt header top and 16pt page top; Settings, Home, and Insights fill available content width. [Certain]",
-        "history": "24pt outer gutters, 80pt day column, 16pt column gap; no nested indent on expanded entries. [Certain]"
+        "history": "24pt outer gutters, 80pt day column, 16pt column gap; no nested indent on expanded entries. [Certain]",
+        "settingsDensity": "40pt serif title, 14pt introduction with 6pt top/8pt bottom gaps; shared toggle rows use 10pt vertical insets while retaining the 40pt minimum interaction height. [Certain]"
       }
     },
     "motion": [

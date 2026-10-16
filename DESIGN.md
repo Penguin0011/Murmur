@@ -17,6 +17,11 @@ typography:
     fontSize: "64pt"
     fontWeight: 400
     letterSpacing: "-1.28pt"
+  settings-title:
+    fontFamily: "Instrument Serif"
+    fontSize: "40pt"
+    fontWeight: 400
+    letterSpacing: "-0.8pt"
   wordmark:
     fontFamily: "Instrument Serif"
     fontSize: "28pt"
@@ -37,6 +42,7 @@ spacing:
   related: "8pt"
   controls: "12pt"
   row: "18pt"
+  toggle-inset: "10pt"
   section: "28pt"
   content: "24pt"
   outer: "24pt"
@@ -78,7 +84,7 @@ Appearance is scoped to the main window with System, Light, and Dark choices; fl
 
 Instrument Serif supplies the wordmark and display headings. DM Sans supplies the main window's authored body, setting titles, help, and buttons. Both fonts are registered from bundled font resources by `WindowType`; no runtime font download is requested by this code. [Certain]
 
-Display titles use regular serif type with tight tracking; page ledes use DM Sans at 16pt, setting titles use 15pt semibold, and supporting copy uses 13pt with added line spacing. Navigation and eyebrows use uppercase system monospace, with tracking equal to 0.08 times the font size. [Certain]
+Settings section titles use 40pt regular serif type and 14pt introductory text, with 6pt above and 8pt below the introduction. Other display titles retain 64pt regular serif type with tight tracking and 16pt page ledes; setting titles use 15pt semibold, and supporting copy uses 13pt with added line spacing. Navigation and eyebrows use uppercase system monospace, with tracking equal to 0.08 times the font size. [Certain]
 
 Meetings page content and consent/notes sheets use the shared DM Sans typography; its start menu uses a 36pt ink capsule with a 14pt semibold label. The floating meeting recording panel retains system typography. The speaker settings subsection also retains some system-font labels. [Certain]
 
@@ -116,7 +122,7 @@ Active sidebar entries, segmented choices, setup steps, and Meetings detail tabs
 
 ### Switches
 
-Rounded switches use ink when on, reduced-opacity ink when off, and a paper thumb. The custom button-backed drawing exposes a native Toggle accessibility representation. [Certain]
+Shared toggle rows use 10pt vertical insets and retain the switch’s 40pt minimum interaction height. Rounded switches use ink when on, reduced-opacity ink when off, and a paper thumb. The custom button-backed drawing exposes a native Toggle accessibility representation. [Certain]
 
 ### Floating indicators
 
