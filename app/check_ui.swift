@@ -138,6 +138,19 @@ import SwiftUI
                 call.insert(stream: .them, start: 30, end: 44, text: "That works. Send it to the team channel when it's ready.")
                 call.myNotes = "Synthetic note: checklist due Thursday."
                 call.seconds = 1834; call.finished = true
+                // --meeting-notes: synthetic notes, as the notes route would write them (W7b).
+                if args.contains("--meeting-notes") {
+                    let ids = call.lines.map(\.id)
+                    var notes = MeetingNotes(title: "Synthetic launch checklist plan", summary: "The call went over the synthetic launch plan for next week. Me offered to draft the checklist by Thursday, and Them asked for it in the team channel.",
+                                             route: "Apple Intelligence (on-device, less accurate)", writtenAt: Date())
+                    notes.keyPoints = [NoteItem(text: "The synthetic launch plan is for next week", lines: [ids[0]])]
+                    notes.decisions = [NoteItem(text: "Share the checklist in the team channel", lines: [ids[2], ids[3]])]
+                    notes.actions = [NoteItem(text: "Draft the checklist", lines: [ids[2], ids[3]], owner: "Me", due: "Thursday", done: false),
+                                     NoteItem(text: "Send it to the team channel when ready", lines: [ids[3]], owner: "Me", done: true)]
+                    notes.dropped = 1
+                    notes.outdated = args.contains("--outdated") ? true : nil
+                    call.notes = notes
+                }
                 var solo = Meeting(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-86400 * 2), source: .microphoneOnly)
                 solo.insert(stream: .me, start: 0, end: 12, text: "Synthetic voice memo recorded with only the microphone.")
                 solo.finished = true
@@ -150,6 +163,8 @@ import SwiftUI
                 recorder.onLiveChange = { panel.update() }
                 recorder.showFixture([call, solo], live: args.contains("--meeting-live") ? live : nil, leftovers: [solo.id: 2])
                 if args.contains("--consent") { recorder.consentPending = .everything }
+                if args.contains("--notes-choice") { recorder.notesChoicePending = call.id }
+                if args.contains("--transcript") { MeetingsPage.initialTab = .transcript }
                 controller.screenRequest = "meetings"
                 fixtureMeetingPanel = panel
             }

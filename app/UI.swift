@@ -172,7 +172,7 @@ struct SettingsView: View {
         "What Murmur saves, and for how long. Nothing leaves this Mac.",
         "Needed only for cloud routes. Stored in your Keychain.",
         "Murmur checks for new versions. You install them yourself.",
-        "Where meeting audio is transcribed, apart from dictation."
+        "Where meeting audio is transcribed, apart from dictation, and how notes are written."
     ]
 
     var body: some View {
@@ -490,6 +490,9 @@ struct SettingsView: View {
                 help("No cloud transcriber is set up. Choose one and save its key in Settings → Transcription and API Keys.", color: Palette.ink)
             }
             help("A change applies to meetings started afterwards; a meeting in progress keeps its route. Dictation’s route is set separately in Transcription.", color: Palette.ink64)
+            eyebrow("Meeting notes").padding(.top, 20)
+            MeetingNotesRoutePicker(controller: controller, selection: Binding(get: { controller.meetingNotesRoute ?? .none }, set: { controller.meetingNotesRoute = $0; controller.meetingRecorder.notesRouteChosen($0) }))
+            help(controller.meetingNotesRoute == nil ? "Not chosen yet: Murmur asks after your first meeting." : "Notes are written after Stop from the transcript and your own notes. Every item cites the lines it rests on; items the transcript does not support are left out.", color: Palette.ink64)
         }
     }
 
