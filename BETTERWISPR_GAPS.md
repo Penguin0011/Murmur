@@ -81,7 +81,7 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 
 | # | Gap | BetterWispr | Murmur today | Plan | PRD impact | Size | W |
 |---|---|---|---|---|---|---|---|
-| 22 | Meeting notetaker | Mic as "Me", system audio as "Them" (Core Audio tap), live transcript, your own notes, AI title, summary, decisions and action items | None | **Spec approved by the user Oct 15 (Q1–Q9 accepted):** [PRD section 11](PRD.md#11-meeting-notetaker-w7) (capture, consent, transcript, retention, notes; milestones W7a–W7b). W7a in progress | Reverses the "no meeting recording at launch" boundary (PRD line 11) | L | W7 |
+| 22 | Meeting notetaker | Mic as "Me", system audio as "Them" (Core Audio tap), live transcript, your own notes, AI title, summary, decisions and action items | None | **Spec approved by the user Oct 15 (Q1–Q9 accepted):** [PRD section 11](PRD.md#11-meeting-notetaker-w7) (capture, consent, transcript, retention, notes; milestones W7a–W7b). W7a merged and live-tested (PR #50, #51). W7b notes built, in review (grounded notes, Apple Intelligence passes the notes bars on the synthetic corpus; cloud routes and real calls open) | Reverses the "no meeting recording at launch" boundary (PRD line 11) | L | W7 |
 | 23 | Meeting detection | Offers to start notes when Zoom, Meet, Teams and others start using the mic | None | After #22; spec in [PRD 11.7](PRD.md#117-meeting-detection-23) (milestone W7c), approved Oct 15 | Same | S | W7 |
 | 24 | Speaker separation | On-device diarization (Speaker 1, 2…) with renaming | None | After #22; spec in [PRD 11.8](PRD.md#118-speaker-separation-24) (offline FluidAudio diarization, about 21.6 MB, milestone W7d), approved Oct 15 | Same | M | W7 |
 

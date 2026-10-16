@@ -71,7 +71,7 @@ nonisolated(unsafe) var lastReplies: [String] = []
             catch ProviderError.payloadTooLarge { throw NotesFailure.tooLarge }
             catch let error as ProviderError { throw NotesFailure.failed(error.userMessage) }
         }
-        let corpus = try JSONDecoder().decode(Corpus.self, from: Data(contentsOf: URL(fileURLWithPath: "app/meeting-notes-corpus.json")))
+        let corpus = try JSONDecoder().decode(Corpus.self, from: Data(contentsOf: URL(fileURLWithPath: ProcessInfo.processInfo.environment["MMN_CORPUS"] ?? "app/meeting-notes-corpus.json")))
         print("route \(routeArg), \(corpus.meetings.count) meetings")
 
         var unsupported = 0, invented = 0, missedDecisions = 0, missedActions = 0, labelledDecisions = 0, labelledActions = 0

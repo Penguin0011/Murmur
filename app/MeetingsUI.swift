@@ -113,7 +113,7 @@ struct MeetingsPage: View {
             Button("Delete", role: .destructive) { if let meeting = confirmDelete { recorder.delete(meeting.id); selectedID = nil } }
             Button("Cancel", role: .cancel) {}
         } message: { Text("The transcript, its notes and your own notes are deleted. This cannot be undone.") }
-        .background(EmptyView().sheet(isPresented: Binding(get: { recorder.notesChoicePending != nil && recorder.consentPending == nil }, set: { if !$0 { recorder.notesChoicePending = nil } })) {
+        .background(Color.clear.sheet(isPresented: Binding(get: { recorder.notesChoicePending != nil && recorder.consentPending == nil }, set: { if !$0 { recorder.notesChoicePending = nil } })) {
             MeetingNotesChoiceSheet(controller: controller) { route in
                 controller.meetingNotesRoute = route
                 recorder.notesRouteChosen(route)
@@ -303,7 +303,7 @@ struct MeetingNotesRoutePicker: View {
             }
             .pickerStyle(.radioGroup).labelsHidden().font(.system(size: 14))
             lede(controller.meetingNotesDisclosure(selection), color: Palette.ink)
-            if selection != MeetingNotesRoute.none, let refusal = controller.meetingNotesProvider(selection).refusal { lede(refusal, color: Palette.accentDeep) }
+            if selection != MeetingNotesRoute.none, let refusal = controller.meetingNotesSetupProblem(selection) { lede(refusal, color: Palette.accentDeep) }
         }
     }
 }

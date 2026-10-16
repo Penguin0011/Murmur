@@ -1994,6 +1994,19 @@ final class PreStart: @unchecked Sendable {
         return (cleaner, nil)
     }
 
+    /// Why a notes route cannot run, for Settings. Checks only that a key exists, so rendering never
+    /// reads the Keychain; the key is read when notes are written.
+    func meetingNotesSetupProblem(_ route: MeetingNotesRoute) -> String? {
+        switch route {
+        case .none: return nil
+        case .appleIntelligence: return AppleCleanupProvider().status()?.userMessage
+        case .gemini, .customAPI:
+            var routes = appliedRoutes; routes.transcription = .local; routes.cleanup = route == .gemini ? .gemini : .customAPI
+            let plan = RoutePlan.make(routes, cleanupSendsText: true) { self.credentials.exists($0) ? APIKey("disclosure-only") : nil }
+            return plan.cleaner == nil ? (plan.refusal ?? "\(route.label) is not set up.") + " Set it up in Settings → Cleanup and API Keys." : nil
+        }
+    }
+
     /// Who receives the transcript on a notes route, for Settings and the first-Stop question.
     func meetingNotesDisclosure(_ route: MeetingNotesRoute) -> String {
         guard route == .gemini || route == .customAPI else { return MeetingNotesRoute.disclosure(route, host: nil, local: true, retention: nil) }
