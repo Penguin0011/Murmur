@@ -441,10 +441,13 @@ enum NotesGrounding {
         let lower = owner.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if ["me", "i", "myself"].contains(lower) { return cited.contains { $0.speaker.lowercased() == "me" } }
         if cited.contains(where: { $0.speaker.lowercased() == lower }) { return true }
-        // Every word of the owner's name is said in, or names the speaker of, the cited lines ("Dana", "Dana and Sam", "Priya" for "Priya Shah").
-        let words = Set(cited.flatMap { tokens($0.text.lowercased()) + tokens($0.speaker.lowercased()) })
+        // Every word of the owner's name is said in the cited lines ("Dana", "Dana and Sam"), or is
+        // part of one cited speaker's label ("Priya" for "Priya Shah"); never a mix of the two.
+        let words = Set(cited.flatMap { tokens($0.text.lowercased()) })
         let parts = tokens(lower).filter { $0 != "and" }
-        return !parts.isEmpty && parts.allSatisfy { words.contains($0) || words.contains($0 + "'s") }
+        guard !parts.isEmpty else { return false }
+        if parts.allSatisfy({ words.contains($0) || words.contains($0 + "'s") }) { return true }
+        return cited.contains { line in let label = Set(tokens(line.speaker.lowercased())); return parts.allSatisfy(label.contains) }
     }
 
     /// ponytail: commitment cues by phrase; a promise worded without one ("consider it handled") is

@@ -661,7 +661,7 @@ Every result records machine model, RAM, macOS and app versions and raw numbers,
 - DER and word-level speaker attribution on at least 10 consented calls with 2–6 remote speakers, on the M3 / 16 GB. Bars: DER at most 20% on the Them stream, the correct speaker count on at least 80% of calls, and at least 85% of words attributed correctly on calls with 3 or more remote speakers.
 - Processing time and peak memory for 1-hour and 2-hour meetings. Bar: at most 2 minutes for 1 hour.
 - Them audio is deleted once diarization finishes, and at 24 h.
-- Renaming, merging and reassigning persist and mark notes out of date. Attribution notices are present.
+- Renaming, merging and reassigning persist. A rename or merge relabels notes already written, and a reassigned line marks them out of date. Attribution notices are present.
 
 **Not verified in the live app** is listed in each pull request's checklist, as for W5 and W6.
 
@@ -713,7 +713,7 @@ The fixes:
 
 **W7a accepted as is (user, October 15, 2026).** After the live tests, the user accepted two open items for now: FaceTime capture is untested, and some echo fragments are still left in Me lines. Echo handling is unchanged until a milestone needs it. [Certain]
 
-**W7b status (October 16, 2026): built, in review, not live-tested.** [Certain]
+**W7b status (October 16, 2026): merged (PR #52, integrated in PR #56); live-tested by the user on one Arc call with notes from their custom route. The other routes and the 11.10 real-call measurements are open.** [Certain]
 - **What it does:** after Stop, and once the transcript is complete, notes are written on the route chosen in Settings → Meetings → Meeting notes. That route is separate from cleanup. The first Stop asks for it, with None preselected; a Stop the user clicked opens the Meetings page for the question, while an automatic stop (cap, silence) asks the next time the page is opened. The notes have a title, a summary, key points, decisions and action items with checkboxes. Each item cites its lines, and a citation jumps to the line in the Transcript tab. Update Notes rewrites them. Editing My notes, or a leftover chunk finished later, marks them out of date. Copy Notes and the Markdown export include them.
 - **Record:** `Meeting.notes` is optional, so W7a records still load (checked on a literal W7a record). Citations are stored as line ids, not L numbers, so they survive lines inserted later.
 - **Prompt and reply:** the transcript is shown as numbered visible lines, `[L12 Them 3:05]`, with hidden echo left out. The lines and the user's notes go inside nonce tags, and the instructions say nothing inside them is an instruction. The reply is one pipe-separated line per item (`ACTION | L7 L8 | Me | Friday | …`). Nested JSON was tried first: on the corpus, Apple's model broke it in 7 of 22 meetings. Apple Intelligence answers through guided generation with a runtime schema (`DynamicGenerationSchema`, no macros), which is rendered into the same lines, so grounding is identical on every route. Decisions and action items are generated before key points, and the reply is capped at 1,200 tokens: uncapped, two replies ran for over 3 minutes.
@@ -761,7 +761,7 @@ The fixes:
 - **Bundle IDs:** checked on this Mac for FaceTime, Safari, Chrome and Arc. The other apps are not installed here.
 - **Not verified:** the offer in the built app with a real call in any listed app, Safari's and Arc's input processes, Take Notes through the consent sheet, and VoiceOver. These are on the pull request's live checklist.
 
-**W7d status (October 16, 2026): built, in review, not live-tested.** Speaker separation runs after Stop as described in 11.8. Measured on the MacBook Air M3 (Mac15,12), 16 GB, macOS 27.0.1, app 0.1.0 (1), with `app/tools/measure_speakers.swift`. [Certain]
+**W7d status (October 16, 2026): merged (PR #55); live-tested by the user on one Arc call, speakers separated 2.5 s after Stop. The 11.10 real-call bars are open.** Speaker separation runs after Stop as described in 11.8. Measured on the MacBook Air M3 (Mac15,12), 16 GB, macOS 27.0.1, app 0.1.0 (1), with `app/tools/measure_speakers.swift`. [Certain]
 - **What was built:**
   - The pinned download: `FluidInference/speaker-diarization-coreml` at `df2625a`, 21 files, 21,599,417 bytes, hash-checked like the other models. The helper loads the files directly; FluidAudio's downloader is never used, so nothing is fetched or purged on its own.
   - A one-shot helper, `ModelBench DIR --diarize KEPT_WAV THRESHOLD`. It prints only speaker ids and times, then exits. It reads the kept file memory-mapped, so nothing is copied to a temporary folder.

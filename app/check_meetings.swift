@@ -417,6 +417,7 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(reason(Item(text: "Marcus will send the budget deck", lines: [1, 2])) == .invented, "an invented name is still dropped")
             check(reason(Item(text: "Ship 1 build next week", lines: [3])) == .invented, "a speaker label's digit never vouches for a number")
             check(reason(Item(text: "Send the budget deck", lines: [3], owner: "Priya"), .action) != nil, "a speaker who is not in the cited lines does not own it")
+            check(NotesGrounding.ownerSupported("Speaker 2", cited: [("I'll send 2 decks.", "Speaker 1")]) == false && NotesGrounding.ownerSupported("Priya", cited: [("I'll send it.", "Priya Shah")]), "an owner's label never borrows words from the line's text")
 
             let reply = """
             TITLE | Budget deck for Priya
