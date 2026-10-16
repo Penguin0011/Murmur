@@ -385,7 +385,7 @@ struct SettingsView: View {
                 .font(WindowType.body(13)).buttonStyle(.plain).foregroundStyle(Palette.ink70)
                 .frame(minHeight: 40)
         }
-        .padding(.horizontal, 56).padding(.top, 28)
+        .padding(.horizontal, 24).padding(.top, 12)
     }
 
     private var sidebar: some View {
@@ -410,10 +410,10 @@ struct SettingsView: View {
             }
             .accessibilityElement(children: .combine)
             .help(controller.appliedTranscriptionIsLocal ? "Local transcription" : "Cloud transcription")
-            .padding(.top, 16).padding(.bottom, 24)
+            .padding(.top, 12).padding(.bottom, 16)
         }
-        .padding(.leading, 56).padding(.trailing, 12).padding(.top, 28)
-        .frame(width: 200).frame(maxHeight: .infinity)
+        .padding(.leading, 24).padding(.trailing, 16).padding(.top, 16)
+        .frame(width: 184).frame(maxHeight: .infinity)
     }
 
     private func navigationRow(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -470,8 +470,7 @@ struct SettingsView: View {
                 help(controller.isBusy ? "Finish dictating to change settings." : "Changes apply as soon as you make them.", color: Palette.ink64)
                     .padding(.top, 12)
             }
-            .frame(maxWidth: 640, alignment: .leading)
-            .padding(EdgeInsets(top: 28, leading: 40, bottom: 24, trailing: 56))
+            .padding(EdgeInsets(top: 16, leading: 24, bottom: 24, trailing: 24))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .id(section)
@@ -1174,7 +1173,7 @@ struct SettingsView: View {
 
     private var history: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("History").font(WindowType.display(64)).tracking(-1.28)
                 help(controller.historySummary)
                 HStack(spacing: 20) {
@@ -1188,7 +1187,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            .padding(EdgeInsets(top: 24, leading: 40, bottom: 16, trailing: 40))
+            .padding(EdgeInsets(top: 16, leading: 24, bottom: 16, trailing: 24))
             .overlay(alignment: .bottom) { rule }
 
             ScrollView {
@@ -1206,7 +1205,7 @@ struct SettingsView: View {
                     }
                     ForEach(groups.indices, id: \.self) { index in
                         let group = groups[index]
-                        HStack(alignment: .top, spacing: 24) {
+                        HStack(alignment: .top, spacing: 16) {
                             VStack(alignment: .leading, spacing: 4) {
                                 mono(group.day)
                                 mono(group.entries.count == 1 ? "1 entry" : "\(group.entries.count) entries", color: Palette.ink64)
@@ -1219,7 +1218,7 @@ struct SettingsView: View {
                         .padding(.vertical, 24).overlay(alignment: .bottom) { rule }
                     }
                 }
-                .padding(.horizontal, 40)
+                .padding(.horizontal, 24)
             }
 
             HStack {
@@ -1228,7 +1227,7 @@ struct SettingsView: View {
                 Button("Clear History…", role: .destructive, action: controller.clearHistory).buttonStyle(InkButtonStyle(kind: .outline))
                     .disabled(controller.history.isEmpty)
             }
-            .padding(.horizontal, 40).frame(height: 56).overlay(alignment: .top) { rule }
+            .padding(.horizontal, 24).frame(height: 56).overlay(alignment: .top) { rule }
         }
     }
 
@@ -1311,7 +1310,7 @@ struct SettingsView: View {
                     .padding(.top, 18)
                     Text("Copying never retries insertion or sends a message.").font(WindowType.body(13)).foregroundStyle(Palette.ink64).padding(.top, 10)
                 }
-                .padding(.leading, 88).padding(.top, 4).padding(.bottom, 20)
+                .padding(.top, 4).padding(.bottom, 20)
             }
         }
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.ink45).frame(height: 1) }
@@ -1427,7 +1426,7 @@ struct SettingsView: View {
                     Logo.path(in: CGSize(width: 48, height: 48)).fill(Palette.ink)
                         .frame(width: 48, height: 48).accessibilityHidden(true)
                 }
-                .padding(40).frame(width: geometry.size.width * 5 / 12, alignment: .leading).frame(maxHeight: .infinity, alignment: .top)
+                .padding(24).frame(width: geometry.size.width * 5 / 12, alignment: .leading).frame(maxHeight: .infinity, alignment: .top)
                 .background(Palette.paper)
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -1475,7 +1474,7 @@ struct SettingsView: View {
                     }
                     .padding(.top, 24)
                 }
-                .padding(40)
+                .padding(24)
             }
         }
     }
@@ -1491,8 +1490,7 @@ extension SettingsView {
                 Text(lede).font(WindowType.body(16)).foregroundStyle(Palette.ink70).padding(.top, 10)
                 content()
             }
-            .frame(maxWidth: 760, alignment: .leading)
-            .padding(EdgeInsets(top: 32, leading: 40, bottom: 40, trailing: 40))
+            .padding(EdgeInsets(top: 16, leading: 24, bottom: 24, trailing: 24))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

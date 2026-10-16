@@ -38,8 +38,10 @@ spacing:
   controls: "12pt"
   row: "18pt"
   section: "28pt"
-  content: "40pt"
-  outer: "56pt"
+  content: "24pt"
+  outer: "24pt"
+  page-top: "16pt"
+  header-top: "12pt"
 components:
   button-primary:
     backgroundColor: "{colors.ink}"
@@ -82,11 +84,11 @@ Meetings page content and consent/notes sheets use the shared DM Sans typography
 
 ## Layout
 
-The main window has a sparse wordmark header with a small monochrome voice mark and a trailing setup action. A 200pt text sidebar contains Home, Insights, Meetings, settings sections, and History; current phase sits at its foot. Navigation uses text rather than numbered boxes or header tabs; rows have a 36pt minimum height and 2pt gaps. [Certain]
+The main window has a sparse wordmark header with a small monochrome voice mark and a trailing setup action. A 184pt text sidebar contains Home, Insights, Meetings, settings sections, and History; current phase sits at its foot. Navigation uses text rather than numbered boxes or header tabs; rows have a 36pt minimum height and 2pt gaps. [Certain]
 
-Settings uses a scrollable content column up to 640pt wide, with 40pt leading and 56pt trailing padding. Page titles lead each section, followed by a lede and flat setting groups. The window's declared minimum is 760×560pt. Home and Insights share the serif page hierarchy. Populated Meetings uses a 200pt inner list beside detail when its content is at least 680pt wide; below that threshold, a search field and native meeting picker sit above detail. Search constrains the selected meeting to matching results. [Certain]
+Settings, Home, and Insights use the available content width with 24pt horizontal gutters and a 16pt top inset. The wordmark header uses the same horizontal gutter and a 12pt top inset. History uses matching outer gutters, an 80pt day column with a 16pt gap, and expanded entry content without an extra nested indent. Page titles lead each section, followed by a lede and flat setting groups. The window's declared minimum is 760×560pt. Home and Insights share the serif page hierarchy. Populated Meetings uses a 200pt inner list beside detail when its content is at least 680pt wide; below that threshold, a search field and native meeting picker sit above detail. Search constrains the selected meeting to matching results. [Certain]
 
-Setup remains a distinct 5:7 split with five numbered steps on paper, a blue underline for the selected step, and a plain monochrome voice mark. It is not evidence that every screen follows the settings composition. [Certain]
+Setup remains a distinct 5:7 split with 24pt insets and five numbered steps on paper, a blue underline for the selected step, and a plain monochrome voice mark. It is not evidence that every screen follows the settings composition. [Certain]
 
 ## Elevation & Depth
 

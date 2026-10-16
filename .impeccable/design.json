@@ -48,10 +48,12 @@
         }
       ],
       "layout": {
-        "sidebar": "200pt width; 36pt minimum rows, 2pt gaps. [Certain]",
+        "sidebar": "184pt width; 24pt leading, 16pt trailing; 36pt minimum rows, 2pt gaps. [Certain]",
         "meetings": "At content width \u2265680pt, 200pt list beside detail; below 680pt, search and native meeting picker above detail. Selection stays within search results. [Certain]",
-        "setup": "5:7 split on paper; five numbered steps with selected underline; monochrome mark. [Certain]",
-        "historyActions": "ViewThatFits keeps a horizontal action row when all labels fit; otherwise it stacks Copy Text, Copy Raw, Edit, and Delete vertically. [Certain]"
+        "setup": "5:7 split on paper with 24pt insets; five numbered steps with selected underline; monochrome mark. [Certain]",
+        "historyActions": "ViewThatFits keeps a horizontal action row when all labels fit; otherwise it stacks Copy Text, Copy Raw, Edit, and Delete vertically. [Certain]",
+        "windowGutters": "24pt horizontal; 12pt header top and 16pt page top; Settings, Home, and Insights fill available content width. [Certain]",
+        "history": "24pt outer gutters, 80pt day column, 16pt column gap; no nested indent on expanded entries. [Certain]"
       }
     },
     "motion": [

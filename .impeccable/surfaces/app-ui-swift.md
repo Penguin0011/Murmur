@@ -14,7 +14,7 @@ Authority: user-supplied Murmur Settings Final standalone.html; its active rende
 THESIS: Apply the supplied balanced design to the working native macOS app while keeping all real controls and recovery paths.
 OWN-WORLD: Near-white #FAFAFA, ink #141414, Instrument Serif display, DM Sans content, monospace section navigation, blue underlines, flat groups, pill actions, rounded switches. Dark appearance mirrors these roles.
 STORY: Find a setting, understand its effect, change it immediately; retain Home, Insights, writing modes, meetings, History, and setup.
-FIRST VIEWPORT: 1000×680 content area; 28pt serif wordmark above a 200pt text navigation column; 64pt serif page title and a readable content column; active navigation and choices have a 2pt blue underline.
+FIRST VIEWPORT: 1000×680 content area; 28pt serif wordmark above a 184pt text navigation column; 64pt serif page title and a readable content column; active navigation and choices have a 2pt blue underline.
 FORM: Direct implementation of the user-supplied active balanced variant; no concept seed or generated imagery. Preserve macOS window controls and keyboard/VoiceOver semantics. Existing cloud providers, insertion rules and transcription vocabulary behavior are authoritative over demo data.
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
@@ -39,3 +39,10 @@ Constraints: No WebView or demo runtime in the production app. Fonts ship offlin
 - Tested immediate setting changes, local appearance switching, every navigation destination, setup Next/Back/direct-step selection/Finish, simulated Listening disabling settings and rejecting activation, and status dismissal preserving all seven transcripts plus the recovery-entry reference. [Certain]
 - Rebuilt and signature-verified the application; rebuilt the fixture with font assertions; native History/verifier checks passed. No GitHub checks were reported for the PR at validation time. [Certain]
 - Scope remains isolated native UI with synthetic data. No live microphone, transcription/provider requests, actual insertion, real Keychain validation, full VoiceOver session, installation, or merge was performed. [Certain]
+
+
+## Margin refinement — October 16, 2026
+
+The user requested less wasted space from UI margins. Use 24pt horizontal gutters, a 12pt header top inset, and 16pt page top insets. The sidebar is 184pt wide; Settings, Home, and Insights use available width without the former 640/760pt caps. History retains an 80pt date column with a smaller 16pt gap and removes the 88pt nested indent from expanded entries. Setup uses 24pt insets. Typography and control sizes remain unchanged. [Certain]
+
+Verified this refinement with a fresh signed build and isolated native fixture at 1000×680 and 760×560, plus a zoomed window. Reviewed Settings in light/dark, History, Home, Insights, setup, and Meetings. Expanded History recovery actions remain readable and fit horizontally at the minimum size; a native toggle still updates and restores its value after resizing. Local captures use the `margins-` prefix under `.impeccable/review/`. No live dictation or installation was performed. [Certain]
