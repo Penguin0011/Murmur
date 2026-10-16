@@ -150,6 +150,7 @@ app/check_ui.sh --settings --system-appearance
 app/check_ui.sh --meetings --light
 app/check_ui.sh --meetings --compact --light
 app/check_ui.sh --meeting-live
+app/check_ui.sh --meeting-live --collapsed
 app/check_ui.sh --consent
 ```
 

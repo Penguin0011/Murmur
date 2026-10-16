@@ -55,6 +55,9 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     private var folder: URL?
     private var livePump: MeetingPump?
     private var meWatch = StreamWatch(now: 0), themWatch = StreamWatch(now: 0)
+    private var lastPlayingCheck: TimeInterval = 0
+    private var themPlaying = true
+    private var meScale = MeterScale(), themScale = MeterScale()
     /// The default output device when the tap was built; a change rebuilds the tap.
     private var outputUID: String?
 
@@ -95,6 +98,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         systemAudioProblem = nil; warning = nil; askEnded = false; behind = false; elapsed = 0; message = nil
         callApp = source.bundleID; callWasUsingMic = false
         meWatch = StreamWatch(now: started); themWatch = StreamWatch(now: started)
+        meScale = MeterScale(); themScale = MeterScale(); themPlaying = true; lastPlayingCheck = 0
         self.folder = folder; livePump = pump
         live = meeting
         if let error = startMe() {
@@ -136,8 +140,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         let clients = AudioProcessList.all().map(\.bundleID)
         let target: TapTarget
         if let id = source.bundleID {
-            let app = CallApp.app(id) ?? CallApp(bundleID: id, name: source.name, isBrowser: false, helpers: [])
-            target = .only(app.tapBundleIDs(running: clients))
+            target = .only(CallApp.app(id) ?? CallApp(bundleID: id, name: source.name, isBrowser: false, helpers: []))
         } else {
             target = .allExcept(CallApp.ownBundleIDs(main: Bundle.main.bundleIdentifier, running: clients))
         }
@@ -288,9 +291,10 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         guard let meeting = live else { return }
         let now = ProcessInfo.processInfo.systemUptime
         elapsed = now - started
-        meLevel = capture.map { c in c.queue.sync { c.level } } ?? 0
-        themLevel = tap.map { t in t.queue.sync { t.level } } ?? 0
-        if max(meLevel, themLevel) > MeetingLimits.silenceLevel { lastVoice = now; askEnded = false }
+        let meRaw = capture.map { c in c.queue.sync { c.level } } ?? 0
+        let themRaw = tap.map { t in t.queue.sync { t.level } } ?? 0
+        meLevel = meScale.display(meRaw); themLevel = themScale.display(themRaw)
+        if max(meRaw, themRaw) > MeetingLimits.silenceLevel { lastVoice = now; askEnded = false }
         // The meeting-only Capture is not the controller's: it restarts in place on a device change
         // (W5 rule); if audio still stops, the watch rebuilds it with a new engine.
         if let capture, !capture.engine.isRunning, !capture.restart() {
@@ -299,7 +303,9 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         watch(.me, meWatch.update(count: capture.map { c in c.queue.sync { Int64(c.frames) } } ?? 0, now: now))
         if live == nil { return }
         if meeting.source.micOnly == false && systemAudioProblem == nil {
-            watch(.them, themWatch.update(count: tap.map { t in t.queue.sync { t.buffers } } ?? 0, now: now))
+            // A tap delivers nothing while no tapped app plays (YouTube paused, a call not yet connected): idle, not a stall.
+            if now - lastPlayingCheck >= 1 { lastPlayingCheck = now; themPlaying = tap?.isPlaying(AudioProcessList.all()) ?? true }
+            watch(.them, themWatch.update(count: tap.map { t in t.queue.sync { t.buffers } } ?? 0, now: now, idle: !themPlaying))
         }
         behind = (pumps[meeting.id]?.backlog ?? 0) > MeetingLimits.behind
         // A denied tap may deliver silence rather than an error (PRD 11.10): say so after 60 s without call audio.
@@ -313,7 +319,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
                 gap(.them, reason: "output-device-changed"); rebuild(.them, reason: "output-device-changed")
             }
             if let callApp {
-                let using = AudioProcessList.all().contains { $0.input && ($0.bundleID == callApp || $0.bundleID.hasPrefix(callApp + ".")) }
+                let app = CallApp.app(callApp) ?? CallApp(bundleID: callApp, name: "", isBrowser: false, helpers: [])
+                let using = AudioProcessList.all().contains { $0.input && app.matches($0.bundleID) }
                 if callWasUsingMic && !using { askEnded = true }
                 callWasUsingMic = using
             }
@@ -384,9 +391,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
 
     private func purgeAudio() {
         guard let audioRoot else { return }
-        var keep = Set(meetings.map(\.id)); if let live { keep.insert(live.id) }
-        keep.formUnion(pumps.keys)
-        MeetingAudio.purge(audioRoot, keep: keep)
+        var active = Set(pumps.keys); if let live { active.insert(live.id) }
+        MeetingAudio.purge(audioRoot, keep: Set(meetings.map(\.id)), active: active)
         refreshLeftovers()
     }
 

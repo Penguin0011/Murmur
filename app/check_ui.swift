@@ -127,6 +127,9 @@ import SwiftUI
                 }
             }
             // Meeting notes (PRD 11.9): --meetings shows the page, --meeting-live the live panel, --consent the sheet.
+            // The fixture's defaults persist: set the panel's minimized state every time (--collapsed).
+            UserDefaults.standard.set(args.contains("--collapsed"), forKey: MeetingPanelPresenter.collapsedKey)
+            UserDefaults.standard.removeObject(forKey: MeetingPanelPresenter.cornerKey)
             if args.contains("--meetings") || args.contains("--meeting-live") || args.contains("--consent") {
                 var call = Meeting(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-7200), source: MeetingSource(name: "Zoom", bundleID: "us.zoom.xos"))
                 call.insert(stream: .them, start: 2, end: 16, text: "Thanks for joining. Let's go over the synthetic launch plan for next week.")

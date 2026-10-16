@@ -98,6 +98,20 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(!FileManager.default.fileExists(atPath: MeetingAudio.folder(root, meeting: orphan).path), "a meeting without a record loses its audio")
             MeetingAudio.purge(root, keep: [])
             check(((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []).isEmpty, "no record, no audio")
+
+            // The live meeting's folder is never touched: not the chunker's file being written (not yet a
+            // chunk name), not an empty folder, even though the live meeting has no saved record yet.
+            let live = UUID().uuidString
+            let liveFolder = MeetingAudio.folder(root, meeting: live)
+            try FileManager.default.createDirectory(at: liveFolder, withIntermediateDirectories: true)
+            MeetingAudio.purge(root, keep: [], active: [live])
+            check(FileManager.default.fileExists(atPath: liveFolder.path), "an empty live folder survives the minute purge")
+            let writing = liveFolder.appendingPathComponent(UUID().uuidString + ".wav")
+            try Data([1]).write(to: writing)
+            MeetingAudio.purge(root, keep: [], active: [live])
+            check(FileManager.default.fileExists(atPath: writing.path), "the chunk being written survives the minute purge")
+            MeetingAudio.purge(root, keep: [])
+            check(!FileManager.default.fileExists(atPath: liveFolder.path), "once the meeting is gone, its folder goes")
         }
 
         // The pump: one chunk in flight, recording order across streams, retry once, then keep the file.
@@ -181,8 +195,25 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             watch.rebuilt(now: 8)
             if case .recovered(let after) = watch.update(count: 50, now: 9) { check(abs(after - 7) < 0.001, "recovery reports how long the stream was stalled") } else { check(false, "the new stream's audio recovers it") }
             check(watch.update(count: 60, now: 10) == .none && watch.stalledSince == nil, "back to normal")
+            var idle = StreamWatch(now: 0)
+            check(idle.update(count: 0, now: 10, idle: true) == .none && idle.update(count: 0, now: 20, idle: true) == .none, "a tap with nothing playing is idle, never a stall")
+            check(idle.update(count: 0, now: 22.9) == .none && idle.update(count: 0, now: 23) == .stalled, "playing again without audio: a stall after 3 s")
+            if case .recovered = idle.update(count: 0, now: 24, idle: true) {} else { check(false, "playback stopping ends the stall") }
             var fresh = StreamWatch(now: 0)
             check(fresh.update(count: 0, now: 2.9) == .none && fresh.update(count: 0, now: 3) == .stalled, "a stream that never starts is a stall too")
+        }
+
+        // Meters: each scaled to its own recent loudness, with a floor.
+        do {
+            var scale = MeterScale()
+            check(scale.display(0) == 0 && scale.display(0.01) < 0.5, "silence and hiss stay low")
+            var quiet = MeterScale()
+            var shown = 0.0
+            for _ in 0..<5 { shown = quiet.display(0.06) }
+            check(shown > 0.9, "quiet but steady call audio fills the bar")
+            var loud = MeterScale()
+            _ = loud.display(0.8)
+            check(loud.display(0.2) < 0.6 && loud.display(0.8) > 0.99, "after loud audio, quieter audio shows lower")
         }
 
         // Limits (Q7).
@@ -226,6 +257,10 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(CallApp.app("com.apple.Safari")!.tapBundleIDs(running: []).contains("com.apple.WebKit.GPU"), "Safari includes the WebKit audio process")
             check(CallApp.ownBundleIDs(main: "cc.clouddev.dictation", running: ["cc.clouddev.dictation.helper", "us.zoom.xos"]) == ["cc.clouddev.dictation", "cc.clouddev.dictation.helper"], "Murmur and its helpers are excluded")
             check(Set(CallApp.catalog.map(\.bundleID)).count == CallApp.catalog.count, "catalog has no duplicates")
+            let arc = CallApp.app("company.thebrowser.Browser")!
+            check(arc.matches("company.thebrowser.browser.helper") && arc.matches("COMPANY.THEBROWSER.BROWSER"), "bundle IDs match ignoring case (Arc's audio helper)")
+            check(arc.tapBundleIDs(running: ["company.thebrowser.browser.helper"]).contains("company.thebrowser.browser.helper"), "a lowercase helper is tapped")
+            check(!arc.matches("company.thebrowser.browserx") && CallApp.app("com.apple.FaceTime")!.matches("COM.APPLE.AVCONFERENCED"), "no look-alikes; known helpers ignore case too")
         }
 
         if failures > 0 { print("\(failures) meeting check(s) failed"); exit(1) }

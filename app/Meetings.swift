@@ -229,9 +229,12 @@ enum MeetingAudio {
     }
     /// Removes folders of meetings that no longer exist (or are not to be kept), chunk files older
     /// than 24 hours, and anything that is not a chunk. `keep` holds the meeting ids still on record.
-    static func purge(_ root: URL, keep: Set<String>, now: Date = Date()) {
+    /// `active` (the meeting recording now, and any still transcribing) is never touched: its folder
+    /// holds the chunker's file being written, and deleting it stopped both streams in the first live tests.
+    static func purge(_ root: URL, keep: Set<String>, active: Set<String> = [], now: Date = Date()) {
         let fm = FileManager.default
         for folder in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+            if active.contains(folder.lastPathComponent) { continue }
             guard keep.contains(folder.lastPathComponent) else { try? fm.removeItem(at: folder); continue }
             for file in (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey])) ?? [] {
                 let created = (try? file.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
@@ -367,9 +370,11 @@ struct StreamWatch {
 
     init(now: TimeInterval) { lastProgress = now }
 
-    mutating func update(count: Int64, now: TimeInterval) -> Action {
-        if count > lastCount {
-            lastCount = count; lastProgress = now
+    /// `idle`: nothing the stream records is producing audio (a tap delivers no buffers while no
+    /// tapped app plays), which is not a stall.
+    mutating func update(count: Int64, now: TimeInterval, idle: Bool = false) -> Action {
+        if count > lastCount || idle {
+            lastCount = max(lastCount, count); lastProgress = now
             guard let since = stalledSince else { return .none }
             stalledSince = nil
             return .recovered(after: now - since)
@@ -381,6 +386,20 @@ struct StreamWatch {
 
     /// A new capture or tap counts from zero; only its own audio counts as progress.
     mutating func rebuilt(now: TimeInterval) { lastCount = 0; lastRebuild = now }
+}
+
+/// The live meters (PRD 11.9): call audio from a tap is often much quieter than the microphone, so
+/// each meter is scaled to its own recent loudness, with a floor so silence and hiss stay low. The
+/// square root lifts quiet speech, as the dictation bubble does.
+struct MeterScale {
+    static let floor = 0.05
+    /// Per update (about 6–7 a second): the reference falls by about two thirds in 5 s.
+    static let decay = 0.97
+    private var reference = floor
+    mutating func display(_ level: Double) -> Double {
+        reference = max(level, reference * Self.decay, Self.floor)
+        return min(1, (max(0, level) / reference).squareRoot())
+    }
 }
 
 // MARK: - Limits
@@ -473,6 +492,14 @@ struct CallApp: Equatable {
     /// Processes outside the bundle-ID prefix that play this app's audio.
     let helpers: [String]
 
+    /// Whether a process belongs to this app: its own ID, an ID under it (`.helper`), or a known
+    /// helper. Case is ignored: Arc is `company.thebrowser.Browser`, its audio helper
+    /// `company.thebrowser.browser.helper`.
+    func matches(_ id: String) -> Bool {
+        let id = id.lowercased(), own = bundleID.lowercased()
+        return id == own || id.hasPrefix(own + ".") || helpers.contains { $0.lowercased() == id }
+    }
+
     static let catalog: [CallApp] = [
         CallApp(bundleID: "us.zoom.xos", name: "Zoom", isBrowser: false, helpers: []),
         CallApp(bundleID: "com.microsoft.teams2", name: "Microsoft Teams", isBrowser: false, helpers: []),
@@ -496,7 +523,7 @@ struct CallApp: Equatable {
     /// (helpers such as `com.google.Chrome.helper`), and its known out-of-prefix helpers.
     func tapBundleIDs(running: [String]) -> [String] {
         var ids = [bundleID] + helpers
-        for id in running where id.hasPrefix(bundleID + ".") && !ids.contains(id) { ids.append(id) }
+        for id in running where matches(id) && !ids.contains(where: { $0.lowercased() == id.lowercased() }) { ids.append(id) }
         return ids
     }
     /// Murmur and its helpers, excluded from an "All apps" tap.

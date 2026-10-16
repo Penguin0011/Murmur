@@ -236,14 +236,19 @@ struct MeetingLiveView: View {
 
     private var dot: some View { Circle().fill(Color.red).frame(width: 10, height: 10).accessibilityHidden(true) }
 
+    /// The minimized panel: red dot, timer and Stop. Clicking the dot or timer expands it; drag it anywhere.
     private var pill: some View {
         HStack(spacing: 10) {
-            dot
-            mono("Recording \(MeetingExport.clock(recorder.elapsed))", size: 12)
-            Button { collapsed = false } label: { Image(systemName: "chevron.down") }.buttonStyle(.plain).accessibilityLabel("Show meeting notes")
+            Button { collapsed = false } label: {
+                HStack(spacing: 8) { dot; mono(MeetingExport.clock(recorder.elapsed), size: 12) }.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("Show the meeting panel").accessibilityLabel("Recording meeting notes, \(MeetingExport.clock(recorder.elapsed)). Show the panel")
+            Button("Stop", action: recorder.stop).buttonStyle(.plain).font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 8).frame(height: 24).background(Palette.ink).foregroundStyle(Palette.paper)
+                .accessibilityLabel("Stop meeting notes")
         }
-        .padding(.horizontal, 14).frame(height: 40).modifier(UtilityGlass(radius: 20))
-        .accessibilityElement(children: .contain).accessibilityLabel("Recording meeting notes")
+        .padding(.horizontal, 12).frame(height: 40).modifier(UtilityGlass(radius: 20))
+        .accessibilityElement(children: .contain)
     }
 
     private var full: some View {
@@ -253,7 +258,8 @@ struct MeetingLiveView: View {
                 mono("Recording \(MeetingExport.clock(recorder.elapsed))", size: 12)
                 Spacer()
                 if let live = recorder.live { mono((live.source.micOnly ? "Mic only" : live.source.name) + (live.transcribedBy.map { " · " + $0 } ?? ""), size: 11, color: Palette.ink70).lineLimit(1) }
-                Button { collapsed = true } label: { Image(systemName: "chevron.up") }.buttonStyle(.plain).accessibilityLabel("Collapse to a small indicator")
+                Button { collapsed = true } label: { Label("Minimize", systemImage: "arrow.down.right.and.arrow.up.left").labelStyle(.iconOnly).font(.system(size: 13, weight: .semibold)).frame(width: 28, height: 24).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).help("Minimize to a small pill with the timer and Stop").accessibilityLabel("Minimize to a small indicator")
             }
             HStack(spacing: 8) {
                 Text(MeetingConsent.reminder).font(.system(size: 13, weight: .semibold))
@@ -324,11 +330,15 @@ private final class MeetingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-/// Shows the live panel while a meeting records, docked to the top right of the main screen.
+/// Shows the live panel while a meeting records: top right of the main screen at first, then where
+/// the user drags it. Minimized or not, and where, are remembered across meetings. It cannot be
+/// closed while recording (PRD 11.3, R6).
 @MainActor final class MeetingPanelPresenter {
+    static let collapsedKey = "meetingPanelCollapsed", cornerKey = "meetingPanelTopRight"
     private var panel: MeetingPanel?
     private let recorder: MeetingRecorder
-    private var collapsed = false
+    private var collapsed: Bool { UserDefaults.standard.bool(forKey: Self.collapsedKey) }
+    private var moved: NSObjectProtocol?
 
     init(recorder: MeetingRecorder) { self.recorder = recorder }
     /// The panel's content, for the UI fixture's snapshot.
@@ -336,7 +346,8 @@ private final class MeetingPanel: NSPanel {
 
     func update() {
         guard recorder.live != nil else {
-            panel?.orderOut(nil); panel = nil; collapsed = false
+            if let moved { NotificationCenter.default.removeObserver(moved) }; moved = nil
+            panel?.orderOut(nil); panel = nil
             NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: "Meeting notes stopped", .priority: NSAccessibilityPriorityLevel.high.rawValue])
             return
         }
@@ -345,25 +356,40 @@ private final class MeetingPanel: NSPanel {
             next.level = .floating; next.isFloatingPanel = true; next.hidesOnDeactivate = false
             next.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             next.backgroundColor = .clear; next.isOpaque = false; next.hasShadow = true; next.isMovableByWindowBackground = true
-            next.contentView = NSHostingView(rootView: LivePanelRoot(recorder: recorder) { [weak self] in self?.collapsed = $0; self?.place() })
+            next.contentView = NSHostingView(rootView: LivePanelRoot(recorder: recorder) { [weak self] _ in self?.place() })
             panel = next
+            // Remember where the user drags it (its top-right corner, so minimizing keeps it in place).
+            moved = NotificationCenter.default.addObserver(forName: NSWindow.didMoveNotification, object: next, queue: .main) { [weak next] _ in
+                MainActor.assumeIsolated {
+                    guard let frame = next?.frame else { return }
+                    UserDefaults.standard.set([frame.maxX, frame.maxY], forKey: Self.cornerKey)
+                }
+            }
+            place(initial: true)
             NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: "Meeting notes recording", .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
-        place(); panel?.orderFrontRegardless()
+        panel?.orderFrontRegardless()
     }
 
-    private func place() {
+    /// Keeps the panel's top-right corner where it was (or where it was last left) and resizes around it.
+    private func place(initial: Bool = false) {
         guard let panel, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let size = collapsed ? NSSize(width: 220, height: 40) : NSSize(width: 340, height: 520)
-        let frame = screen.visibleFrame
-        panel.setFrame(NSRect(x: frame.maxX - size.width - 16, y: frame.maxY - size.height - 16, width: size.width, height: size.height), display: true)
+        let size = collapsed ? NSSize(width: 180, height: 40) : NSSize(width: 340, height: 520)
+        let visible = screen.visibleFrame
+        var corner = NSPoint(x: visible.maxX - 16, y: visible.maxY - 16)
+        if !initial { corner = NSPoint(x: panel.frame.maxX, y: panel.frame.maxY) }
+        else if let saved = UserDefaults.standard.array(forKey: Self.cornerKey) as? [Double], saved.count == 2,
+                NSScreen.screens.contains(where: { $0.visibleFrame.insetBy(dx: -1, dy: -1).contains(NSPoint(x: saved[0] - 1, y: saved[1] - 1)) }) {
+            corner = NSPoint(x: saved[0], y: saved[1])
+        }
+        panel.setFrame(NSRect(x: corner.x - size.width, y: corner.y - size.height, width: size.width, height: size.height), display: true)
     }
 }
 
 private struct LivePanelRoot: View {
     @ObservedObject var recorder: MeetingRecorder
     let changed: (Bool) -> Void
-    @State private var collapsed = false
+    @AppStorage(MeetingPanelPresenter.collapsedKey) private var collapsed = false
     var body: some View {
         MeetingLiveView(recorder: recorder, collapsed: $collapsed)
             .onChange(of: collapsed) { changed(collapsed) }

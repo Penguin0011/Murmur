@@ -396,6 +396,10 @@ final class Chunker {
     private func write(_ audio: [AVAudioPCMBuffer], in directory: URL) -> URL? {
         let url = directory.appendingPathComponent("\(UUID().uuidString).wav")
         do {
+            // Backstop: a folder removed while recording is made again (owner-only) rather than losing the chunk.
+            if !FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            }
             let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
             guard fd >= 0 else { throw CaptureError("Cannot create chunk file") }
             close(fd)
