@@ -925,7 +925,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             dictionaryModel
             rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "Fix a misheard word within a minute and Murmur adds it to your dictionary. Where an app hides its text, it follows your keys for that minute; raw keys stay in memory.", isOn: $controller.learningEnabled)
+            toggleRow("Learn from my corrections", "Fix a misheard word once, within a minute, and Murmur adds it to your dictionary and fixes it from your next dictation. Where an app hides its text, it follows your keys for that minute; raw keys stay in memory.", isOn: $controller.learningEnabled)
             toggleRow("Limit learning to readable fields", "No keystroke learning in editors Murmur can't read. Add those words by hand.", isOn: $controller.learningRequiresReadableField)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(width: 220).onSubmit(addEntry)
@@ -2030,14 +2030,19 @@ private struct UndoCancelCard: View {
     }
 }
 
-/// A short, buttonless notice; learned entries can be removed in Settings → Dictionary.
+/// A short notice with Undo, which removes what was learned and blocks it; learned entries can
+/// also be removed in Settings → Dictionary.
 private struct LearnedNotice: View {
+    let controller: AppController
     let word: String
+    let entryID: UUID
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "character.book.closed").font(.system(size: 12)).foregroundStyle(.secondary).accessibilityHidden(true)
             Text("Added “\(word)” to dictionary").font(.system(size: 12, weight: .medium)).lineLimit(1)
             Spacer(minLength: 4)
+            Button("Undo") { controller.undoLearned(entryID) }.buttonStyle(.borderedProminent).controlSize(.small)
+                .accessibilityHint("Stops replacing this word and does not learn it again.")
         }
         .padding(8).frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -2105,11 +2110,11 @@ final class BubblePresenter {
         notice = UUID()
     }
     /// The learned-word notice; leaves after 5 s unless something else took the panel first.
-    func showLearned(_ word: String, screen: NSScreen?) {
+    func showLearned(_ word: String, entryID: UUID, screen: NSScreen?) {
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let width = min(320, max(200, frame.width - 32))
         let shown = UUID()
-        let host = NSHostingView(rootView: LearnedNotice(word: word).frame(width: width))
+        let host = NSHostingView(rootView: LearnedNotice(controller: controller, word: word, entryID: entryID).frame(width: width))
         panel.contentView = host
         panel.hasShadow = true
         panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.minY + 24, width: width, height: host.fittingSize.height), display: true)

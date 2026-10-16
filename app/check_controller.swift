@@ -222,6 +222,19 @@ import AVFoundation
         controller.removeKey(.customCleanup)
         // The learning lexicon uses the real English spell checker.
         precondition(isCommonEnglishWord("lunch") && isCommonEnglishWord("launch") && !isCommonEnglishWord("akmeq"))
+        // Gap #11 with the real lexicon: one History edit learns the replacement, the notice's Undo
+        // removes and tombstones it, and an ordinary-word swap is never learned.
+        let edited = HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "Ask Acme today", finalText: "Ask Acme today", insertionStatus: "saved-not-inserted")
+        controller.history = [edited]
+        precondition(controller.editEntryText(edited, to: "Ask Akme today"), "history edit saves")
+        guard let akme = controller.dictionaryEntries.first(where: { $0.source == .learned && $0.preferred == "Akme" }) else { preconditionFailure("one history edit learns") }
+        precondition(akme.variants == ["Acme"], "one history edit adds the misheard form")
+        controller.undoLearned(akme.id)
+        precondition(!controller.dictionaryEntries.contains { $0.source == .learned } && controller.blockedWords == [.spelling("akme")], "notice Undo removes and tombstones")
+        let lunch = HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "Go to lunch", finalText: "Go to lunch", insertionStatus: "saved-not-inserted")
+        controller.history = [lunch]
+        precondition(controller.editEntryText(lunch, to: "Go to launch") && !controller.dictionaryEntries.contains { $0.source == .learned }, "ordinary-word swap not learned")
+        controller.history = []
         controller.lastDictationText = "held synthetic text"; controller.setupTestTranscript = "setup synthetic text"
         let chunk = temp.appendingPathComponent(name).appendingPathComponent("chunks/abandoned.wav")
         try Data([4, 5, 6]).write(to: chunk)

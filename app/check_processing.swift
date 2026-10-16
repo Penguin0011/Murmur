@@ -401,7 +401,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
     }
 
     static func learningChecks(_ dir: URL, _ defaults: UserDefaults) throws {
-        // Learning on: two settled sessions promote.
+        // Learning on: one settled session promotes (gap #11); a repeat confirms.
         let on = try ProcessingCoordinator(directory: dir.appendingPathComponent("on"), defaults: defaults)
         check(on.settings.learningEnabled && on.ledger.learningEnabled, "learning on by default")
         for _ in 0..<2 {
@@ -409,11 +409,11 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
             try check(on.observe(ObservedCorrection(sessionID: session, source: "Acme", target: "Akme", observedAt: Date())) == .provisional, "recorded")
             try on.settle(sessionID: session)
         }
-        check(on.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" }, "promoted after two sessions")
+        check(on.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" }, "promoted")
         check(on.process("call acme") == .insert("Call Akme"), "learned entry applies (punctuation capitalizes)")
 
         // Watched spans (AppController's loop without AX): undo drops evidence; two corrected
-        // dictations promote with the user's casing, not the tracker's lowercased candidate.
+        // dictations keep the user's casing, not the tracker's lowercased candidate.
         let watched = try ProcessingCoordinator(directory: dir.appendingPathComponent("watch"), defaults: defaults)
         func dictate(_ snapshots: [String], inserted: String = "Call Acme today", into p: ProcessingCoordinator? = nil) throws {
             let watched = p ?? watched
@@ -430,8 +430,8 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try dictate(["Call Acme today and more"])
         check(watched.ledger.evidence.isEmpty && watched.dictionary.entries.isEmpty, "undo and plain appended text leave no evidence")
         try dictate(["Call Akme today", "Call Akme today and more", "Call Akme today and more. Then"])
-        check(watched.dictionary.entries.map(\.variants) == [[]], "a fix followed by more typing adds a hint")
-        check(watched.process("call acme") == .insert("Call acme"), "a hint replaces nothing")
+        check(watched.dictionary.entries.map(\.variants) == [["Acme"]], "a fix followed by more typing learns the replacement")
+        check(watched.process("call acme") == .insert("Call Akme"), "one watched fix replaces from the next dictation")
         try dictate(["Call Akme"], inserted: "Call Acme")
         check(watched.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "watched corrections promote with casing")
         try dictate(["Call Acme today"], inserted: "Call Akme today")
@@ -483,7 +483,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try typed(selectAcme + [.text("Akme")], click: true)
         try typed(selectAcme + [.text("Akme"), .other])
         try typed([.text(" and more")])
-        check(keyed.ledger.evidence.count == 1 && keyed.dictionary.entries.map(\.variants) == [[]], "keystroke fix kept as a hint; undo chord and appended text dropped")
+        check(keyed.ledger.evidence.isEmpty && keyed.dictionary.entries.map(\.variants) == [["Acme"]], "keystroke fix learned in one step; undo chord and appended text dropped")
         try typed([.left(word: true, extend: false), .left(word: false, extend: false)] + Array(repeating: .backspace(word: false), count: 4) + "Akme".map { .text(String($0)) })
         check(keyed.dictionary.entries.contains { $0.source == .learned && $0.preferred == "Akme" && $0.variants == ["Acme"] }, "backspace-and-retype promotes")
         // Click to fix: the caret position is unknown, so the one plausible reading is taken.
