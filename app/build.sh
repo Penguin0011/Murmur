@@ -33,6 +33,8 @@ swiftc -O -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/app/UI.swift" "$project_root/app/Meetings.swift" "$project_root/app/MeetingNotes.swift" "$project_root/app/MeetingSpeakers.swift" "$project_root/app/MeetingCapture.swift" "$project_root/app/MeetingRecorder.swift" "$project_root/app/MeetingsUI.swift" "$project_root/app/LaunchOptions.swift" "$project_root/app/main.swift" \
   "$project_root/app/CallDetection.swift" "$project_root/app/CallOfferUI.swift" \
   -o "$app_path/Contents/MacOS/Murmur"
+mkdir -p "$app_path/Contents/Resources"
+cp -R "$project_root/app/Fonts" "$app_path/Contents/Resources/"
 cp "$project_root/app/Info.plist" "$app_path/Contents/Info.plist"
 cp "$runner_path" "$app_path/Contents/MacOS/ModelBench"
 cp "$project_root/app/AppIcon.icns" "$app_path/Contents/Resources/AppIcon.icns"

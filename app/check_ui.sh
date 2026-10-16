@@ -19,6 +19,8 @@ swiftc -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/app/UI.swift" "$project_root/app/Meetings.swift" "$project_root/app/MeetingNotes.swift" "$project_root/app/MeetingSpeakers.swift" "$project_root/app/MeetingCapture.swift" "$project_root/app/MeetingRecorder.swift" "$project_root/app/MeetingsUI.swift" "$project_root/app/check_ui.swift" \
   "$project_root/app/CallDetection.swift" "$project_root/app/CallOfferUI.swift" \
   -o "$fixture_path/Contents/MacOS/UIQA"
+mkdir -p "$fixture_path/Contents/Resources"
+cp -R "$project_root/app/Fonts" "$fixture_path/Contents/Resources/"
 cp "$project_root/app/Info.plist" "$fixture_path/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable UIQA' "$fixture_path/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier cc.clouddev.dictation.uiqa' "$fixture_path/Contents/Info.plist"
