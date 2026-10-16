@@ -29,3 +29,13 @@ Constraints: No WebView or demo runtime in the production app. Fonts ship offlin
 - `check_insights.swift` and `check_app_services.swift` passed. [Certain]
 - Independent finish review: ship within synthetic-fixture scope, with no established required fixes. [Certain]
 - No live microphone, provider, insertion, keyboard-only, or full VoiceOver session was tested. The installed app was not replaced. [Certain]
+
+
+## PR #60 local interaction pass — October 16, 2026
+
+- Minimum-size History recovery testing found truncated action labels when both raw and final text were present; the action group now falls back to a vertical stack. The matrix fixture seeds differing raw/final text, and a fresh native capture confirmed every action label is readable. Focused independent review marked this fix resolved. [Certain]
+- Tested History: 7 total / 4 attention entries, unmatched search and clear, blank edits disabling Save, Escape cancel preserving the original, and Save updating final text while retaining raw text. [Certain]
+- Tested Dictionary: Return adds a synthetic entry; blank preferred spelling disables Save; Escape restores the original entry. Tested API Key empty/nonempty Save states, saved actions, and empty replacement draft using a dummy value in the preview's in-memory credential store; no provider validation was invoked. [Certain]
+- Tested immediate setting changes, local appearance switching, every navigation destination, setup Next/Back/direct-step selection/Finish, simulated Listening disabling settings and rejecting activation, and status dismissal preserving all seven transcripts plus the recovery-entry reference. [Certain]
+- Rebuilt and signature-verified the application; rebuilt the fixture with font assertions; native History/verifier checks passed. No GitHub checks were reported for the PR at validation time. [Certain]
+- Scope remains isolated native UI with synthetic data. No live microphone, transcription/provider requests, actual insertion, real Keychain validation, full VoiceOver session, installation, or merge was performed. [Certain]

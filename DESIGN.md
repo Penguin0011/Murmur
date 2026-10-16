@@ -102,6 +102,8 @@ Shared action buttons are capsules with a 36pt minimum height. Text fields use a
 
 Shared actions use ink fill, ink outline, accent-ink fill, or plain text. Labels use 14pt semibold DM Sans; pressed opacity is 0.7 and disabled opacity is 0.45. Do not import web hover animations or iOS control assumptions into these native macOS controls. [Certain]
 
+History and Meetings actions keep full labels in a horizontal row when they fit, and stack vertically when they do not. [Certain]
+
 ### Inputs / Fields
 
 Shared text and secure fields use plain text styling, an explicit accessible label, an ink-64 placeholder overlay, horizontal padding, and a quiet border. Native pickers, checkboxes, menus, sheets, and alerts remain where the implementation uses them. [Certain]

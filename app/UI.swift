@@ -1289,7 +1289,7 @@ struct SettingsView: View {
                         Text(entry.rawText).font(WindowType.body(15)).lineSpacing(3).foregroundStyle(Palette.ink70)
                             .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
                     }
-                    HStack(spacing: 8) {
+                    let actions = Group {
                         if !entry.finalText.isEmpty {
                             Button(copiedID == entry.id + "f" ? "Copied ✓" : "Copy Text") { controller.copyEntry(entry); flashCopied(entry.id + "f") }
                                 .buttonStyle(InkButtonStyle())
@@ -1302,8 +1302,11 @@ struct SettingsView: View {
                             Button("Edit") { textDraft = entry.finalText; editingTextID = entry.id }.buttonStyle(InkButtonStyle(kind: .outline))
                                 .accessibilityLabel("Edit final text")
                         }
-                        Spacer()
                         Button("Delete", role: .destructive) { controller.deleteEntry(entry) }.buttonStyle(InkButtonStyle(kind: .plain))
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { actions }.fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: 8) { actions }
                     }
                     .padding(.top, 18)
                     Text("Copying never retries insertion or sends a message.").font(WindowType.body(13)).foregroundStyle(Palette.ink64).padding(.top, 10)

@@ -78,7 +78,7 @@ import SwiftUI
         }
         if CommandLine.arguments.contains("--matrix") && !CommandLine.arguments.contains("--empty") {
             entries += [
-                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-7200), rawText: "Synthetic failed paste.", finalText: "Synthetic failed paste.", insertionStatus: "failed"),
+                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-7200), rawText: "Synthetic failed paste before cleanup.", finalText: "Synthetic failed paste.", insertionStatus: "failed"),
                 HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-10800), rawText: "Synthetic pending delivery. Check the target before recovering this text.\nSecond line for wrapping.", finalText: "Synthetic pending delivery. Check the target before recovering this text.\nSecond line for wrapping.", insertionStatus: "insertion-pending"),
                 HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-14400), rawText: "Synthetic saved output.", finalText: "Synthetic saved output.", insertionStatus: "saved-not-inserted"),
                 HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-18000), rawText: "Synthetic cleanup hold.", finalText: "", insertionStatus: "held-cleanup"),
