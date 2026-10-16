@@ -99,7 +99,7 @@ struct InkButtonStyle: ButtonStyle {
 }
 
 /// A square switch; VoiceOver still sees a native toggle.
-private struct SquareToggleStyle: ToggleStyle {
+struct SquareToggleStyle: ToggleStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 24) {
@@ -494,6 +494,7 @@ struct SettingsView: View {
             MeetingNotesRoutePicker(controller: controller, selection: Binding(get: { controller.meetingNotesRoute ?? .none }, set: { controller.meetingNotesRoute = $0; controller.meetingRecorder.notesRouteChosen($0) }))
             help(controller.meetingNotesRoute == nil ? "Not chosen yet: Murmur asks after your first meeting." : "Notes are written after Stop from the transcript and your own notes. Every item cites the lines it rests on; items the transcript does not support are left out.", color: Palette.ink64)
             CallDetectionRows(presenter: controller.callOffers)
+            SpeakerSettingsSection(settings: controller.speakerSettings)
         }
     }
 

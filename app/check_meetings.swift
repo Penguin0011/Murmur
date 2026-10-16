@@ -1,5 +1,5 @@
 // Meeting notes W7a checks (PRD section 11). No audio, no taps, no network.
-// swiftc app/Retention.swift app/Meetings.swift app/MeetingNotes.swift app/check_meetings.swift -o /tmp/murmur-meetings-check && /tmp/murmur-meetings-check
+// swiftc app/Retention.swift app/Meetings.swift app/MeetingSpeakers.swift app/MeetingNotes.swift app/check_meetings.swift -o /tmp/murmur-meetings-check && /tmp/murmur-meetings-check
 import Foundation
 
 nonisolated(unsafe) var failures = 0

@@ -101,6 +101,7 @@ import SwiftUI
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }
             if args.contains("--settings") || args.contains("--dictionary") { controller.screenRequest = "settings" }
+            if args.contains("--speaker-settings") { controller.speakerSettings.showFixture(enabled: true, status: args.contains("--ready") ? .ready : .notDownloaded) }
             if args.contains("--meeting-settings") { controller.meetingTranscription = args.contains("--cloud") ? .cloud : .local; controller.screenRequest = "meeting-settings" }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
@@ -158,6 +159,16 @@ import SwiftUI
                     notes.outdated = args.contains("--outdated") ? true : nil
                     call.notes = notes
                 }
+                // Speaker separation (W7d): --speakers shows separated, renamed speakers; --separating the progress line with Skip.
+                if args.contains("--speakers") || args.contains("--separating") {
+                    call.speakers = SpeakerSeparation(state: .pending, threshold: MeetingSpeakers.threshold)
+                    call.insert(stream: .them, start: 45, end: 58, text: "I can review it on Friday before the synthetic launch.")
+                    if args.contains("--speakers") {
+                        MeetingSpeakers.apply([SpeakerSegment(speaker: "a", start: 2, end: 16), SpeakerSegment(speaker: "b", start: 30, end: 44),
+                                               SpeakerSegment(speaker: "c", start: 45, end: 58)], to: &call)
+                        call.renameSpeaker(2, to: "Priya")
+                    }
+                }
                 var solo = Meeting(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-86400 * 2), source: .microphoneOnly)
                 solo.insert(stream: .me, start: 0, end: 12, text: "Synthetic voice memo recorded with only the microphone.")
                 solo.finished = true
@@ -168,7 +179,7 @@ import SwiftUI
                 let recorder = controller.meetingRecorder
                 let panel = MeetingPanelPresenter(recorder: recorder)
                 recorder.onLiveChange = { panel.update() }
-                recorder.showFixture([call, solo], live: args.contains("--meeting-live") ? live : nil, leftovers: [solo.id: 2])
+                recorder.showFixture([call, solo], live: args.contains("--meeting-live") ? live : nil, leftovers: [solo.id: 2], separating: args.contains("--separating") ? [call.id] : [])
                 if args.contains("--consent") { recorder.consentPending = .everything }
                 if args.contains("--notes-choice") { recorder.notesChoicePending = call.id }
                 if args.contains("--transcript") { MeetingsPage.initialTab = .transcript }

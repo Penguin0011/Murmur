@@ -67,6 +67,10 @@ final class WarmRunner: @unchecked Sendable {
         send(boundary ? (try? JSONSerialization.data(withJSONObject: ["boundary": audio.path])).map { String(decoding: $0, as: UTF8.self) } : audio.path,
              helper: helper, launch: launch, completion: completion)
     }
+    /// A meeting's Them chunk with speaker separation on: the answer adds `words` (W7d).
+    func transcribeTimed(_ audio: URL, helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
+        send((try? JSONSerialization.data(withJSONObject: ["timed": audio.path])).map { String(decoding: $0, as: UTF8.self) }, helper: helper, launch: launch, completion: completion)
+    }
     /// 16 kHz mono samples held in memory (an undone cancel); the answer is like an audio path's.
     func transcribe(samples: [Float], helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
         let encoded = samples.withUnsafeBytes { Data($0).base64EncodedString() }
@@ -451,6 +455,8 @@ final class PreStart: @unchecked Sendable {
     lazy var callOffers = CallOfferPresenter(controller: self)
     /// Meeting notes (PRD section 11): its own capture and store, sharing the warm helper.
     let meetingRecorder = MeetingRecorder()
+    /// Settings → Meetings → speaker separation (W7d): the switch and its optional download.
+    let speakerSettings = SpeakerModelSettings()
     private var store: HistoryStore?
     /// All history reads and writes; it keeps entries in memory only when history is off.
     private var records: HistoryRouter<HistoryEntry>?
@@ -1941,8 +1947,23 @@ final class PreStart: @unchecked Sendable {
             return try await self.writeMeetingNotes(meeting)
         }
         recorder.onNotesChoiceNeeded = { [weak self] in self?.screenRequest = "meetings"; self?.openSettings?() }
+        speakerSettings.attach(recorder, preview: preview) { [weak self] in self?.isBusy ?? true }
         guard !preview, let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
         let warm = warm
+        recorder.helper = helper
+        recorder.transcribeTimed = { [weak self] url, done in
+            guard let self else { done(nil); return }
+            let models = URL(fileURLWithPath: self.modelDirectory), vocabulary = self.vocabularyFile, dictionaryModel = self.dictionaryModelDirectory
+            DispatchQueue.global(qos: .utility).async {
+                guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
+                      let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel) else { done(nil); return }
+                warm.transcribeTimed(url, helper: helper, launch: launch) { line in
+                    let answer = line.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                    guard let text = answer?["text"] as? String else { done(nil); return }
+                    done(ChunkText(text: text, words: answer?["words"] as? [[Double]]))
+                }
+            }
+        }
         recorder.transcribe = { [weak self] url, done in
             guard let self else { done(nil); return }
             let models = URL(fileURLWithPath: self.modelDirectory), vocabulary = self.vocabularyFile, dictionaryModel = self.dictionaryModelDirectory
