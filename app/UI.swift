@@ -493,6 +493,18 @@ struct SettingsView: View {
             eyebrow("Meeting notes").padding(.top, 20)
             MeetingNotesRoutePicker(controller: controller, selection: Binding(get: { controller.meetingNotesRoute ?? .none }, set: { controller.meetingNotesRoute = $0; controller.meetingRecorder.notesRouteChosen($0) }))
             help(controller.meetingNotesRoute == nil ? "Not chosen yet: Murmur asks after your first meeting." : "Notes are written after Stop from the transcript and your own notes. Every item cites the lines it rests on; items the transcript does not support are left out.", color: Palette.ink64)
+            eyebrow("Call detection").padding(.top, 20)
+            toggleRow("Offer to take notes when a call starts", "When a call app or a browser starts using the microphone, Murmur offers to take notes. It never starts recording on its own, and reads no window titles or web addresses.", isOn: $controller.meetingDetection)
+            if !controller.meetingDetectionNever.isEmpty {
+                help("Never offered for:", color: Palette.ink)
+                ForEach(controller.meetingDetectionNever, id: \.self) { id in
+                    HStack {
+                        Text(CallApp.app(id)?.name ?? id).font(.system(size: 14))
+                        Spacer()
+                        Button("Offer Again") { controller.meetingDetectionNever.removeAll { $0 == id } }.buttonStyle(InkButtonStyle(kind: .outline))
+                    }
+                }
+            }
         }
     }
 
@@ -1999,6 +2011,30 @@ private struct UndoCancelCard: View {
     }
 }
 
+/// The call-detection offer (W7c, PRD 11.7). Only Take Notes starts a meeting.
+private struct MeetingOfferCard: View {
+    @ObservedObject var controller: AppController
+    let app: CallApp
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "mic").font(.system(size: 12)).foregroundStyle(.secondary).accessibilityHidden(true)
+                Text(CallDetector.text(app)).font(.system(size: 12, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 6) {
+                Button("Take Notes") { controller.takeMeetingNotes() }.buttonStyle(.borderedProminent).controlSize(.small)
+                Button("Not Now") { controller.declineMeetingOffer(never: false) }.controlSize(.small)
+                Spacer(minLength: 0)
+                Button("Never for \(app.name)") { controller.declineMeetingOffer(never: true) }.buttonStyle(.link).controlSize(.small)
+                    .accessibilityHint("Murmur stops offering notes for this app. Undo it in Settings → Meetings.")
+            }
+        }
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .modifier(UtilityGlass(radius: 18))
+    }
+}
+
 /// A short, buttonless notice; learned entries can be removed in Settings → Dictionary.
 private struct LearnedNotice: View {
     let word: String
@@ -2040,7 +2076,7 @@ final class BubblePresenter {
         // An idle status change leaves a learned-word notice up; anything shown replaces it.
         // A card holding text not pasted shows in any phase (Saved included).
         guard showsFloatingIndicator(phase: phase) || controller.pasteFailure != nil else { if notice == nil { hide() }; return }
-        notice = nil
+        notice = nil; offer = false
         let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
         let minimal = phase != "Error" && controller.pasteFailure == nil
         panel.hasShadow = !minimal
@@ -2057,7 +2093,24 @@ final class BubblePresenter {
         panel.orderFrontRegardless()
     }
 
-    func hide() { notice = nil; panel.orderOut(nil) }
+    func hide() { notice = nil; offer = false; panel.orderOut(nil) }
+
+    /// Whether the panel shows the call-detection offer.
+    private var offer = false
+    /// The call-detection offer; the controller removes it after 30 s or when the app stops using the microphone.
+    func showMeetingOffer(_ app: CallApp, screen: NSScreen? = nil) {
+        let frame = (screen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        let width = min(380, max(240, frame.width - 32))
+        let host = NSHostingView(rootView: MeetingOfferCard(controller: controller, app: app).frame(width: width))
+        panel.contentView = host
+        panel.hasShadow = true
+        panel.setFrame(NSRect(x: frame.midX - width / 2, y: frame.minY + 24, width: width, height: host.fittingSize.height), display: true)
+        panel.orderFrontRegardless()
+        notice = UUID(); offer = true
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [.announcement: CallDetector.text(app), .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+    }
+    /// Removes the offer only if it is still what the panel shows.
+    func hideMeetingOffer() { if offer { hide() } }
 
     private var notice: UUID?
     /// The Undo card; it leaves with the "Recording canceled" status (5 s) or when anything else is shown.

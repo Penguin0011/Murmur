@@ -390,6 +390,54 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(MeetingNotesRoute.disclosure(.customAPI, host: "127.0.0.1:8080", local: true, retention: nil).contains("nothing leaves this Mac"), "a loopback endpoint counts as local")
         }
 
+        // W7c call detection (PRD 11.7): offer after 5 s of input, once per mic session, gone after 30 s.
+        do {
+            let own = "cc.clouddev.dictation"
+            var d = CallDetector()
+            func step(_ t: Double, _ inputs: [String], enabled: Bool = true, never: [String] = [], meeting: Bool = false, dictating: Bool = false) -> CallDetector.Offer? {
+                d.update(now: t, inputs: inputs, own: own, enabled: enabled, never: never, meeting: meeting, dictating: dictating)
+            }
+            check(step(0, ["us.zoom.xos"]) == nil && step(4, ["us.zoom.xos"]) == nil, "no offer before 5 s of input")
+            check(step(5, ["us.zoom.xos"])?.app.name == "Zoom", "an offer after 5 s")
+            check(CallDetector.text(CallApp.app("us.zoom.xos")!) == "Zoom is using the microphone. Take meeting notes?", "worded as microphone use")
+            check(step(34, ["us.zoom.xos"]) != nil && step(35, ["us.zoom.xos"]) == nil, "the offer disappears after 30 s")
+            check(step(100, ["us.zoom.xos"]) == nil, "one offer per mic session")
+            _ = step(101, []); _ = step(112, [])
+            _ = step(120, ["us.zoom.xos"])
+            check(step(125, ["us.zoom.xos"]) != nil, "a new mic session offers again")
+            d.dismiss()
+            check(step(126, ["us.zoom.xos"]) == nil, "Not now closes it for this session")
+
+            d = CallDetector()
+            _ = step(0, ["com.google.Chrome.helper"]); _ = step(2, [])
+            check(step(4, []) == nil && step(30, []) == nil, "a 2-second voice search gets no offer")
+            d = CallDetector()
+            _ = step(0, ["COMPANY.THEBROWSER.BROWSER.HELPER"])
+            let arc = step(6, ["COMPANY.THEBROWSER.BROWSER.HELPER"])
+            check(arc?.app.name == "Arc" && CallDetector.text(arc!.app).contains("is using the microphone") && !CallDetector.text(arc!.app).contains("call"), "a browser helper maps to its browser, ignoring case; no call is claimed")
+            d = CallDetector()
+            _ = step(0, [own, own + ".ModelBench"])
+            check(step(10, [own, own + ".ModelBench"]) == nil, "Murmur's own recording never triggers an offer")
+            d = CallDetector()
+            _ = step(0, ["com.apple.avconferenced"])
+            check(step(6, ["com.apple.avconferenced"])?.app.name == "FaceTime", "FaceTime's audio helper maps to FaceTime")
+            d = CallDetector()
+            _ = step(0, ["us.zoom.xos"], enabled: false)
+            check(step(6, ["us.zoom.xos"], enabled: false) == nil, "the off switch stops offers")
+            d = CallDetector()
+            _ = step(0, ["us.zoom.xos"])
+            check(step(6, ["us.zoom.xos"], never: ["US.ZOOM.XOS"]) == nil, "Never for an app stops its offers")
+            d = CallDetector()
+            _ = step(0, ["us.zoom.xos"])
+            check(step(6, ["us.zoom.xos"], dictating: true) == nil && step(7, ["us.zoom.xos"]) != nil, "no offer while dictating, then it comes")
+            d = CallDetector()
+            _ = step(0, ["us.zoom.xos"])
+            check(step(6, ["us.zoom.xos"], meeting: true) == nil && step(20, ["us.zoom.xos"]) == nil, "no offer during a meeting, nor after it for the same call")
+            check(step(1, ["com.unknown.recorder", ""]) == nil, "unknown apps are ignored")
+            let defaults = UserDefaults(suiteName: "murmur-detect-\(UUID().uuidString)")!
+            check(CallDetector.enabled(defaults) && CallDetector.never(defaults).isEmpty, "detection is on by default with no Never list")
+        }
+
         if failures > 0 { print("\(failures) meeting check(s) failed"); exit(1) }
         print("All meeting checks passed.")
     }

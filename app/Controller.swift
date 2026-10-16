@@ -663,6 +663,7 @@ final class PreStart: @unchecked Sendable {
                 guard let self else { return }
                 self.voiceLevel = self.capture?.queue.sync { self.capture?.level ?? 0 } ?? 0
                 self.meetingRecorder.tick()
+                self.detectCalls()
                 // A canceled or empty recording's audio is gone; drop its chunk transcripts.
                 for (audio, job) in self.chunkJobs where !FileManager.default.fileExists(atPath: audio.path) { job.discard(); self.chunkJobs[audio] = nil }
                 // Download progress and the verifying phase are sampled here, on the main thread.
@@ -2030,6 +2031,49 @@ final class PreStart: @unchecked Sendable {
             catch let error as ProviderError { throw NotesFailure.failed(error.userMessage) }
             catch { throw NotesFailure.failed("Notes could not be written.") }
         }
+    }
+
+    // MARK: Call detection (W7c, PRD 11.7)
+
+    /// Settings → Meetings → "Offer to take notes when a call starts". On by default (Q6).
+    @Published var meetingDetection = CallDetector.enabled(.standard) {
+        didSet { UserDefaults.standard.set(meetingDetection, forKey: CallDetector.enabledKey) }
+    }
+    /// Apps the user chose "Never" for, by bundle ID.
+    @Published var meetingDetectionNever = CallDetector.never(.standard) {
+        didSet { UserDefaults.standard.set(meetingDetectionNever, forKey: CallDetector.neverKey) }
+    }
+    private var callDetector = CallDetector()
+    private var lastDetection: TimeInterval = 0
+    private(set) var meetingOffer: CallDetector.Offer?
+
+    /// Once a second: which processes run audio input (Core Audio process objects; no permission,
+    /// no window or URL read). Offers only; nothing starts without Take Notes.
+    private func detectCalls() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !preview, now - lastDetection >= 1 else { return }
+        lastDetection = now
+        let inputs = meetingDetection || meetingOffer != nil ? AudioProcessList.all().filter(\.input).map(\.bundleID) : []
+        let offer = callDetector.update(now: now, inputs: inputs, own: Bundle.main.bundleIdentifier, enabled: meetingDetection, never: meetingDetectionNever,
+                                        meeting: meetingRecorder.live != nil, dictating: isBusy)
+        guard offer != meetingOffer else { return }
+        meetingOffer = offer
+        if let offer {
+            timingLog.notice("meeting-offer app=\(offer.app.bundleID, privacy: .public)")
+            bubble.showMeetingOffer(offer.app)
+        } else { bubble.hideMeetingOffer() }
+    }
+
+    func takeMeetingNotes() {
+        guard let offer = meetingOffer else { return }
+        callDetector.dismiss(); meetingOffer = nil; bubble.hideMeetingOffer()
+        startMeeting(MeetingSource(name: offer.app.name, bundleID: offer.app.bundleID))
+    }
+
+    func declineMeetingOffer(never: Bool) {
+        guard let offer = meetingOffer else { return }
+        callDetector.dismiss(); meetingOffer = nil; bubble.hideMeetingOffer()
+        if never, !meetingDetectionNever.contains(offer.app.bundleID) { meetingDetectionNever.append(offer.app.bundleID) }
     }
 
     /// Shows or hides the live meeting panel; set by the app delegate.

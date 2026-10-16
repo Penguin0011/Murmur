@@ -739,6 +739,19 @@ The fixes:
 - **Real calls:** none; consented recordings are needed. **Open.**
 - `check_meetings.swift` covers the grounding rules on fixtures, the prompt layout and nonce tags, the parser, the title fallback, map-reduce with one overflow split, the route setting and the disclosures.
 
+**W7c status (October 16, 2026): built, in review, not live-tested.** Stacked on W7b. [Certain]
+- **Detector** (`CallDetector`, Foundation-only, in `Meetings.swift`): once a second the app reads `kAudioHardwarePropertyProcessObjectList` and each process's bundle ID and `IsRunningInput`. This is polled rather than observed with a listener: the properties are the same, the cost is a few property reads, and no permission is needed. On this Mac the list read 28 processes with no prompt. A process maps to a catalog app by bundle ID ignoring case, helpers included (`com.google.Chrome.helper`, Arc's lowercase helper, FaceTime's `avconferenced`). Murmur's own processes never count.
+- **Rules:**
+  - an offer comes after 5 s of input;
+  - one offer per app per microphone session, where a session survives 10 s without input;
+  - the offer goes after 30 s, or when the app stops using the microphone;
+  - no offer while dictating (it comes after) or during a meeting, and none afterwards for the same session;
+  - the "Never" list matches bundle IDs ignoring case.
+- **Offer:** a card in the bubble reads "<App> is using the microphone. Take meeting notes?", with Take Notes, Not Now and Never for <App>. Browsers get the same microphone wording and no call is claimed. No window title or URL is read. Only Take Notes starts a meeting, with that app as the Them source. VoiceOver announces the offer. The log records only the app's bundle ID.
+- **Settings → Meetings → Call detection:** "Offer to take notes when a call starts", on by default (Q6), and the Never list with Offer Again.
+- **Evidence:** `check_meetings.swift` covers the 5-second filter, a 2-second voice search, one offer per session and a new session, the 30-second expiry, Not Now, Murmur's own processes, case-insensitive helpers (Arc and FaceTime), the off switch, Never, dictation, meetings, the wording and the default.
+- **Open (live checklist):** an offer for each listed app and each browser on a real call; none for Murmur's own recording, a 2-second voice search or a second time in one call; Never and the off switch; and no recording without Take Notes. Each app's bundle ID must also be verified on the test Mac. `app/tools/watch_call_detection.swift` prints what the detector sees, for those checks.
+
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
 ### 11.12 Amendments (applied October 15, 2026)

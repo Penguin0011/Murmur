@@ -562,3 +562,59 @@ struct CallApp: Equatable {
         return [main] + running.filter { $0.hasPrefix(main + ".") }
     }
 }
+
+// MARK: - Call detection (W7c, PRD 11.7, Q5, Q6)
+
+/// Offers meeting notes when a known call app or a browser starts using the microphone. It reads
+/// only which processes run audio input: no window titles, URLs or screen, and nothing is stored
+/// except the user's "Never" list. It never starts recording; Take Notes does.
+struct CallDetector {
+    /// Input must run this long before an offer, which filters short voice searches.
+    static let settle: TimeInterval = 5
+    static let offerLifetime: TimeInterval = 30
+    /// ponytail: a mic session survives this long without input (a call app reopening its input
+    /// on a device change); tune if one call gets two offers on the test Mac.
+    static let grace: TimeInterval = 10
+    static let enabledKey = "meetingDetection", neverKey = "meetingDetectionNever"
+
+    /// On unless the user turned it off (Q6).
+    static func enabled(_ defaults: UserDefaults) -> Bool { defaults.object(forKey: enabledKey) as? Bool ?? true }
+    static func never(_ defaults: UserDefaults) -> [String] { defaults.stringArray(forKey: neverKey) ?? [] }
+
+    struct Offer: Equatable { let app: CallApp; let shownAt: TimeInterval }
+    private struct Session { var since: TimeInterval; var lastSeen: TimeInterval; var offered: Bool }
+    private var sessions: [String: Session] = [:]
+    private(set) var offer: Offer?
+
+    /// The wording (Q5): microphone use, never a claimed call, for browsers and call apps alike.
+    static func text(_ app: CallApp) -> String { "\(app.name) is using the microphone. Take meeting notes?" }
+
+    /// The catalog app a process belongs to, or nil (Murmur's own processes included).
+    static func app(for bundleID: String, own: String?) -> CallApp? {
+        if let own, !own.isEmpty, bundleID.lowercased() == own.lowercased() || bundleID.lowercased().hasPrefix(own.lowercased() + ".") { return nil }
+        return CallApp.catalog.first { $0.matches(bundleID) }
+    }
+
+    /// Called about once a second. `inputs`: bundle IDs of processes running audio input now.
+    /// `meeting`: a meeting is recording, so every current session counts as offered.
+    /// `dictating`: no offer while Murmur records a dictation. Returns the offer to show, if any.
+    mutating func update(now: TimeInterval, inputs: [String], own: String?, enabled: Bool, never: [String], meeting: Bool, dictating: Bool) -> Offer? {
+        let active = Set(inputs.compactMap { Self.app(for: $0, own: own)?.bundleID })
+        for id in active {
+            if sessions[id] == nil { sessions[id] = Session(since: now, lastSeen: now, offered: false) } else { sessions[id]?.lastSeen = now }
+        }
+        sessions = sessions.filter { active.contains($0.key) || now - $0.value.lastSeen < Self.grace }
+        if meeting { for id in sessions.keys { sessions[id]?.offered = true } }
+        if let current = offer, meeting || dictating || !enabled || !active.contains(current.app.bundleID) || now - current.shownAt >= Self.offerLifetime { offer = nil }
+        guard offer == nil, enabled, !meeting, !dictating else { return offer }
+        let blocked = Set(never.map { $0.lowercased() })
+        let ready = sessions.filter { !$0.value.offered && active.contains($0.key) && now - $0.value.since >= Self.settle && !blocked.contains($0.key.lowercased()) }
+        guard let next = ready.min(by: { $0.value.since < $1.value.since }), let app = CallApp.app(next.key) else { return nil }
+        sessions[next.key]?.offered = true
+        offer = Offer(app: app, shownAt: now)
+        return offer
+    }
+
+    /// Not now, Never or Take Notes: the offer goes; this mic session is not offered again.
+    mutating func dismiss() { offer = nil }
+}

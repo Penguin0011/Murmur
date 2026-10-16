@@ -101,7 +101,11 @@ import SwiftUI
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }
             if args.contains("--settings") || args.contains("--dictionary") { controller.screenRequest = "settings" }
-            if args.contains("--meeting-settings") { controller.meetingTranscription = args.contains("--cloud") ? .cloud : .local; controller.screenRequest = "meeting-settings" }
+            if args.contains("--meeting-settings") {
+                controller.meetingTranscription = args.contains("--cloud") ? .cloud : .local; controller.screenRequest = "meeting-settings"
+                // The fixture's defaults persist: set the Never list every time (--never seeds Zoom).
+                controller.meetingDetectionNever = args.contains("--never") ? ["us.zoom.xos"] : []
+            }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
             controller.message = CommandLine.arguments.contains("--credential-warning")
@@ -121,6 +125,8 @@ import SwiftUI
             }
             if CommandLine.arguments.contains("--undo") { controller.bubble.showUndo(screen: nil) }
             if CommandLine.arguments.contains("--learned") { controller.bubble.showLearned("Aakash", screen: nil) }
+            // --meeting-offer shows the call-detection offer (W7c); --browser shows it for Google Chrome.
+            if args.contains("--meeting-offer") { controller.bubble.showMeetingOffer(CallApp.app(args.contains("--browser") ? "com.google.Chrome" : "us.zoom.xos")!) }
             if CommandLine.arguments.contains("--keep-notice") {
                 Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
                     MainActor.assumeIsolated { controller.bubble.showLearned("Aakash", screen: nil) }
