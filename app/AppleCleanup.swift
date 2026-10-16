@@ -77,8 +77,9 @@ enum AppleSystemModel {
     /// schema fixes the shape. The result is rendered in the notes reply format (MeetingNotes.swift),
     /// so grounding is the same on every route. A fresh session per call, like cleanup.
     /// Notes for one chunk are short. Without a cap, a few replies ran on for over 3 minutes
-    /// (measured October 15, 2026); the cap also keeps the reply inside the 4,096-token context.
-    static let maximumNotesTokens = 900
+    /// (measured October 15, 2026). With a 5,000-character request (about 1,700 tokens) and the
+    /// instructions, 1,200 still fits the 4,096-token context.
+    static let maximumNotesTokens = 1_200
 
     @Sendable static func notes(system: String, user: String) async throws -> String {
         let int = DynamicGenerationSchema(type: Int.self), text = DynamicGenerationSchema(type: String.self)
@@ -93,9 +94,11 @@ enum AppleSystemModel {
         let root = DynamicGenerationSchema(name: "Notes", properties: [
             .init(name: "title", description: "At most 8 words, in sentence case: only the first word and names capitalized", schema: text),
             .init(name: "summary", description: "2 to 4 sentences", schema: text),
-            .init(name: "points", description: "Key points", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(referenceTo: "Item"))),
-            .init(name: "decisions", description: "Choices the group agreed on", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(referenceTo: "Item"))),
-            .init(name: "actions", description: "Tasks someone committed to or accepted", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(referenceTo: "Action"))),
+            // Generated in this order: decisions and action items before key points, so a reply that
+            // reaches the token cap loses points, not commitments.
+            .init(name: "decisions", description: "Choices the group agreed on", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(referenceTo: "Item"), maximumElements: 10)),
+            .init(name: "actions", description: "Tasks someone committed to or accepted", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(referenceTo: "Action"), maximumElements: 12)),
+            .init(name: "points", description: "Key points, each a short phrase", schema: DynamicGenerationSchema(arrayOf: DynamicGenerationSchema(referenceTo: "Item"), maximumElements: 8)),
         ])
         let session = LanguageModelSession(instructions: system)
         let content: GeneratedContent
@@ -115,7 +118,7 @@ enum AppleSystemModel {
         var out: [String] = []
         if let title = try? content.value(String.self, forProperty: "title") { out.append("TITLE | " + one(title)) }
         if let summary = try? content.value(String.self, forProperty: "summary") { out.append("SUMMARY | " + one(summary)) }
-        for (key, kind) in [("points", "POINT"), ("decisions", "DECISION")] {
+        for (key, kind) in [("decisions", "DECISION"), ("points", "POINT")] {
             for entry in entries(key) { out.append("\(kind) | \(lines(entry)) | " + one(try? entry.value(String.self, forProperty: "text"))) }
         }
         for entry in entries("actions") {

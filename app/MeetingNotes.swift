@@ -92,9 +92,9 @@ enum MeetingNotesPrompt {
     static let shape = """
     TITLE | <at most 8 words, sentence case>
     SUMMARY | <2 to 4 sentences>
-    POINT | <L numbers> | <a key point>
     DECISION | <L numbers> | <something the group agreed>
     ACTION | <L numbers> | <owner, or -> | <when it is due, or -> | <the task>
+    POINT | <L numbers> | <a key point, as a short phrase>
     """
 
     static func rules(_ tag: String, _ notesTag: String) -> String {
@@ -170,9 +170,9 @@ struct Draft: Equatable {
         var out: [String] = []
         if let title { out.append("TITLE | \(title)") }
         if let summary { out.append("SUMMARY | \(summary)") }
-        out += points.map { "POINT | \(cites($0.lines)) | \($0.text)" }
         out += decisions.map { "DECISION | \(cites($0.lines)) | \($0.text)" }
         out += actions.map { "ACTION | \(cites($0.lines)) | \($0.owner ?? "-") | \($0.due ?? "-") | \($0.text)" }
+        out += points.map { "POINT | \(cites($0.lines)) | \($0.text)" }
         return out.joined(separator: "\n")
     }
 
