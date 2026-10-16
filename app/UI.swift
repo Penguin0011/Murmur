@@ -490,6 +490,7 @@ struct SettingsView: View {
                 help("No cloud transcriber is set up. Choose one and save its key in Settings → Transcription and API Keys.", color: Palette.ink)
             }
             help("A change applies to meetings started afterwards; a meeting in progress keeps its route. Dictation’s route is set separately in Transcription.", color: Palette.ink64)
+            CallDetectionRows(presenter: controller.callOffers)
         }
     }
 
@@ -1842,6 +1843,35 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.customAPIBaseURL) { if !apiFieldFocused { controller.settingsChanged() } }
             .onChange(of: controller.customTranscriptionAPIBaseURL) { if !apiFieldFocused { controller.settingsChanged() } }
             .onChange(of: apiFieldFocused) { _, focused in if !focused { controller.settingsChanged() } }
+    }
+}
+
+/// Settings → Meetings: meeting detection's switch and "Never" list (PRD 11.7, Q6).
+private struct CallDetectionRows: View {
+    @ObservedObject var presenter: CallOfferPresenter
+    private func help(_ text: String, color: Color = Palette.ink70) -> some View {
+        Text(text).font(.system(size: 14)).lineSpacing(2).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Call detection").font(.system(size: 11, design: .monospaced)).tracking(0.88).textCase(.uppercase).foregroundStyle(Palette.accentInk).padding(.top, 20)
+            Toggle(isOn: $presenter.enabled) {
+                Text("Offer to take notes when a call starts").font(.system(size: 16, weight: .semibold))
+            }
+            .toggleStyle(SquareToggleStyle())
+            help("When a call app or a browser uses the microphone for a few seconds, Murmur offers meeting notes. It never starts recording on its own. It checks only which apps use the microphone, on this Mac; it reads no windows or web addresses.")
+            if !presenter.never.isEmpty {
+                Text("Never offer for").font(.system(size: 14, weight: .semibold))
+                ForEach(presenter.never, id: \.self) { id in
+                    HStack {
+                        Text(CallOfferPresenter.name(id)).font(.system(size: 14))
+                        Spacer()
+                        Button("Remove") { presenter.removeNever(id) }.buttonStyle(InkButtonStyle(kind: .outline))
+                            .accessibilityLabel("Offer again for \(CallOfferPresenter.name(id))")
+                    }
+                }
+            }
+        }
     }
 }
 

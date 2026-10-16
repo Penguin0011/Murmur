@@ -36,7 +36,7 @@ App, history and controller (macOS):
 ```sh
 swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-check && /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check && /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Insights.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/Meetings.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/MeetingsUI.swift app/check_controller.swift -o /tmp/dictation-controller-check && /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Insights.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/Meetings.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/MeetingsUI.swift app/CallDetection.swift app/CallOfferUI.swift app/check_controller.swift -o /tmp/dictation-controller-check && /tmp/dictation-controller-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/check_recording.swift -o /tmp/murmur-recording-check && /tmp/murmur-recording-check
 ```
 
@@ -52,6 +52,7 @@ python3 app/check_http.py
 swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check && /tmp/murmur-updates-check
 swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check && /tmp/murmur-insights-check
 swiftc app/Retention.swift app/Meetings.swift app/check_meetings.swift -o /tmp/murmur-meetings-check && /tmp/murmur-meetings-check
+swiftc app/Retention.swift app/Meetings.swift app/CallDetection.swift app/check_call_detection.swift -o /tmp/murmur-detection-check && /tmp/murmur-detection-check
 swiftc app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/check_app_services.swift -o /tmp/murmur-app-services-check && /tmp/murmur-app-services-check
 swiftc module-one/models/Runner/Sources/ModelBench/BoostFilter.swift app/check_boost_filter.swift -o /tmp/murmur-boost-check && /tmp/murmur-boost-check
 python3 app/tools/build_cleanup_corpus.py
@@ -70,6 +71,8 @@ app/check_ui.sh --history-off
 app/check_ui.sh --guide 4
 app/check_ui.sh --meetings --compact --light
 app/check_ui.sh --meeting-live
+app/check_ui.sh --call-offer --saved --bubble-only
+app/check_ui.sh --meeting-settings --never --light
 ```
 
 These commands come from [app/README.md](app/README.md), which lists every fixture flag and is the source of truth if they drift. Spike and model checks are in `spike/README.md` and `module-one/*/README.md`. [Certain]

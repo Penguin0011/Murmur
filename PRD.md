@@ -711,6 +711,27 @@ The fixes:
 - **Meters:** each meter is scaled to its own recent loudness, with a floor.
 - **Panel:** the live panel minimizes to a pill (red dot, timer, Stop), can be dragged, and remembers both. [Certain]
 
+**W7c status (October 16, 2026): built, in review, not live-tested in the app.** [Certain]
+- **What was built:**
+  - The rules are in `CallDetection.swift`. The offer panel, Settings rows and a once-a-second poll from the existing 0.15 s timer are in `CallOfferUI.swift`.
+  - Murmur reads `kAudioHardwarePropertyProcessObjectList` and each process's bundle ID and `kAudioProcessPropertyIsRunningInput` once a second. It does not install property listeners: per-process input changes would need a listener on every process object, and the poll costs 1.4–2.9 ms per call on the M3. With the switch off, nothing is read.
+- **How matching works:**
+  - A process maps to a listed app by bundle ID or bundle-ID prefix, ignoring case.
+  - A known helper outside the prefix (Safari's `com.apple.WebKit.GPU`, FaceTime's `com.apple.avconferenced`) counts only while that app is open, since every WebKit app shares that helper.
+  - Telegram's non-App-Store client (`com.tdesktop.Telegram`) is added for detection.
+- **When it offers:**
+  - A session ends after 15 s with no input, so a device switch or a brief stop does not offer again in the same call.
+  - A meeting that records uses up the offer for every call running at the time, so Stop is not followed by an offer for the same call.
+  - Dictation only defers the offer.
+- **What the offer says:** "<App> is using the microphone." A browser's offer asks "If this is a call, take meeting notes?", so it never claims a call. The offer has its own non-activating panel at the bubble's position, because the dictation bubble hides itself on status changes.
+- **Measured on the MacBook Air M3, macOS 27.0.1, with `app/tools/probe_call_detection.swift`:** it runs the same rules on the live process list.
+  - Chrome on a local `getUserMedia` page: one offer 5 s after its helper's input started.
+  - No second offer when the microphone came back after 8 s off.
+  - No offer for a 2-second use.
+  - No offer with Chrome named as Murmur's own ID, with a meeting live, while dictating, with Chrome on the Never list (in upper case), or with the switch off.
+- **Bundle IDs:** checked on this Mac for FaceTime, Safari, Chrome and Arc. The other apps are not installed here.
+- **Not verified:** the offer in the built app with a real call in any listed app, Safari's and Arc's input processes, Take Notes through the consent sheet, and VoiceOver. These are on the pull request's live checklist.
+
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
 ### 11.12 Amendments (applied October 15, 2026)
