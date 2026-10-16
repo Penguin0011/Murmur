@@ -447,6 +447,8 @@ final class PreStart: @unchecked Sendable {
     var openSettings: (() -> Void)?
     var updateMenu: (() -> Void)?
     lazy var bubble = BubblePresenter(controller: self)
+    /// Meeting detection (PRD 11.7): offers meeting notes when a call app or browser uses the microphone.
+    lazy var callOffers = CallOfferPresenter(controller: self)
     /// Meeting notes (PRD section 11): its own capture and store, sharing the warm helper.
     let meetingRecorder = MeetingRecorder()
     private var store: HistoryStore?
@@ -663,6 +665,7 @@ final class PreStart: @unchecked Sendable {
                 guard let self else { return }
                 self.voiceLevel = self.capture?.queue.sync { self.capture?.level ?? 0 } ?? 0
                 self.meetingRecorder.tick()
+                if !self.preview { self.callOffers.tick() }
                 // A canceled or empty recording's audio is gone; drop its chunk transcripts.
                 for (audio, job) in self.chunkJobs where !FileManager.default.fileExists(atPath: audio.path) { job.discard(); self.chunkJobs[audio] = nil }
                 // Download progress and the verifying phase are sampled here, on the main thread.
