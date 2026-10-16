@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Insights.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/Meetings.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/MeetingsUI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Insights.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/MeetingsUI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/check_recording.swift -o /tmp/murmur-recording-check
 /tmp/murmur-recording-check
@@ -104,11 +104,11 @@ swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check
 /tmp/murmur-updates-check
 swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check
 /tmp/murmur-insights-check
-swiftc app/Retention.swift app/Meetings.swift app/check_meetings.swift -o /tmp/murmur-meetings-check
+swiftc app/Retention.swift app/Meetings.swift app/MeetingNotes.swift app/check_meetings.swift -o /tmp/murmur-meetings-check
 /tmp/murmur-meetings-check
 ```
 
-`check_meetings.swift` covers meeting notes W7a (PRD section 11): echo suppression (hidden from Me, never from Them, kept for "Show hidden echo", only near in time), capture-time ordering, the owner-only store with damaged files moved aside, retention by start date, the History cap across dictations and meetings, chunk names and the 24-hour purge, the pump (one chunk in flight, recording order across streams, one retry, then the file is kept), the 3-hour and silence limits, versioned consent, Markdown export with escaping, and call-app process resolution. `app/tools/measure_meeting.swift` feeds two LibriSpeech streams through the same Chunker, feed, pump and helper and prints accuracy, lag, CPU, memory and dictation latency. [Certain]
+`check_meetings.swift` covers meeting notes W7a (PRD section 11): echo suppression (hidden from Me, never from Them, kept for "Show hidden echo", only near in time), capture-time ordering, the owner-only store with damaged files moved aside, retention by start date, the History cap across dictations and meetings, chunk names and the 24-hour purge, the pump (one chunk in flight, recording order across streams, one retry, then the file is kept), the 3-hour and silence limits, versioned consent, Markdown export with escaping, and call-app process resolution. For W7b notes (PRD 11.6) it covers W7a records without notes still loading, the prompt layout (numbered visible lines and the user's notes inside nonce tags, hidden echo left out), the reply parser, each grounding rule (no citation, a missing line, a line speaking to the note-taker, no shared word, an invented name, number or date, an owner who was not there, no agreement for a decision, no commitment for an action item), the title and summary fallback, map-reduce with a context overflow split once, Copy Notes and the Markdown notes section. `app/tools/measure_meeting_notes.swift` runs `app/meeting-notes-corpus.json` (22 synthetic meetings labelled with their agreed decisions and action items, injections and traps) through a notes route and prints unsupported and invented items after the check, missed items and time; `--long` times synthetic 1-hour and 2-hour meetings. `app/tools/measure_meeting.swift` feeds two LibriSpeech streams through the same Chunker, feed, pump and helper and prints accuracy, lag, CPU, memory and dictation latency. [Certain]
 
 `check_insights.swift` covers Home and Insights (gap #19): pace in five-character words per minute against 51.56 typed, time saved and its clamp at zero, words changed, apps, streaks across days, time zones and a daylight-saving change, and the History-off and empty states. `check_app_services.swift` covers the welcome guide (gap #21): resuming at the saved step, clamping, version-stamped completion, replay and the upgrade default. [Certain]
 
@@ -152,9 +152,14 @@ app/check_ui.sh --meetings --compact --light
 app/check_ui.sh --meeting-live
 app/check_ui.sh --meeting-live --collapsed
 app/check_ui.sh --consent
+app/check_ui.sh --meetings --meeting-notes --light
+app/check_ui.sh --meetings --meeting-notes --outdated --tall
+app/check_ui.sh --meetings --transcript --compact --light
+app/check_ui.sh --meetings --notes-choice
+app/check_ui.sh --meeting-settings --tall
 ```
 
-`--meetings` seeds two synthetic meetings (one with hidden echo, one with leftover parts) and opens Meetings (PRD section 11). `--meeting-live` also shows the live panel with a synthetic recording; with `--snapshot` it renders the panel, whose glass draws transparent offscreen. `--consent` opens the one-time consent sheet; quit it from the menu, since `--snapshot` does not close a sheet. [Certain]
+`--meetings` seeds two synthetic meetings (one with hidden echo, one with leftover parts) and opens Meetings (PRD section 11). `--meeting-live` also shows the live panel with a synthetic recording; with `--snapshot` it renders the panel, whose glass draws transparent offscreen. `--consent` opens the one-time consent sheet; quit it from the menu, since `--snapshot` does not close a sheet. [Certain] `--meeting-notes` gives the first meeting synthetic notes (W7b) and opens its Notes tab; `--outdated` marks them out of date. `--transcript` opens the Transcript tab instead. `--notes-choice` opens the first-Stop notes route question; like `--consent`, quit it from the menu. `--meeting-settings` opens Settings → Meetings with the meeting transcription and notes routes. [Certain]
 
 The window opens on Home (gap #19). `--insights` seeds timed dictations into four apps over 24 days and opens Insights; with `--empty` it shows the empty state, and `--history-off` shows the History-off state. `--guide STEP` opens the welcome guide (gap #21) at step 0–4; without it the fixture marks the guide finished. `--settings` opens Settings, `--tall` makes the window 1100 points tall where the screen allows, and `--system-appearance` stores System (or, with `--light` or `--dark`, that choice) without forcing the app's appearance, so the bubble follows macOS (gap #20). `--snapshot PATH` renders the window offscreen to a PNG and quits, which works while the screen is locked. [Certain]
 

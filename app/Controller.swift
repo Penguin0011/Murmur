@@ -1932,6 +1932,12 @@ final class PreStart: @unchecked Sendable {
                            persists: appliedHistoryMode.persistsTranscripts)
         recorder.applyDictionary = { [weak self] text in self?.processing?.dictionary.apply(to: text, isCommonWord: isCommonEnglishWord) ?? text }
         recorder.onLiveChange = { [weak self] in self?.updateMenu?(); self?.meetingPanelChanged?() }
+        recorder.notesRoute = { [weak self] in self?.meetingNotesRoute }
+        recorder.notesWriter = { [weak self] meeting in
+            guard let self else { throw NotesFailure.failed("Murmur is closing.") }
+            return try await self.writeMeetingNotes(meeting)
+        }
+        recorder.onNotesChoiceNeeded = { [weak self] in self?.screenRequest = "meetings"; self?.openSettings?() }
         guard !preview, let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
         let warm = warm
         recorder.transcribe = { [weak self] url, done in
@@ -1959,6 +1965,73 @@ final class PreStart: @unchecked Sendable {
         guard let disclosure = plan.stages.first(where: { $0.disclosure.stage == .transcription })?.disclosure else { return nil }
         return (disclosure.summary, MeetingRoute.cloudNote(provider: disclosure.provider.displayName, host: disclosure.destinationHost, storesAudio: routes.cloudTranscriber == .gemini))
     }
+    /// Settings → Meetings → Meeting notes (Q3). Nil until the first Stop asks, with None preselected.
+    @Published var meetingNotesRoute = MeetingNotesRoute.load(.standard) {
+        didSet {
+            if let route = meetingNotesRoute { UserDefaults.standard.set(route.rawValue, forKey: MeetingNotesRoute.key) }
+            else { UserDefaults.standard.removeObject(forKey: MeetingNotesRoute.key) }
+        }
+    }
+
+    /// The notes route's provider, built from the applied settings and the Keychain like cleanup's,
+    /// or why it cannot run. Never falls back to another route.
+    func meetingNotesProvider(_ route: MeetingNotesRoute) -> (provider: CleanupProvider?, refusal: String?) {
+        let choice: CleanupChoice
+        switch route {
+        case .none: return (nil, "Meeting notes are off. Choose a notes route in Settings → Meetings.")
+        case .appleIntelligence:
+            let apple = AppleCleanupProvider()
+            return apple.status().map { (nil, $0.userMessage) } ?? (apple, nil)
+        case .gemini: choice = .gemini
+        case .customAPI: choice = .customAPI
+        }
+        var routes = appliedRoutes; routes.transcription = .local; routes.cleanup = choice
+        let plan = routePlan(routes, cleanupSendsText: true)
+        guard let cleaner = plan.cleaner else { return (nil, (plan.refusal ?? "\(route.label) is not set up.") + " Set it up in Settings → Cleanup and API Keys.") }
+        // A whole meeting takes longer than a dictation: allow the longest wait each route permits.
+        if var gemini = cleaner as? GeminiCleanupProvider { gemini.timeout = 120; return (gemini, nil) }
+        if var custom = cleaner as? OpenAICompatibleCleanupProvider { custom.timeout = OpenAICompatibleCleanupProvider.maximumTimeout; return (custom, nil) }
+        return (cleaner, nil)
+    }
+
+    /// Why a notes route cannot run, for Settings. Checks only that a key exists, so rendering never
+    /// reads the Keychain; the key is read when notes are written.
+    func meetingNotesSetupProblem(_ route: MeetingNotesRoute) -> String? {
+        switch route {
+        case .none: return nil
+        case .appleIntelligence: return AppleCleanupProvider().status()?.userMessage
+        case .gemini, .customAPI:
+            var routes = appliedRoutes; routes.transcription = .local; routes.cleanup = route == .gemini ? .gemini : .customAPI
+            let plan = RoutePlan.make(routes, cleanupSendsText: true) { self.credentials.exists($0) ? APIKey("disclosure-only") : nil }
+            return plan.cleaner == nil ? (plan.refusal ?? "\(route.label) is not set up.") + " Set it up in Settings → Cleanup and API Keys." : nil
+        }
+    }
+
+    /// Who receives the transcript on a notes route, for Settings and the first-Stop question.
+    func meetingNotesDisclosure(_ route: MeetingNotesRoute) -> String {
+        guard route == .gemini || route == .customAPI else { return MeetingNotesRoute.disclosure(route, host: nil, local: true, retention: nil) }
+        var routes = appliedRoutes; routes.transcription = .local; routes.cleanup = route == .gemini ? .gemini : .customAPI
+        let disclosure = RoutePlan.make(routes, cleanupSendsText: true) { _ in APIKey("disclosure-only") }.stages.first?.disclosure
+        let local = disclosure?.staysOnThisMac ?? false
+        let warning = disclosure?.warning.map { " " + $0 } ?? ""
+        return MeetingNotesRoute.disclosure(route, host: disclosure?.destinationHost, local: local, retention: (disclosure?.retentionNote ?? "") + warning)
+    }
+
+    /// Writes notes for a finished meeting on the route chosen now (PRD 11.6).
+    func writeMeetingNotes(_ meeting: Meeting) async throws -> MeetingNotesWriter.Outcome {
+        let route = meetingNotesRoute ?? .none
+        let built = meetingNotesProvider(route)
+        guard let provider = built.provider else { throw NotesFailure.failed(built.refusal ?? "Notes could not be written.") }
+        let name = route == .appleIntelligence ? "Apple Intelligence (on-device, less accurate)" : provider.id.displayName
+        let structured = route == .appleIntelligence
+        return try await MeetingNotesWriter.write(meeting, route: route, routeName: name, structured: structured) { system, user in
+            do { return structured ? try await AppleSystemModel.notes(system: system, user: user) : try await provider.cleanup(CleanupMessages(system: system, user: user)) }
+            catch ProviderError.payloadTooLarge { throw NotesFailure.tooLarge }
+            catch let error as ProviderError { throw NotesFailure.failed(error.userMessage) }
+            catch { throw NotesFailure.failed("Notes could not be written.") }
+        }
+    }
+
     /// Shows or hides the live meeting panel; set by the app delegate.
     var meetingPanelChanged: (() -> Void)?
     /// Start from the Meetings page, Home or the menu bar. Meetings need the local model (Q2).

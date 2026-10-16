@@ -43,6 +43,13 @@ struct MeetingsPage: View {
     @State private var search = ""
     @State private var notesDraft = ""
     @State private var confirmDelete: Meeting?
+    @State private var tab = MeetingsPage.initialTab
+    /// The UI fixture opens other tabs (check_ui.swift --transcript).
+    static var initialTab = DetailTab.notes
+    /// A cited line to scroll to and highlight on the Transcript tab.
+    @State private var jump: Int?
+
+    enum DetailTab: String, CaseIterable { case notes = "Notes", transcript = "Transcript", mine = "My notes" }
 
     private var filtered: [Meeting] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -105,7 +112,13 @@ struct MeetingsPage: View {
         .alert("Delete this meeting?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } })) {
             Button("Delete", role: .destructive) { if let meeting = confirmDelete { recorder.delete(meeting.id); selectedID = nil } }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("The transcript and your notes are deleted. This cannot be undone.") }
+        } message: { Text("The transcript, its notes and your own notes are deleted. This cannot be undone.") }
+        .background(Color.clear.sheet(isPresented: Binding(get: { recorder.notesChoicePending != nil && recorder.consentPending == nil }, set: { if !$0 { recorder.notesChoicePending = nil } })) {
+            MeetingNotesChoiceSheet(controller: controller) { route in
+                controller.meetingNotesRoute = route
+                recorder.notesRouteChosen(route)
+            }
+        })
     }
 
     private var list: some View {
@@ -135,46 +148,182 @@ struct MeetingsPage: View {
     }
 
     private func detail(_ meeting: Meeting) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(meeting.title).font(.system(size: 22, weight: .bold)).tracking(-0.5).textSelection(.enabled)
-                mono("\(MeetingExport.clock(meeting.seconds)) · \(meeting.source.micOnly ? "My microphone only" : "Me and \(meeting.source.name)") · \(meeting.transcribedBy.map { "Transcribed by \($0)" } ?? "Transcribed on this Mac")", size: 11, color: Palette.ink70)
-                HStack(spacing: 12) {
-                    Button("Copy Transcript") { recorder.copyTranscript(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
-                    Button("Save Markdown…") { recorder.saveMarkdown(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
-                    Spacer()
-                    Button("Delete…") { confirmDelete = meeting }.buttonStyle(InkButtonStyle(kind: .plain))
-                }
-                if recorder.finishing.contains(meeting.id) { lede("Finishing the transcript…", color: Palette.accentDeep) }
-                else if let left = recorder.leftovers[meeting.id] {
-                    HStack {
-                        lede("\(left) \(left == 1 ? "part" : "parts") of this meeting \(left == 1 ? "was" : "were") not transcribed. The audio is kept for up to 24 hours.")
-                        Button("Finish Transcript") { recorder.finishLeftovers(meeting.id) }.buttonStyle(InkButtonStyle(kind: .filled))
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(meeting.title).font(.system(size: 22, weight: .bold)).tracking(-0.5).textSelection(.enabled)
+                    mono("\(MeetingExport.clock(meeting.seconds)) · \(meeting.source.micOnly ? "My microphone only" : "Me and \(meeting.source.name)") · \(meeting.transcribedBy.map { "Transcribed by \($0)" } ?? "Transcribed on this Mac")", size: 11, color: Palette.ink70)
+                    HStack(spacing: 12) {
+                        if meeting.notes?.isEmpty == false { Button("Copy Notes") { recorder.copyNotes(meeting) }.buttonStyle(InkButtonStyle(kind: .outline)) }
+                        Button("Copy Transcript") { recorder.copyTranscript(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
+                        Button("Save Markdown…") { recorder.saveMarkdown(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
+                        Spacer()
+                        Button("Delete…") { confirmDelete = meeting }.buttonStyle(InkButtonStyle(kind: .plain))
+                    }
+                    if recorder.finishing.contains(meeting.id) { lede("Finishing the transcript…", color: Palette.accentDeep) }
+                    else if let left = recorder.leftovers[meeting.id] {
+                        HStack {
+                            lede("\(left) \(left == 1 ? "part" : "parts") of this meeting \(left == 1 ? "was" : "were") not transcribed. The audio is kept for up to 24 hours.")
+                            Button("Finish Transcript") { recorder.finishLeftovers(meeting.id) }.buttonStyle(InkButtonStyle(kind: .filled))
+                        }
+                    }
+                    HStack(spacing: -1.5) {
+                        ForEach(DetailTab.allCases, id: \.self) { item in
+                            Button { tab = item } label: {
+                                Text(item.rawValue).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 14).frame(height: 32)
+                                    .foregroundStyle(tab == item ? Palette.paper : Palette.ink).background(tab == item ? Palette.ink : Color.clear)
+                                    .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).accessibilityAddTraits(tab == item ? .isSelected : [])
+                        }
+                    }
+                    .padding(.top, 4)
+                    switch tab {
+                    case .notes: notesTab(meeting)
+                    case .mine:
+                        TextEditor(text: $notesDraft).font(.system(size: 14)).scrollContentBackground(.hidden).frame(minHeight: 160)
+                            .padding(6).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
+                            .onChange(of: notesDraft) { if notesDraft != meeting.myNotes { recorder.setNotes(notesDraft, for: meeting.id) } }
+                            .onAppear { notesDraft = meeting.myNotes }
+                        lede("Your own notes go into the generated notes as yours. Editing them marks the notes out of date.", color: Palette.ink64)
+                    case .transcript:
+                        HStack {
+                            Spacer()
+                            if meeting.lines.contains(where: { $0.shown != nil }) {
+                                Toggle("Show hidden echo", isOn: $showEcho).toggleStyle(.checkbox).font(.system(size: 13))
+                            }
+                        }
+                        if meeting.lines.isEmpty { lede("No words were transcribed.") }
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(meeting.lines.filter { showEcho || !$0.isHidden }) { line in
+                                MeetingLineRow(line: line, showEcho: showEcho).id(line.id)
+                                    .padding(.vertical, 2).background(jump == line.id ? Palette.accent16 : Color.clear)
+                            }
+                        }
                     }
                 }
-                mono("My notes", size: 11, color: Palette.accentInk).padding(.top, 6)
-                TextEditor(text: $notesDraft).font(.system(size: 14)).scrollContentBackground(.hidden).frame(minHeight: 70)
-                    .padding(6).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
-                    .onChange(of: notesDraft) { if notesDraft != meeting.myNotes { recorder.setNotes(notesDraft, for: meeting.id) } }
-                    .onAppear { notesDraft = meeting.myNotes }
-                    .onChange(of: meeting.id) { notesDraft = meeting.myNotes }
-                HStack {
-                    mono("Transcript", size: 11, color: Palette.accentInk)
+                .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: jump) { if let jump { withAnimation(nil) { proxy.scrollTo(jump, anchor: .center) } } }
+            .onChange(of: meeting.id) { notesDraft = meeting.myNotes; jump = nil }
+        }
+    }
+
+    /// Notes, with each item's cited lines as links into the transcript (PRD 11.6, 11.9).
+    @ViewBuilder private func notesTab(_ meeting: Meeting) -> some View {
+        let route = controller.meetingNotesRoute
+        if recorder.notesWriting.contains(meeting.id) {
+            lede("Writing notes…", color: Palette.accentDeep)
+        } else if let problem = recorder.notesProblem[meeting.id] {
+            HStack(alignment: .firstTextBaseline) {
+                lede(problem, color: Palette.accentDeep)
+                Spacer()
+                Button("Try Again") { recorder.writeNotes(meeting.id) }.buttonStyle(InkButtonStyle(kind: .outline))
+            }
+        }
+        if let notes = meeting.notes {
+            if notes.outdated == true {
+                HStack(alignment: .firstTextBaseline) {
+                    lede("The transcript or your notes changed after these notes were written.", color: Palette.accentDeep)
                     Spacer()
-                    if meeting.lines.contains(where: { $0.shown != nil }) {
-                        Toggle("Show hidden echo", isOn: $showEcho).toggleStyle(.checkbox).font(.system(size: 13))
-                    }
                 }
-                .padding(.top, 6)
-                if meeting.lines.isEmpty { lede("No words were transcribed.") }
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(meeting.lines.filter { showEcho || !$0.isHidden }) { line in
-                        MeetingLineRow(line: line, showEcho: showEcho)
+            }
+            if notes.isEmpty { lede("Nothing in the transcript could be written up as a point, decision or action item.") }
+            if let summary = notes.summary { Text(summary).font(.system(size: 15)).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+            noteSection("Key points", notes.keyPoints, meeting: meeting)
+            noteSection("Decisions", notes.decisions, meeting: meeting)
+            noteSection("Action items", notes.actions, meeting: meeting, actions: true)
+            HStack(alignment: .firstTextBaseline) {
+                lede("Written by \(notes.route). Items cite the lines they rest on\(notes.dropped > 0 ? "; \(notes.dropped) the transcript did not support \(notes.dropped == 1 ? "was" : "were") left out" : "").", color: Palette.ink64)
+                Spacer()
+                if route != nil && route != MeetingNotesRoute.none {
+                    Button("Update Notes") { recorder.writeNotes(meeting.id) }.buttonStyle(InkButtonStyle(kind: .outline))
+                        .disabled(recorder.notesWriting.contains(meeting.id) || recorder.finishing.contains(meeting.id))
+                }
+            }
+        } else if !recorder.notesWriting.contains(meeting.id) {
+            if route == nil || route == MeetingNotesRoute.none {
+                HStack(alignment: .firstTextBaseline) {
+                    lede(route == nil ? "Choose how notes are written: a title, summary, key points, decisions and action items." : "Notes are off. This meeting keeps its transcript.")
+                    Spacer()
+                    Button("Choose Notes Route…") { recorder.notesChoicePending = meeting.id }.buttonStyle(InkButtonStyle(kind: .outline))
+                }
+            } else if recorder.notesProblem[meeting.id] == nil {
+                HStack(alignment: .firstTextBaseline) {
+                    lede("No notes yet.")
+                    Spacer()
+                    Button("Write Notes") { recorder.writeNotes(meeting.id) }.buttonStyle(InkButtonStyle(kind: .filled))
+                        .disabled(recorder.finishing.contains(meeting.id) || meeting.lines.allSatisfy(\.isHidden))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func noteSection(_ title: String, _ items: [NoteItem], meeting: Meeting, actions: Bool = false) -> some View {
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                mono(title, size: 11, color: Palette.accentInk).padding(.top, 6)
+                ForEach(items.indices, id: \.self) { index in
+                    let item = items[index]
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if actions {
+                            Toggle("", isOn: Binding(get: { item.done == true }, set: { _ in recorder.toggleAction(index, of: meeting.id) }))
+                                .toggleStyle(.checkbox).labelsHidden().accessibilityLabel(item.done == true ? "Done" : "Not done")
+                        } else { Text("•").font(.system(size: 14)).accessibilityHidden(true) }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(item.text).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                .strikethrough(item.done == true)
+                            HStack(spacing: 8) {
+                                if let owner = item.owner { mono(owner, size: 10, color: Palette.ink70) }
+                                if let due = item.due { mono("Due \(due)", size: 10, color: Palette.ink70) }
+                                ForEach(item.lines, id: \.self) { id in
+                                    if let line = meeting.lines.first(where: { $0.id == id }) {
+                                        Button { tab = .transcript; jump = id } label: { mono(MeetingExport.clock(line.start), size: 10, color: Palette.accentInk).underline() }
+                                            .buttonStyle(.plain).help("Show this line in the transcript")
+                                            .accessibilityLabel("Cited line at \(MeetingExport.clock(line.start))")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-            .padding(24).frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+/// The notes route options with the selected route's disclosure (Settings, and the first-Stop question).
+struct MeetingNotesRoutePicker: View {
+    @ObservedObject var controller: AppController
+    @Binding var selection: MeetingNotesRoute
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Meeting notes", selection: $selection) {
+                ForEach(MeetingNotesRoute.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.radioGroup).labelsHidden().font(.system(size: 14))
+            lede(controller.meetingNotesDisclosure(selection), color: Palette.ink)
+            if selection != MeetingNotesRoute.none, let refusal = controller.meetingNotesSetupProblem(selection) { lede(refusal, color: Palette.accentDeep) }
+        }
+    }
+}
+
+/// Asked once, at the first Stop, with None preselected (Q3).
+struct MeetingNotesChoiceSheet: View {
+    @ObservedObject var controller: AppController
+    let done: (MeetingNotesRoute) -> Void
+    @State private var route = MeetingNotesRoute.none
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Write notes for your meetings?").font(.system(size: 20, weight: .bold))
+            lede("After Stop, a model can write a title, a summary, key points, decisions and action items from the transcript. Each item cites the lines it rests on, and items the transcript does not support are left out. You can change this in Settings → Meetings.")
+            MeetingNotesRoutePicker(controller: controller, selection: $route)
+            HStack {
+                Spacer()
+                Button("Save") { done(route) }.buttonStyle(InkButtonStyle(kind: .filled)).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24).frame(width: 500).foregroundStyle(Palette.ink).background(Palette.paper)
     }
 }
 

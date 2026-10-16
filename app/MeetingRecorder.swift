@@ -30,11 +30,26 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     /// Why the call's audio could not be recorded; the view offers "Record only my microphone".
     @Published var systemAudioProblem: String?
     @Published var message: String?
+    /// Meetings whose notes are being written (W7b).
+    @Published private(set) var notesWriting: Set<String> = []
+    /// Why notes could not be written, per meeting; the transcript is kept either way.
+    @Published var notesProblem: [String: String] = [:]
+    /// A meeting waiting for the first-Stop notes route question (Q3).
+    @Published var notesChoicePending: String?
 
     /// Set by AppController: transcribe a 16 kHz WAV with the warm helper (text or nil).
     var transcribe: ((URL, @escaping (String?) -> Void) -> Void)?
     /// Set by AppController: the dictionary's spellings, applied to each line.
     var applyDictionary: (String) -> String = { $0 }
+    /// Set by AppController: the notes route in Settings, nil until the first Stop asks (Q3).
+    var notesRoute: () -> MeetingNotesRoute? = { nil }
+    /// Set by AppController: writes notes with the route chosen now. Throws `NotesFailure`.
+    var notesWriter: ((Meeting) async throws -> MeetingNotesWriter.Outcome)?
+    /// Called when the notes question waits after a Stop the user clicked, to open the Meetings page.
+    var onNotesChoiceNeeded: (() -> Void)?
+    /// Meetings stopped by the user, whose notes question may open the Meetings page; automatic stops
+    /// (cap, silence) only ask the next time the page is opened.
+    private var askOnDone: Set<String> = []
     /// Called whenever a meeting starts or stops, for the menu bar and the live panel.
     var onLiveChange: (() -> Void)?
     private(set) var store: MeetingStore?
@@ -160,7 +175,9 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     }
 
     /// Stops capture; the last chunks are still transcribed into the saved meeting.
-    func stop() {
+    func stop() { finish(manual: true) }
+
+    private func finish(manual: Bool) {
         guard var meeting = live else { return }
         capture?.stop(); tap?.stop(); capture = nil; tap = nil; folder = nil; livePump = nil
         meeting.seconds = max(meeting.seconds, ProcessInfo.processInfo.systemUptime - started)
@@ -168,10 +185,12 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         live = nil
         meetings.insert(meeting, at: 0)
         if persists { try? store?.save(meeting) }
+        if manual { askOnDone.insert(meeting.id) }
         if pumps[meeting.id]?.isIdle == false { finishing.insert(meeting.id) } else { pumps[meeting.id] = nil }
         askEnded = false; warning = nil; meLevel = 0; themLevel = 0
         meetingLog.notice("meeting-stopped seconds=\(Int(meeting.seconds))")
         onLiveChange?(); refreshLeftovers()
+        if pumps[meeting.id] == nil { transcriptDone(meeting.id) }
     }
 
     /// Discards the meeting being recorded: capture, queued chunks, audio and record.
@@ -190,6 +209,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         cancel()
         pumps.values.forEach { $0.stop() }; pumps = [:]
         meetings = []; finishing = []; leftovers = [:]; store = nil; audioRoot = nil
+        notesProblem = [:]; notesChoicePending = nil; askOnDone = []
     }
 
     // MARK: Lines
@@ -216,7 +236,11 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         // Content-free: how many words a chunk gave, so an all-silent stream shows up as words=0.
         meetingLog.notice("meeting-line stream=\(job.stream.rawValue, privacy: .public) words=\(chunk.text.split(separator: " ").count) fallback=\(chunk.localFallback, privacy: .public)")
         let spelled = applyDictionary(chunk.text)
-        update(id) { $0.insert(stream: job.stream, start: job.start, end: job.start + job.duration, text: spelled, localFallback: chunk.localFallback) }
+        update(id) {
+            $0.insert(stream: job.stream, start: job.start, end: job.start + job.duration, text: spelled, localFallback: chunk.localFallback)
+            // A leftover finished after notes were written: they no longer cover the whole transcript.
+            if $0.notes != nil, !spelled.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { $0.notes?.outdated = true }
+        }
         try? FileManager.default.removeItem(at: job.url)
         settle(id)
     }
@@ -224,6 +248,76 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     private func settle(_ id: String) {
         guard live?.id != id, pumps[id]?.isIdle != false else { return }
         pumps[id] = nil; finishing.remove(id); refreshLeftovers()
+        transcriptDone(id)
+    }
+
+    // MARK: Notes (W7b, PRD 11.6)
+
+    /// The transcript is complete: write notes on the chosen route, or ask for one the first time.
+    /// Notes already written are left alone (a finished leftover marks them out of date instead).
+    private func transcriptDone(_ id: String) {
+        let manual = askOnDone.remove(id) != nil
+        guard let meeting = meetings.first(where: { $0.id == id }), meeting.notes == nil,
+              meeting.lines.contains(where: { !$0.isHidden }) else { return }
+        switch notesRoute() {
+        case nil:
+            notesChoicePending = id
+            if manual { onNotesChoiceNeeded?() }
+        case .none?: break
+        default: writeNotes(id)
+        }
+    }
+
+    /// Writes (or rewrites: "Update Notes") a finished meeting's notes. Failure keeps the meeting and says why.
+    func writeNotes(_ id: String) {
+        guard let writer = notesWriter, !notesWriting.contains(id), !finishing.contains(id),
+              let meeting = meetings.first(where: { $0.id == id }) else { return }
+        guard meeting.lines.contains(where: { !$0.isHidden }) else { notesProblem[id] = "There is no transcript to write notes from."; return }
+        notesWriting.insert(id); notesProblem[id] = nil
+        Task { [weak self] in
+            let result: Result<MeetingNotesWriter.Outcome, Error>
+            do { result = .success(try await writer(meeting)) } catch { result = .failure(error) }
+            guard let self else { return }
+            self.notesWriting.remove(id)
+            switch result {
+            case .success(let outcome):
+                // Content-free: counts and reasons only.
+                let reasons = outcome.reasons.map { "\($0.key.rawValue)=\($0.value)" }.sorted().joined(separator: ",")
+                meetingLog.notice("meeting-notes points=\(outcome.notes.keyPoints.count) decisions=\(outcome.notes.decisions.count) actions=\(outcome.notes.actions.count) dropped=\(outcome.notes.dropped) reasons=\(reasons, privacy: .public)")
+                self.update(id) { meeting in
+                    var notes = outcome.notes
+                    // Keep ticked action items that were written again word for word.
+                    let ticked = Set((meeting.notes?.actions ?? []).filter { $0.done == true }.map(\.text))
+                    for i in notes.actions.indices where ticked.contains(notes.actions[i].text) { notes.actions[i].done = true }
+                    meeting.notes = notes
+                }
+            case .failure(let error):
+                let reason: String
+                switch error as? NotesFailure {
+                case .failed(let text)?: reason = text
+                case .tooLarge?: reason = "This meeting is too long for the notes route."
+                case nil: reason = "Notes could not be written."
+                }
+                meetingLog.notice("meeting-notes-failed")
+                self.notesProblem[id] = reason + " The transcript is saved."
+            }
+        }
+    }
+
+    /// The first-Stop question was answered (or the route changed in Settings).
+    func notesRouteChosen(_ route: MeetingNotesRoute) {
+        guard let id = notesChoicePending else { return }
+        notesChoicePending = nil
+        if route != .none { writeNotes(id) }
+    }
+
+    /// Ticks or unticks an action item's checkbox.
+    func toggleAction(_ index: Int, of id: String) {
+        update(id) { meeting in
+            guard var notes = meeting.notes, notes.actions.indices.contains(index) else { return }
+            notes.actions[index].done = !(notes.actions[index].done ?? false)
+            meeting.notes = notes
+        }
     }
 
     /// Applies a change to the live meeting or a finished one, and saves it.
@@ -244,7 +338,14 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         try? store?.save(meeting)
     }
 
-    func setNotes(_ text: String, for id: String) { update(id) { $0.myNotes = text } }
+    /// The user's own notes. Changing them marks written notes out of date (PRD 11.6).
+    func setNotes(_ text: String, for id: String) {
+        update(id) { meeting in
+            guard meeting.myNotes != text else { return }
+            meeting.myNotes = text
+            if meeting.notes != nil { meeting.notes?.outdated = true }
+        }
+    }
 
     /// A chunk file could not be written: mark the gap and rebuild the stream with a new chunker.
     private func streamFailed(_ stream: MeetingStream) {
@@ -326,8 +427,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
             }
         }
         switch MeetingLimits.action(elapsed: elapsed, silentFor: now - lastVoice) {
-        case .stopCap: message = "Meeting notes stopped at the 3-hour limit."; stop()
-        case .stopSilent: message = "Meeting notes stopped after 10 minutes of silence."; stop()
+        case .stopCap: message = "Meeting notes stopped at the 3-hour limit."; finish(manual: false)
+        case .stopSilent: message = "Meeting notes stopped after 10 minutes of silence."; finish(manual: false)
         case .warnCap: warning = "Meeting notes stop at 3 hours, in \(max(1, Int((MeetingLimits.cap - elapsed) / 60))) min."
         case .askEnded: askEnded = true
         case .none: break
@@ -361,7 +462,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     }
 
     func delete(_ id: String) {
-        pumps.removeValue(forKey: id)?.stop(); finishing.remove(id)
+        pumps.removeValue(forKey: id)?.stop(); finishing.remove(id); notesProblem[id] = nil
+        if notesChoicePending == id { notesChoicePending = nil }
         if persists, let store, FileManager.default.fileExists(atPath: store.directory.appendingPathComponent(id + ".json").path) {
             do { try store.delete(id) } catch { message = "Could not delete this meeting."; return }
         }
@@ -398,7 +500,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
 
     /// Murmur is quitting: never keep recording (PRD 11.3). Untranscribed chunks stay for 24 hours.
     func shutdown() {
-        if live != nil { stop() }
+        if live != nil { finish(manual: false) }
         pumps.values.forEach { $0.stop() }
     }
 
@@ -421,6 +523,9 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try Data(MeetingExport.markdown(meeting).utf8).write(to: url, options: .atomic) }
         catch { message = "Could not save the Markdown file." }
+    }
+    func copyNotes(_ meeting: Meeting) {
+        NSPasteboard.general.clearContents(); NSPasteboard.general.setString(MeetingExport.notes(meeting), forType: .string)
     }
     func copyNotice() { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(MeetingConsent.notice, forType: .string) }
 
