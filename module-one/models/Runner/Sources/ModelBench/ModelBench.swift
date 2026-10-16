@@ -1,11 +1,12 @@
 import AppKit
 import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 
 // Explicit local directory: no mutable-main download or implicit network access.
 @main struct ModelBench {
-    static let usage = "Usage: ModelBench MODEL_DIRECTORY (AUDIO_FILE [--single] | --serve | --stream SAMPLE_RATE) [--ctc CTC_DIRECTORY --vocabulary VOCABULARY_JSON]"
+    static let usage = "Usage: ModelBench MODEL_DIRECTORY (AUDIO_FILE [--single] | --serve | --stream SAMPLE_RATE | --diarize AUDIO_FILE THRESHOLD) [--ctc CTC_DIRECTORY --vocabulary VOCABULARY_JSON]"
 
     static func main() async throws {
         var arguments = Array(CommandLine.arguments.dropFirst())
@@ -21,6 +22,9 @@ import Foundation
         }
         if arguments.count == 3 && arguments[1] == "--stream", let rate = Double(arguments[2]), rate >= 8_000, rate <= 192_000, ctc == nil {
             try await stream(models: URL(fileURLWithPath: arguments[0]), sampleRate: rate); return
+        }
+        if arguments.count == 4 && arguments[1] == "--diarize", let threshold = Double(arguments[3]), threshold > 0, threshold < 2, ctc == nil {
+            try await diarize(models: URL(fileURLWithPath: arguments[0]), audio: arguments[2], threshold: threshold); return
         }
         if arguments.count == 2 && arguments[1] == "--serve" {
             try await serve(models: URL(fileURLWithPath: arguments[0]), ctc: ctc, vocabulary: vocabulary); return
@@ -87,6 +91,42 @@ import Foundation
                 try emit(["error": "transcription failed"])
             }
         }
+    }
+
+    /// Speaker separation (W7d, PRD 11.8): FluidAudio's offline pipeline over one 16 kHz mono file,
+    /// loaded straight from the pinned, already verified folder. Not `prepareModels` or
+    /// `OfflineDiarizerModels.load`: those go through the model hub, which downloads when a load
+    /// fails. Prints {"segments":[{"speaker","start","end"}]} only; embeddings are never output
+    /// and are gone when the process exits (PRD 11.8, "Never kept").
+    static func diarize(models: URL, audio: String, threshold: Double) async throws {
+        let start = Date()
+        let all = MLModelConfiguration(); all.computeUnits = .all
+        // FluidAudio runs FBank on the CPU, where it is fastest.
+        let cpu = MLModelConfiguration(); cpu.computeUnits = .cpuOnly
+        func model(_ name: String, _ configuration: MLModelConfiguration) throws -> MLModel {
+            try MLModel(contentsOf: models.appendingPathComponent(name, isDirectory: true), configuration: configuration)
+        }
+        let loaded = OfflineDiarizerModels(segmentationModel: try model("Segmentation.mlmodelc", all), fbankModel: try model("FBank.mlmodelc", cpu),
+                                           embeddingModel: try model("Embedding.mlmodelc", all), pldaRhoModel: try model("PldaRho.mlmodelc", all),
+                                           pldaPsi: try pldaPsi(models.appendingPathComponent("plda-parameters.json")), compilationDuration: 0)
+        var config = OfflineDiarizerConfig.default
+        config.clustering.threshold = threshold
+        let manager = OfflineDiarizerManager(config: config)
+        manager.initialize(models: loaded)
+        let ready = Date()
+        // Disk-backed: a 2-hour stream is not held in memory as floats.
+        let result = try await manager.process(URL(fileURLWithPath: audio))
+        try emit(["segments": result.segments.map { ["speaker": $0.speakerId, "start": Double($0.startTimeSeconds), "end": Double($0.endTimeSeconds)] },
+                  "load_seconds": ready.timeIntervalSince(start), "seconds": Date().timeIntervalSince(ready), "threshold": threshold])
+    }
+
+    /// The PLDA psi tensor: base64 little-endian Float32 under tensors.psi.data_base64.
+    static func pldaPsi(_ url: URL) throws -> [Double] {
+        guard let root = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
+              let psi = (root["tensors"] as? [String: Any])?["psi"] as? [String: Any], let base64 = psi["data_base64"] as? String,
+              let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters), data.count >= 4, data.count % 4 == 0
+        else { throw NSError(domain: "PLDA parameters are unreadable", code: 1) }
+        return floats(data).map(Double.init)
     }
 
     /// Live words (gap #13), display only: loads the streaming encoder folder, prints {"ready":true},

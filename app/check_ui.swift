@@ -157,6 +157,13 @@ import SwiftUI
                     notes.outdated = args.contains("--outdated") ? true : nil
                     call.notes = notes
                 }
+                // --speakers: the call after speaker separation (W7d), one speaker named.
+                if args.contains("--speakers") {
+                    let them = call.lines.filter { $0.stream == .them }.map(\.id)
+                    call.applySpeakers([them[0]: 1, them[1]: 2], split: [:])
+                    call.renameSpeaker(2, to: "Dana")
+                    if call.notes != nil { call.notes?.outdated = nil }
+                }
                 var solo = Meeting(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-86400 * 2), source: .microphoneOnly)
                 solo.insert(stream: .me, start: 0, end: 12, text: "Synthetic voice memo recorded with only the microphone.")
                 solo.finished = true

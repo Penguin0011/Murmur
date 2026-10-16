@@ -622,6 +622,7 @@ final class PreStart: @unchecked Sendable {
         } catch { store = nil; records = nil; retry = nil; processing = nil; phase = "Error"; message = "Private storage is unavailable. Murmur cannot start." }
         modelStatus = downloader?.status() ?? .notDownloaded
         dictionaryModelStatus = dictionaryDownloader?.status() ?? .notDownloaded
+        refreshSpeakerModel()
         liveWordsStatus = liveWordsDownloader?.status() ?? .notDownloaded
         warm.onDictionaryStatus = { [weak self] failed in DispatchQueue.main.async { self?.dictionarySupportFailed = failed } }
         if !preview {
@@ -670,6 +671,7 @@ final class PreStart: @unchecked Sendable {
                 if self.modelDownloadInFlight, let status = self.downloader?.status(), status != self.modelStatus { self.modelStatus = status }
                 if self.dictionaryDownloadInFlight, let status = self.dictionaryDownloader?.status(), status != self.dictionaryModelStatus { self.dictionaryModelStatus = status }
                 if self.liveWordsDownloadInFlight, let status = self.liveWordsDownloader?.status(), status != self.liveWordsStatus { self.liveWordsStatus = status }
+                if self.speakerDownloadInFlight, let status = self.speakerDownloader?.status(), status != self.speakerModelStatus { self.speakerModelStatus = status }
                 if self.sessionAvailable && self.session.state == .listening, let capture = self.capture,
                    // A device change stops the engine; it restarts on the current device (gap #16) and only
                    // an engine that cannot restart counts as an interruption.
@@ -1953,6 +1955,25 @@ final class PreStart: @unchecked Sendable {
                 }
             }
         }
+        recorder.speakerSeparation = { [weak self] in self?.meetingSpeakerSeparation == true && self?.speakerModelStatus == .ready }
+        // One run of the pinned diarizer per meeting, after the transcript; verified first, no network.
+        let speakers = SpeakerModelFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser)
+        recorder.diarize = { url, done in
+            DispatchQueue.global(qos: .utility).async {
+                guard (try? ModelVerificationCache.shared.verify(speakers, manifest: manifest, repository: SpeakerModelFacts.repository)) != nil else { done(nil); return }
+                let process = Process(), out = Pipe()
+                process.executableURL = helper
+                process.arguments = [speakers.path, "--diarize", url.path, String(SpeakerSeparation.threshold)]
+                process.standardOutput = out; process.standardError = FileHandle.nullDevice
+                guard (try? process.run()) != nil else { done(nil); return }
+                let data = out.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                // The answer is the last line; anything else the helper prints is ignored.
+                let last = String(decoding: data, as: UTF8.self).split(separator: "\n").last { $0.hasPrefix("{") }
+                done(process.terminationStatus == 0 ? last.flatMap { SpeakerSeparation.parse(Data($0.utf8)) } : nil)
+            }
+        }
+        recorder.resumeSeparations()
     }
     /// Settings → Meetings: where meeting audio is transcribed (decision of October 15, 2026). Applies
     /// to meetings started after it changes; a meeting keeps the route it started with.
@@ -2025,7 +2046,7 @@ final class PreStart: @unchecked Sendable {
         guard let provider = built.provider else { throw NotesFailure.failed(built.refusal ?? "Notes could not be written.") }
         let name = route == .appleIntelligence ? "Apple Intelligence (on-device, less accurate)" : provider.id.displayName
         let structured = route == .appleIntelligence
-        return try await MeetingNotesWriter.write(meeting, route: route, routeName: name, structured: structured) { system, user in
+        return try await MeetingNotesWriter.write(meeting, route: route, routeName: name, structured: structured, speaker: meeting.label) { system, user in
             do { return structured ? try await AppleSystemModel.notes(system: system, user: user) : try await provider.cleanup(CleanupMessages(system: system, user: user)) }
             catch ProviderError.payloadTooLarge { throw NotesFailure.tooLarge }
             catch let error as ProviderError { throw NotesFailure.failed(error.userMessage) }
@@ -2034,6 +2055,52 @@ final class PreStart: @unchecked Sendable {
     }
 
     // MARK: Call detection (W7c, PRD 11.7)
+
+    // MARK: Speaker separation (W7d, PRD 11.8)
+
+    /// Settings → Meetings → Separate speakers. Off by default; it needs the optional download.
+    @Published var meetingSpeakerSeparation = UserDefaults.standard.bool(forKey: SpeakerSeparation.key) {
+        didSet { UserDefaults.standard.set(meetingSpeakerSeparation, forKey: SpeakerSeparation.key) }
+    }
+    @Published var speakerModelStatus: ModelStatus = .notDownloaded
+    @Published var speakerModelMessage = ""
+    private var speakerDownloadInFlight = false
+    private lazy var speakerDownloader: ModelDownloader? = {
+        guard let pins = Bundle.main.url(forResource: "artifact-pins", withExtension: "json"),
+              let manifest = try? ModelManifest(contentsOf: pins, repository: SpeakerModelFacts.repository) else { return nil }
+        return ModelDownloader(manifest: manifest, target: SpeakerModelFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser))
+    }()
+    var speakerModelRow: ModelRowPresentation { ModelRowPresentation.make(speakerDownloader == nil ? nil : speakerModelStatus) }
+    var speakerModelSummary: String { speakerDownloader.map { SpeakerModelFacts.summary(downloadSize: $0.downloadSize) } ?? "" }
+    func refreshSpeakerModel() { if !speakerDownloadInFlight { speakerModelStatus = preview ? .notDownloaded : speakerDownloader?.status() ?? .notDownloaded } }
+
+    func downloadSpeakerModel() {
+        guard let speakerDownloader else { speakerModelMessage = ModelDownloadError.invalidManifest.userMessage; return }
+        if let refusal = ModelGate.downloadRefusal(isBusy: isBusy, preview: preview, downloading: speakerDownloadInFlight) { speakerModelMessage = refusal; return }
+        let text = SpeakerModelFacts.confirmation(downloadSize: speakerDownloader.downloadSize, folder: speakerDownloader.target)
+        let alert = NSAlert(); alert.messageText = text.title; alert.informativeText = text.body
+        alert.addButton(withTitle: "Download"); alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        speakerDownloadInFlight = true; speakerModelMessage = ""
+        speakerModelStatus = .downloading(ModelDownloadProgress(bytesDone: 0, totalBytes: speakerDownloader.downloadSize))
+        speakerDownloader.start { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.speakerDownloadInFlight = false
+                self.speakerModelStatus = speakerDownloader.status()
+                self.speakerModelMessage = SpeakerModelFacts.completionMessage(result)
+                if self.speakerModelStatus == .ready { self.meetingSpeakerSeparation = true }
+            }
+        }
+    }
+    func cancelSpeakerModelDownload() { speakerDownloader?.cancel() }
+    func removeSpeakerModel() {
+        guard let speakerDownloader, !speakerDownloadInFlight else { return }
+        do { try speakerDownloader.remove(); speakerModelMessage = "Speaker separation was removed." }
+        catch { speakerModelMessage = (error as? ModelDownloadError)?.userMessage ?? ModelDownloadError.fileSystem.userMessage }
+        meetingSpeakerSeparation = false
+        speakerModelStatus = speakerDownloader.status()
+    }
 
     /// Settings → Meetings → "Offer to take notes when a call starts". On by default (Q6).
     @Published var meetingDetection = CallDetector.enabled(.standard) {

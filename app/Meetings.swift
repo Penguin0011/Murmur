@@ -19,6 +19,8 @@ struct MeetingLine: Codable, Equatable, Identifiable {
     var shown: String? = nil
     /// True when the meeting's cloud route failed for this chunk and this Mac transcribed it.
     var localFallback: Bool? = nil
+    /// Them lines after speaker separation (W7d): 1, 2… in order of first speech.
+    var speaker: Int? = nil
 
     var isHidden: Bool { shown == "" }
     /// What the transcript, exports and (later) notes use.
@@ -53,6 +55,22 @@ struct Meeting: Codable, Identifiable, Equatable {
     var transcribedBy: String? = nil
     /// Written after Stop by the notes route (W7b, PRD 11.6). Optional, so W7a records still decode.
     var notes: MeetingNotes? = nil
+    /// Speaker separation (W7d, PRD 11.8), fixed when the meeting starts; nil means off.
+    var separation: SeparationState? = nil
+    /// Names the user gave speakers in this meeting, by number ("2": "Dana"). Expire with it.
+    var speakerNames: [String: String]? = nil
+
+    /// "Me", or a Them line's speaker name, "Speaker 2", or "Them" before separation.
+    func label(_ line: MeetingLine) -> String {
+        guard line.stream == .them, let speaker = line.speaker else { return MeetingExport.label(line.stream) }
+        return speakerNames?[String(speaker)] ?? "Speaker \(speaker)"
+    }
+    /// Speaker numbers in order of first speech.
+    var speakers: [Int] {
+        var seen: [Int] = []
+        for line in lines { if let s = line.speaker, !seen.contains(s) { seen.append(s) } }
+        return seen
+    }
 
     /// The notes' title once they have one, otherwise the source and date.
     var title: String { notes?.title ?? defaultTitle }
@@ -219,6 +237,14 @@ enum MeetingCap {
 /// transcription leaves is retry audio: offered as "Finish transcript", gone after 24 hours.
 enum MeetingAudio {
     static func folder(_ root: URL, meeting id: String) -> URL { root.appendingPathComponent(id, isDirectory: true) }
+    /// Them chunks kept until speaker separation finishes (W7d), apart from untranscribed leftovers.
+    static let keptName = "kept-them"
+    static func kept(_ root: URL, meeting id: String) -> URL { folder(root, meeting: id).appendingPathComponent(keptName, isDirectory: true) }
+    /// Kept Them chunks, oldest first.
+    static func keptChunks(_ root: URL, meeting id: String) -> [(url: URL, start: Double)] {
+        let urls = (try? FileManager.default.contentsOfDirectory(at: kept(root, meeting: id), includingPropertiesForKeys: nil)) ?? []
+        return urls.compactMap { url in parse(url).flatMap { $0.stream == .them ? (url, $0.start) : nil } }.sorted { $0.start < $1.start }
+    }
     static func name(_ stream: MeetingStream, start: Double) -> String { "\(stream.rawValue)-\(Int((start * 1000).rounded())).wav" }
     static func parse(_ url: URL) -> (stream: MeetingStream, start: Double)? {
         guard url.pathExtension == "wav" else { return nil }
@@ -242,6 +268,15 @@ enum MeetingAudio {
             guard keep.contains(folder.lastPathComponent) else { try? fm.removeItem(at: folder); continue }
             for file in (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.creationDateKey])) ?? [] {
                 let created = (try? file.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                // Them audio kept for speaker separation: the same 24 hours, file by file (Q4).
+                if file.lastPathComponent == keptName {
+                    for kept in (try? fm.contentsOfDirectory(at: file, includingPropertiesForKeys: [.creationDateKey])) ?? [] {
+                        let made = (try? kept.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                        if now.timeIntervalSince(made) >= RetryWindow.lifetime || made > now { try? fm.removeItem(at: kept) }
+                    }
+                    if ((try? fm.contentsOfDirectory(atPath: file.path)) ?? []).isEmpty { try? fm.removeItem(at: file) }
+                    continue
+                }
                 if parse(file) == nil || now.timeIntervalSince(created) >= RetryWindow.lifetime || created > now { try? fm.removeItem(at: file) }
             }
             if ((try? fm.contentsOfDirectory(atPath: folder.path)) ?? []).isEmpty { try? fm.removeItem(at: folder) }
@@ -456,19 +491,20 @@ enum MeetingExport {
     static func label(_ stream: MeetingStream) -> String { stream == .me ? "Me" : "Them" }
     /// Visible lines only: hidden echo is left out of exports.
     static func transcript(_ meeting: Meeting) -> String {
-        meeting.lines.filter { !$0.isHidden }.map { "[\(clock($0.start))] \(label($0.stream)): \($0.visibleText)" }.joined(separator: "\n")
+        meeting.lines.filter { !$0.isHidden }.map { "[\(clock($0.start))] \(meeting.label($0)): \($0.visibleText)" }.joined(separator: "\n")
     }
     static func markdown(_ meeting: Meeting) -> String {
         var out = "# \(escape(meeting.title))\n\n"
         out += "- Date: \(ISO8601DateFormatter().string(from: meeting.recordedAt))\n- Length: \(clock(meeting.seconds))\n"
         out += "- Audio: \(meeting.source.micOnly ? "my microphone only" : "my microphone and \(meeting.source.name)")\n"
         out += "- Transcribed: \(meeting.transcribedBy.map { "by \($0)" } ?? "on this Mac")\n"
+        if !meeting.speakers.isEmpty { out += "- Speakers: Me, " + meeting.speakers.map { meeting.speakerNames?[String($0)] ?? "Speaker \($0)" }.map(escape).joined(separator: ", ") + "\n" }
         if let notes = meeting.notes, !notes.isEmpty { out += "\n## Notes\n\n" + self.notes(meeting, markdown: true) + "\n" }
         let mine = meeting.myNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         if !mine.isEmpty { out += "\n## My notes\n\n\(mine)\n" }
         out += "\n## Transcript\n\n"
         for line in meeting.lines where !line.isHidden {
-            out += "**\(label(line.stream))** [\(clock(line.start))]: \(escape(line.visibleText))\n\n"
+            out += "**\(escape(meeting.label(line)))** [\(clock(line.start))]: \(escape(line.visibleText))\n\n"
         }
         return out
     }
@@ -617,4 +653,122 @@ struct CallDetector {
 
     /// Not now, Never or Take Notes: the offer goes; this mic session is not offered again.
     mutating func dismiss() { offer = nil }
+}
+
+// MARK: - Speaker separation (W7d, PRD 11.8, Q4)
+
+enum SeparationState: String, Codable { case pending, done, failed, expired }
+
+enum SpeakerSeparation {
+    static let key = "meetingSpeakerSeparation"
+    /// FluidAudio's clustering threshold, set explicitly (PRD 11.8): about 0.775 in today's units
+    /// matches the `--threshold 0.7` run behind its 10.62% AMI result; FluidAudio's default is 0.6.
+    static let threshold = 0.775
+    /// A Them line is split only where another speaker holds at least this long inside it.
+    static let minimumPiece = 1.5
+
+    struct Segment: Equatable { let speaker: Int; let start: Double; let end: Double }
+
+    /// The helper's {"segments":[{"speaker","start","end"}]}, speakers renumbered 1, 2… in order of
+    /// first speech. Nil when the answer is not that shape.
+    static func parse(_ data: Data) -> [Segment]? {
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let raw = object["segments"] as? [[String: Any]] else { return nil }
+        let rows = raw.compactMap { row -> (String, Double, Double)? in
+            guard let id = row["speaker"].map({ "\($0)" }), let start = (row["start"] as? NSNumber)?.doubleValue, let end = (row["end"] as? NSNumber)?.doubleValue, end > start else { return nil }
+            return (id, start, end)
+        }.sorted { $0.1 < $1.1 }
+        var numbers: [String: Int] = [:]
+        return rows.map { row in
+            let n = numbers[row.0] ?? (numbers.count + 1); numbers[row.0] = n
+            return Segment(speaker: n, start: row.1, end: row.2)
+        }
+    }
+
+    /// Each Them line's one speaker, or the pieces it must be re-transcribed in. Lines nobody
+    /// overlaps keep no speaker.
+    static func plan(_ lines: [MeetingLine], segments: [Segment]) -> (speakers: [Int: Int], splits: [Int: [Segment]]) {
+        var speakers: [Int: Int] = [:], splits: [Int: [Segment]] = [:]
+        for line in lines where line.stream == .them {
+            let found = pieces(start: line.start, end: line.end, segments: segments)
+            if found.count == 1 { speakers[line.id] = found[0].speaker } else if found.count > 1 { splits[line.id] = found }
+        }
+        return (speakers, splits)
+    }
+
+    /// Who speaks in `start..<end`: consecutive pieces, each at least `minimumPiece` long (shorter
+    /// ones join their neighbour), cut at the middle of the gap between speakers and stretched to
+    /// the line's ends. One piece means the line is not split. Empty when nobody overlaps it.
+    static func pieces(start: Double, end: Double, segments: [Segment]) -> [Segment] {
+        var runs: [Segment] = []
+        for segment in segments where segment.end > start && segment.start < end {
+            let clipped = Segment(speaker: segment.speaker, start: max(start, segment.start), end: min(end, segment.end))
+            if let last = runs.last, last.speaker == clipped.speaker { runs[runs.count - 1] = Segment(speaker: last.speaker, start: last.start, end: max(last.end, clipped.end)) }
+            else { runs.append(clipped) }
+        }
+        // Fold short runs into the longer neighbour until every run is long enough (or one is left).
+        while runs.count > 1, let shortest = runs.indices.min(by: { runs[$0].end - runs[$0].start < runs[$1].end - runs[$1].start }),
+              runs[shortest].end - runs[shortest].start < minimumPiece {
+            let left = shortest > 0 ? shortest - 1 : nil, right = shortest + 1 < runs.count ? shortest + 1 : nil
+            let into = [left, right].compactMap { $0 }.max { runs[$0].end - runs[$0].start < runs[$1].end - runs[$1].start }!
+            let merged = Segment(speaker: runs[into].speaker, start: min(runs[into].start, runs[shortest].start), end: max(runs[into].end, runs[shortest].end))
+            runs[into] = merged; runs.remove(at: shortest)
+            // Neighbours that now share a speaker become one run.
+            var i = 1
+            while i < runs.count { if runs[i].speaker == runs[i - 1].speaker { runs[i - 1] = Segment(speaker: runs[i].speaker, start: runs[i - 1].start, end: runs[i].end); runs.remove(at: i) } else { i += 1 } }
+        }
+        guard !runs.isEmpty else { return [] }
+        var out: [Segment] = []
+        for (i, run) in runs.enumerated() {
+            let from = i == 0 ? start : (runs[i - 1].end + run.start) / 2
+            let to = i == runs.count - 1 ? end : (run.end + runs[i + 1].start) / 2
+            out.append(Segment(speaker: run.speaker, start: from, end: to))
+        }
+        return out
+    }
+}
+
+extension Meeting {
+    /// Applies a separation result: each Them line takes its one speaker, or is replaced by
+    /// re-transcribed pieces (`split[lineID]`, text per piece). Echo is re-run, since Me's hidden
+    /// text depends on Them's. Written notes are marked out of date.
+    mutating func applySpeakers(_ speakers: [Int: Int], split: [Int: [(speaker: Int, start: Double, end: Double, text: String)]]) {
+        var next = (lines.map(\.id).max() ?? 0) + 1
+        var out: [MeetingLine] = []
+        for line in lines {
+            guard line.stream == .them else { out.append(line); continue }
+            if let pieces = split[line.id] {
+                for piece in pieces where !piece.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    var made = MeetingLine(id: next, stream: .them, start: piece.start, end: piece.end, text: piece.text.trimmingCharacters(in: .whitespacesAndNewlines))
+                    made.speaker = piece.speaker; made.localFallback = line.localFallback
+                    out.append(made); next += 1
+                }
+            } else {
+                var line = line; line.speaker = speakers[line.id] ?? line.speaker; out.append(line)
+            }
+        }
+        lines = out.sorted { $0.start < $1.start || ($0.start == $1.start && $0.stream == .them) }
+        MeetingEcho.apply(&lines, near: -.infinity, to: .infinity)
+        separation = .done
+        if notes != nil { notes?.outdated = true }
+    }
+
+    /// Renaming, merging and reassigning (PRD 11.8) mark written notes out of date (11.6).
+    mutating func renameSpeaker(_ speaker: Int, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var names = speakerNames ?? [:]
+        names[String(speaker)] = trimmed.isEmpty ? nil : trimmed
+        speakerNames = names.isEmpty ? nil : names
+        if notes != nil { notes?.outdated = true }
+    }
+    mutating func mergeSpeaker(_ speaker: Int, into other: Int) {
+        guard speaker != other else { return }
+        for i in lines.indices where lines[i].speaker == speaker { lines[i].speaker = other }
+        speakerNames?[String(speaker)] = nil
+        if notes != nil { notes?.outdated = true }
+    }
+    mutating func reassign(line id: Int, to speaker: Int) {
+        guard let i = lines.firstIndex(where: { $0.id == id && $0.stream == .them }) else { return }
+        lines[i].speaker = speaker
+        if notes != nil { notes?.outdated = true }
+    }
 }

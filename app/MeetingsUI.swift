@@ -63,7 +63,9 @@ struct MeetingsPage: View {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Meetings").font(.system(size: 28, weight: .bold)).tracking(-0.8)
-                    lede("Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Audio is deleted as soon as it is transcribed.")
+                    lede(controller.meetingSpeakerSeparation
+                         ? "Your microphone as Me and the call’s audio as Them. Your audio is deleted as soon as it is transcribed; the call’s is kept until speakers are separated, at most 24 hours."
+                         : "Your microphone as Me and the call’s audio as Them. Audio is deleted as soon as it is transcribed.")
                 }
                 Spacer()
                 if let live = recorder.live {
@@ -193,10 +195,21 @@ struct MeetingsPage: View {
                                 Toggle("Show hidden echo", isOn: $showEcho).toggleStyle(.checkbox).font(.system(size: 13))
                             }
                         }
+                        if recorder.separating.contains(meeting.id) { lede("Separating speakers…", color: Palette.accentDeep) }
+                        else if meeting.separation == .failed { lede("Speakers could not be separated. The transcript is kept.", color: Palette.accentDeep) }
+                        else if meeting.separation == .expired { lede("Speakers were not separated: the call’s audio was gone (it is kept for 24 hours at most).", color: Palette.ink64) }
+                        if !meeting.speakers.isEmpty { speakersPanel(meeting) }
                         if meeting.lines.isEmpty { lede("No words were transcribed.") }
                         LazyVStack(alignment: .leading, spacing: 8) {
                             ForEach(meeting.lines.filter { showEcho || !$0.isHidden }) { line in
-                                MeetingLineRow(line: line, showEcho: showEcho).id(line.id)
+                                MeetingLineRow(line: line, showEcho: showEcho, label: meeting.label(line)).id(line.id)
+                                    .contextMenu {
+                                        if line.stream == .them && !meeting.speakers.isEmpty {
+                                            ForEach(meeting.speakers, id: \.self) { speaker in
+                                                Button("Said by \(meeting.speakerNames?[String(speaker)] ?? "Speaker \(speaker)")") { recorder.reassign(line: line.id, to: speaker, in: meeting.id) }
+                                            }
+                                        }
+                                    }
                                     .padding(.vertical, 2).background(jump == line.id ? Palette.accent16 : Color.clear)
                             }
                         }
@@ -209,10 +222,39 @@ struct MeetingsPage: View {
         }
     }
 
+    /// Rename or merge this meeting's speakers (PRD 11.8). Names stay with the meeting.
+    private func speakersPanel(_ meeting: Meeting) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            mono("Speakers", size: 11, color: Palette.accentInk)
+            ForEach(meeting.speakers, id: \.self) { speaker in
+                HStack(spacing: 8) {
+                    mono("Speaker \(speaker)", size: 11, color: Palette.ink70).frame(width: 90, alignment: .leading)
+                    TextField("Name", text: Binding(get: { meeting.speakerNames?[String(speaker)] ?? "" },
+                                                    set: { recorder.renameSpeaker(speaker, to: $0, in: meeting.id) }))
+                        .textFieldStyle(.plain).font(.system(size: 14)).padding(.horizontal, 6).frame(height: 28)
+                        .overlay(Rectangle().strokeBorder(Palette.ink20, lineWidth: 1)).frame(maxWidth: 220)
+                        .accessibilityLabel("Name for Speaker \(speaker)")
+                    if meeting.speakers.count > 1 {
+                        Menu("Merge into…") {
+                            ForEach(meeting.speakers.filter { $0 != speaker }, id: \.self) { other in
+                                Button(meeting.speakerNames?[String(other)] ?? "Speaker \(other)") { recorder.mergeSpeaker(speaker, into: other, in: meeting.id) }
+                            }
+                        }
+                        .menuStyle(.button).fixedSize()
+                    }
+                }
+            }
+            lede("Right-click a line to say who said it. Voices are not remembered between meetings.", color: Palette.ink64)
+        }
+        .padding(.vertical, 4)
+    }
+
     /// Notes, with each item's cited lines as links into the transcript (PRD 11.6, 11.9).
     @ViewBuilder private func notesTab(_ meeting: Meeting) -> some View {
         let route = controller.meetingNotesRoute
-        if recorder.notesWriting.contains(meeting.id) {
+        if recorder.separating.contains(meeting.id) {
+            lede("Separating speakers, then writing notes…", color: Palette.accentDeep)
+        } else if recorder.notesWriting.contains(meeting.id) {
             lede("Writing notes…", color: Palette.accentDeep)
         } else if let problem = recorder.notesProblem[meeting.id] {
             HStack(alignment: .firstTextBaseline) {
@@ -332,10 +374,12 @@ private struct ConsentItem: Identifiable { let source: MeetingSource; var id: St
 struct MeetingLineRow: View {
     let line: MeetingLine
     var showEcho = false
+    /// "Me", "Them", "Speaker 2" or a name (W7d).
+    var label: String? = nil
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             mono(MeetingExport.clock(line.start), size: 11, color: Palette.ink64).frame(width: 56, alignment: .leading)
-            mono(MeetingExport.label(line.stream), size: 11, color: line.stream == .me ? Palette.accentInk : Palette.ink).frame(width: 44, alignment: .leading)
+            mono(label ?? MeetingExport.label(line.stream), size: 11, color: line.stream == .me ? Palette.accentInk : Palette.ink).frame(width: 76, alignment: .leading).lineLimit(1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(showEcho ? line.text : line.visibleText).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(line.isHidden ? Palette.ink45 : Palette.ink)

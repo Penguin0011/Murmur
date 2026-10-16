@@ -493,6 +493,28 @@ struct SettingsView: View {
             eyebrow("Meeting notes").padding(.top, 20)
             MeetingNotesRoutePicker(controller: controller, selection: Binding(get: { controller.meetingNotesRoute ?? .none }, set: { controller.meetingNotesRoute = $0; controller.meetingRecorder.notesRouteChosen($0) }))
             help(controller.meetingNotesRoute == nil ? "Not chosen yet: Murmur asks after your first meeting." : "Notes are written after Stop from the transcript and your own notes. Every item cites the lines it rests on; items the transcript does not support are left out.", color: Palette.ink64)
+            eyebrow("Speaker separation").padding(.top, 20)
+            help(SpeakerModelFacts.explanation)
+            let row = controller.speakerModelRow
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(controller.speakerModelSummary).font(.system(size: 14, weight: .semibold))
+                    Text(row.statusText).font(.system(size: 13)).foregroundStyle(Palette.ink70)
+                }
+                Spacer()
+                ForEach(row.actions, id: \.self) { action in
+                    switch action {
+                    case .download, .retry: Button(action == .download ? "Download…" : "Retry") { controller.downloadSpeakerModel() }.buttonStyle(InkButtonStyle(kind: .outline))
+                    case .cancel: Button("Cancel") { controller.cancelSpeakerModelDownload() }.buttonStyle(InkButtonStyle(kind: .plain))
+                    case .remove: Button("Remove") { controller.removeSpeakerModel() }.buttonStyle(InkButtonStyle(kind: .plain))
+                    }
+                }
+            }
+            if !controller.speakerModelMessage.isEmpty { help(controller.speakerModelMessage, color: Palette.ink) }
+            if row.isReady {
+                toggleRow("Separate speakers", "Applies to meetings started afterwards. Turning it off keeps the names already given.", isOn: $controller.meetingSpeakerSeparation)
+            }
+            help(SpeakerModelFacts.credits, color: Palette.ink64)
             eyebrow("Call detection").padding(.top, 20)
             toggleRow("Offer to take notes when a call starts", "When a call app or a browser starts using the microphone, Murmur offers to take notes. It never starts recording on its own, and reads no window titles or web addresses.", isOn: $controller.meetingDetection)
             if !controller.meetingDetectionNever.isEmpty {

@@ -94,6 +94,33 @@ enum DictionaryModelFacts {
     static let unavailableMessage = "Dictionary support could not start, so on-device transcription is running without your dictionary. Remove it and download it again."
 }
 
+/// Speaker separation for meetings (W7d, PRD 11.8): FluidAudio's offline diarization files, pinned
+/// at the revision FluidAudio 0b1f462 resolves. Optional; meetings work without it.
+enum SpeakerModelFacts {
+    static let repository = "FluidInference/speaker-diarization-coreml"
+    static let displayName = "Speaker separation for meetings"
+    static func directory(home: URL) -> URL {
+        home.appendingPathComponent("Library/Caches/Dictation/module-one/diarizer-df2625a")
+    }
+    static func summary(downloadSize: Int64) -> String {
+        "Offline speaker diarization · \(ModelFacts.formatBytes(downloadSize)) download · \(ModelFacts.location)"
+    }
+    /// The attribution the files' NOTICE asks for (CC-BY-4.0).
+    static let credits = "Models: pyannote community-1 segmentation (pyannote), WeSpeaker embeddings (WeSpeaker), PLDA and VBx clustering (BUT Speech@FIT), converted to Core ML by Fluid Inference. These files are modified Core ML conversions, licensed under CC-BY-4.0: https://creativecommons.org/licenses/by/4.0/"
+    static let explanation = "After a meeting, labels the other side as Speaker 1, Speaker 2… on this Mac. While it is on, the call’s audio (never your microphone) is kept until separation finishes, at most 24 hours. Voices are not remembered between meetings."
+    static func confirmation(downloadSize: Int64, folder: URL) -> (title: String, body: String) {
+        ("Download speaker separation (\(ModelFacts.formatBytes(downloadSize)))?",
+         "Murmur downloads \(ModelFacts.formatBytes(downloadSize)) from Hugging Face and checks every file against its pinned checksum. It is saved in \(folder.path).\n\n\(credits)")
+    }
+    static func completionMessage(_ result: Result<Void, ModelDownloadError>) -> String {
+        switch result {
+        case .success: return "Speaker separation is downloaded and verified."
+        case .failure(.cancelled): return "The download was cancelled. Retry continues from the files already downloaded."
+        case .failure(let error): return error.userMessage
+        }
+    }
+}
+
 /// Live words (gap #13): the streaming encoder and the small models it loads with, in a folder of
 /// their own beside the batch model. Optional; dictation never needs it.
 enum LiveWordsFacts {

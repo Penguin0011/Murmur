@@ -36,6 +36,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     @Published var notesProblem: [String: String] = [:]
     /// A meeting waiting for the first-Stop notes route question (Q3).
     @Published var notesChoicePending: String?
+    /// Meetings whose speakers are being separated (W7d).
+    @Published private(set) var separating: Set<String> = []
 
     /// Set by AppController: transcribe a 16 kHz WAV with the warm helper (text or nil).
     var transcribe: ((URL, @escaping (String?) -> Void) -> Void)?
@@ -45,6 +47,10 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     var notesRoute: () -> MeetingNotesRoute? = { nil }
     /// Set by AppController: writes notes with the route chosen now. Throws `NotesFailure`.
     var notesWriter: ((Meeting) async throws -> MeetingNotesWriter.Outcome)?
+    /// Set by AppController: whether a new meeting keeps its Them audio for speaker separation (W7d).
+    var speakerSeparation: () -> Bool = { false }
+    /// Set by AppController: runs the pinned diarizer on a 16 kHz WAV; nil when it could not.
+    var diarize: ((URL, @escaping ([SpeakerSeparation.Segment]?) -> Void) -> Void)?
     /// Called when the notes question waits after a Stop the user clicked, to open the Meetings page.
     var onNotesChoiceNeeded: (() -> Void)?
     /// Meetings stopped by the user, whose notes question may open the Meetings page; automatic stops
@@ -94,6 +100,14 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         purgeAudio()
     }
 
+    /// A separation a quit interrupted runs again from its kept audio (or ends as expired). Called by
+    /// AppController once `diarize` and `transcribe` are set, never from `configure`.
+    func resumeSeparations() {
+        for meeting in meetings where meeting.separation == .pending && pumps[meeting.id] == nil && !separating.contains(meeting.id) && (leftovers[meeting.id] ?? 0) == 0 {
+            transcriptDone(meeting.id)
+        }
+    }
+
     // MARK: Start, stop, cancel
 
     /// Starts recording, or asks for consent first. Returns false when nothing started.
@@ -105,6 +119,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         guard let audioRoot, transcribe != nil else { message = "Meeting notes are unavailable: private storage could not be opened."; return false }
         var meeting = Meeting(id: UUID().uuidString, recordedAt: Date(), source: source)
         meeting.transcribedBy = cloud == nil ? nil : cloudName
+        // Fixed at start, like the transcription route: a change mid-meeting never strands audio.
+        if speakerSeparation() && !source.micOnly { meeting.separation = .pending }
         let folder = MeetingAudio.folder(audioRoot, meeting: meeting.id)
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
         catch { message = "Meeting notes could not create private storage."; return false }
@@ -209,7 +225,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         cancel()
         pumps.values.forEach { $0.stop() }; pumps = [:]
         meetings = []; finishing = []; leftovers = [:]; store = nil; audioRoot = nil
-        notesProblem = [:]; notesChoicePending = nil; askOnDone = []
+        notesProblem = [:]; notesChoicePending = nil; askOnDone = []; separating = []
     }
 
     // MARK: Lines
@@ -241,7 +257,15 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
             // A leftover finished after notes were written: they no longer cover the whole transcript.
             if $0.notes != nil, !spelled.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { $0.notes?.outdated = true }
         }
-        try? FileManager.default.removeItem(at: job.url)
+        // With speaker separation pending, Them audio is kept apart (never Me) until it finishes, at most 24 h (Q4).
+        let meeting = live?.id == id ? live : meetings.first { $0.id == id }
+        if job.stream == .them, meeting?.separation == .pending, let audioRoot {
+            let kept = MeetingAudio.kept(audioRoot, meeting: id)
+            try? FileManager.default.createDirectory(at: kept, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            if (try? FileManager.default.moveItem(at: job.url, to: kept.appendingPathComponent(job.url.lastPathComponent))) == nil { try? FileManager.default.removeItem(at: job.url) }
+        } else {
+            try? FileManager.default.removeItem(at: job.url)
+        }
         settle(id)
     }
 
@@ -253,10 +277,18 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
 
     // MARK: Notes (W7b, PRD 11.6)
 
-    /// The transcript is complete: write notes on the chosen route, or ask for one the first time.
-    /// Notes already written are left alone (a finished leftover marks them out of date instead).
+    /// The transcript is complete: separate speakers if this meeting keeps them, then notes (PRD 11.9:
+    /// Finishing transcript, Separating speakers, Writing notes). Each step can fail on its own.
     private func transcriptDone(_ id: String) {
         let manual = askOnDone.remove(id) != nil
+        if meetings.first(where: { $0.id == id })?.separation == .pending, !separating.contains(id) {
+            separateSpeakers(id) { [weak self] in self?.notesStep(id, manual: manual) }
+        } else { notesStep(id, manual: manual) }
+    }
+
+    /// Write notes on the chosen route, or ask for one the first time. Notes already written are
+    /// left alone (a finished leftover or a separation marks them out of date instead).
+    private func notesStep(_ id: String, manual: Bool) {
         guard let meeting = meetings.first(where: { $0.id == id }), meeting.notes == nil,
               meeting.lines.contains(where: { !$0.isHidden }) else { return }
         switch notesRoute() {
@@ -270,7 +302,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
 
     /// Writes (or rewrites: "Update Notes") a finished meeting's notes. Failure keeps the meeting and says why.
     func writeNotes(_ id: String) {
-        guard let writer = notesWriter, !notesWriting.contains(id), !finishing.contains(id),
+        guard let writer = notesWriter, !notesWriting.contains(id), !finishing.contains(id), !separating.contains(id),
               let meeting = meetings.first(where: { $0.id == id }) else { return }
         guard meeting.lines.contains(where: { !$0.isHidden }) else { notesProblem[id] = "There is no transcript to write notes from."; return }
         notesWriting.insert(id); notesProblem[id] = nil
@@ -310,6 +342,81 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         notesChoicePending = nil
         if route != .none { writeNotes(id) }
     }
+
+    // MARK: Speaker separation (W7d, PRD 11.8)
+
+    /// Joins the kept Them chunks into one file in meeting time, runs the diarizer, gives each Them
+    /// line its speaker, and re-transcribes on this Mac the lines that cross a change. The kept audio
+    /// is deleted when it ends, however it ends.
+    private func separateSpeakers(_ id: String, then: @escaping () -> Void) {
+        guard let audioRoot else { then(); return }
+        let chunks = MeetingAudio.keptChunks(audioRoot, meeting: id)
+        let folder = MeetingAudio.kept(audioRoot, meeting: id)
+        let finish: (SeparationState?) -> Void = { [weak self] state in
+            guard let self else { return }
+            try? FileManager.default.removeItem(at: folder)
+            if let state { self.update(id) { $0.separation = state } }
+            self.separating.remove(id)
+            meetingLog.notice("meeting-speakers state=\(self.meetings.first { $0.id == id }?.separation?.rawValue ?? "-", privacy: .public)")
+            then()
+        }
+        guard !chunks.isEmpty else { finish(.expired); return }
+        guard let diarize else { finish(.failed); return }
+        separating.insert(id)
+        let stream = folder.appendingPathComponent("stream.wav")
+        DispatchQueue.global(qos: .utility).async {
+            let joined = MeetingStreamFile.join(chunks, into: stream)
+            DispatchQueue.main.async {
+                guard joined else { finish(.failed); return }
+                diarize(stream) { [weak self] segments in
+                    DispatchQueue.main.async {
+                        guard let self, let segments, let meeting = self.meetings.first(where: { $0.id == id }) else { finish(.failed); return }
+                        let plan = SpeakerSeparation.plan(meeting.lines, segments: segments)
+                        meetingLog.notice("meeting-speakers speakers=\(Set(segments.map(\.speaker)).count) split-lines=\(plan.splits.count)")
+                        self.transcribePieces(plan.splits, from: stream, in: folder) { texts in
+                            var speakers = plan.speakers
+                            // A line whose pieces could not be transcribed keeps its text, with its main speaker.
+                            for (line, pieces) in plan.splits where texts[line] == nil {
+                                if let main = pieces.max(by: { $0.end - $0.start < $1.end - $1.start }) { speakers[line] = main.speaker }
+                            }
+                            self.update(id) { $0.applySpeakers(speakers, split: texts) }
+                            finish(nil)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Cuts each piece from the joined stream and transcribes it with the warm helper, always on
+    /// this Mac, one at a time. A line is only split when every one of its pieces transcribed.
+    private func transcribePieces(_ splits: [Int: [SpeakerSeparation.Segment]], from stream: URL, in folder: URL,
+                                  done: @escaping ([Int: [(speaker: Int, start: Double, end: Double, text: String)]]) -> Void) {
+        var queue = splits.sorted { $0.key < $1.key }.flatMap { line, pieces in pieces.enumerated().map { (line, $0.offset, $0.element) } }
+        var texts: [Int: [(speaker: Int, start: Double, end: Double, text: String)]] = [:], failed = Set<Int>()
+        let transcribe = transcribe, spell = applyDictionary
+        func next() {
+            guard !queue.isEmpty else {
+                for line in failed { texts[line] = nil }
+                done(texts); return
+            }
+            let (line, index, piece) = queue.removeFirst()
+            let url = folder.appendingPathComponent("piece-\(line)-\(index).wav")
+            guard !failed.contains(line), let transcribe, MeetingStreamFile.cut(stream, from: piece.start, to: piece.end, into: url) else { failed.insert(line); next(); return }
+            transcribe(url) { text in
+                DispatchQueue.main.async {
+                    try? FileManager.default.removeItem(at: url)
+                    if let text { texts[line, default: []].append((piece.speaker, piece.start, piece.end, spell(text))) } else { failed.insert(line) }
+                    next()
+                }
+            }
+        }
+        next()
+    }
+
+    func renameSpeaker(_ speaker: Int, to name: String, in id: String) { update(id) { $0.renameSpeaker(speaker, to: name) } }
+    func mergeSpeaker(_ speaker: Int, into other: Int, in id: String) { update(id) { $0.mergeSpeaker(speaker, into: other) } }
+    func reassign(line: Int, to speaker: Int, in id: String) { update(id) { $0.reassign(line: line, to: speaker) } }
 
     /// Ticks or unticks an action item's checkbox.
     func toggleAction(_ index: Int, of id: String) {
@@ -533,5 +640,55 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     static func runningCallApps() -> [CallApp] {
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
         return CallApp.catalog.filter { running.contains($0.bundleID) }
+    }
+}
+
+/// The joined Them stream for speaker separation, and pieces cut from it (W7d). 16 kHz mono 16-bit,
+/// like the chunks; gaps between chunks are written as silence so file time is meeting time.
+enum MeetingStreamFile {
+    static let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: 16_000, AVNumberOfChannelsKey: 1,
+                                          AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false]
+
+    static func join(_ chunks: [(url: URL, start: Double)], into url: URL) -> Bool {
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
+              let out = try? AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false) else { return false }
+        defer { out.close() }
+        var written: AVAudioFramePosition = 0
+        for chunk in chunks {
+            guard let file = try? AVAudioFile(forReading: chunk.url), file.processingFormat.sampleRate == 16_000, file.processingFormat.channelCount == 1,
+                  let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(max(1, file.length))),
+                  (try? file.read(into: buffer)) != nil else { continue }
+            let at = AVAudioFramePosition((chunk.start * 16_000).rounded())
+            // Silence up to the chunk's start, in 1 s blocks.
+            while written < at {
+                let n = AVAudioFrameCount(min(16_000, at - written))
+                guard let zeros = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: n) else { return false }
+                zeros.frameLength = n
+                guard (try? out.write(from: zeros)) != nil else { return false }
+                written += AVAudioFramePosition(n)
+            }
+            // A chunk that starts before the end of the last one (a rebuilt stream) loses its overlap.
+            let skip = AVAudioFrameCount(max(0, min(AVAudioFramePosition(buffer.frameLength), written - at)))
+            if skip > 0, let data = buffer.floatChannelData {
+                let keep = Int(buffer.frameLength - skip)
+                data[0].update(from: data[0] + Int(skip), count: keep)
+                buffer.frameLength = AVAudioFrameCount(keep)
+            }
+            guard buffer.frameLength > 0 else { continue }
+            guard (try? out.write(from: buffer)) != nil else { return false }
+            written += AVAudioFramePosition(buffer.frameLength)
+        }
+        return written > 0
+    }
+
+    static func cut(_ stream: URL, from start: Double, to end: Double, into url: URL) -> Bool {
+        guard let file = try? AVAudioFile(forReading: stream), end > start else { return false }
+        let first = AVAudioFramePosition(max(0, start) * 16_000), last = min(file.length, AVAudioFramePosition(end * 16_000))
+        guard last > first, let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(last - first)) else { return false }
+        file.framePosition = first
+        guard (try? file.read(into: buffer, frameCount: AVAudioFrameCount(last - first))) != nil,
+              let out = try? AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false) else { return false }
+        defer { out.close() }
+        return (try? out.write(from: buffer)) != nil
     }
 }

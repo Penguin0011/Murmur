@@ -438,6 +438,67 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(CallDetector.enabled(defaults) && CallDetector.never(defaults).isEmpty, "detection is on by default with no Never list")
         }
 
+        // W7d speaker separation (PRD 11.8): parse, numbering, assignment, splits, renaming, kept audio.
+        do {
+            let answer = #"{"segments":[{"speaker":"S7","start":20.0,"end":40.0},{"speaker":"S2","start":0.5,"end":19.0},{"speaker":"S2","start":41,"end":44}]}"#
+            let segments = SpeakerSeparation.parse(Data(answer.utf8))!
+            check(segments.map(\.speaker) == [1, 2, 1] && segments.first?.start == 0.5, "speakers are numbered in order of first speech")
+            check(SpeakerSeparation.parse(Data(#"{"embedding":[0.1]}"#.utf8)) == nil, "only segments are read")
+            typealias Seg = SpeakerSeparation.Segment
+            let one = SpeakerSeparation.pieces(start: 0, end: 15, segments: [Seg(speaker: 1, start: 0.5, end: 14), Seg(speaker: 2, start: 14.2, end: 15)])
+            check(one.count == 1 && one[0].speaker == 1 && one[0].start == 0 && one[0].end == 15, "a short overlap does not split a line")
+            let two = SpeakerSeparation.pieces(start: 0, end: 15, segments: [Seg(speaker: 1, start: 0, end: 6), Seg(speaker: 2, start: 7, end: 15)])
+            check(two.map(\.speaker) == [1, 2] && two[0].end == 6.5 && two[1].start == 6.5 && two[1].end == 15, "a line crossing a change splits at the gap's middle")
+            check(SpeakerSeparation.pieces(start: 100, end: 110, segments: [Seg(speaker: 1, start: 0, end: 6)]).isEmpty, "no overlap, no speaker")
+
+            var meeting = Meeting(id: UUID().uuidString, recordedAt: Date(), source: MeetingSource(name: "Zoom", bundleID: "us.zoom.xos"))
+            meeting.separation = .pending
+            meeting.insert(stream: .them, start: 0, end: 15, text: "Hello from the first speaker. Now the second one answers here.")
+            meeting.insert(stream: .me, start: 16, end: 20, text: "Thanks both.")
+            meeting.insert(stream: .them, start: 21, end: 30, text: "Second speaker again.")
+            meeting.notes = MeetingNotes(route: "x", writtenAt: Date())
+            let them = meeting.lines.filter { $0.stream == .them }.map(\.id)
+            let plan = SpeakerSeparation.plan(meeting.lines, segments: [Seg(speaker: 1, start: 0, end: 6), Seg(speaker: 2, start: 7, end: 15), Seg(speaker: 2, start: 21, end: 30)])
+            check(plan.speakers == [them[1]: 2] && plan.splits[them[0]]?.count == 2, "plan: one speaker per line, or pieces")
+            meeting.applySpeakers(plan.speakers, split: [them[0]: [(1, 0, 6.5, "Hello from the first speaker."), (2, 6.5, 15, "Now the second one answers here.")]])
+            check(meeting.lines.filter { $0.stream == .them }.map(\.speaker) == [1, 2, 2] && meeting.separation == .done, "lines carry speakers; the split line is replaced in order")
+            check(meeting.notes?.outdated == true, "separation marks notes out of date")
+            check(meeting.label(meeting.lines[1]) == "Speaker 2" && meeting.label(meeting.lines.first { $0.stream == .me }!) == "Me", "labels")
+            meeting.notes?.outdated = nil
+            meeting.renameSpeaker(2, to: "Dana")
+            check(meeting.label(meeting.lines[1]) == "Dana" && meeting.notes?.outdated == true, "rename sets the name and marks notes out of date")
+            check(MeetingExport.transcript(meeting).contains("Dana: Now the second one") && MeetingExport.markdown(meeting).contains("- Speakers: Me, Speaker 1, Dana"), "exports use speaker names")
+            let numbered = MeetingNotesPrompt.number(meeting, speaker: meeting.label)
+            check(numbered.contains { $0.speaker == "Dana" }, "notes input carries speaker names")
+            meeting.notes?.outdated = nil
+            meeting.reassign(line: meeting.lines[0].id, to: 2)
+            check(meeting.lines[0].speaker == 2 && meeting.notes?.outdated == true, "reassigning a line persists and marks notes out of date")
+            meeting.mergeSpeaker(2, into: 1)
+            check(meeting.speakers == [1] && meeting.speakerNames?["2"] == nil, "merging moves every line and drops the old name")
+            let saved = try JSONDecoder().decode(Meeting.self, from: JSONEncoder().encode(meeting))
+            check(saved.speakers == [1] && saved.separation == .done, "speakers persist")
+            let w7b = #"{"id":"6F1C2D3E-0000-4000-8000-000000000002","recordedAt":0,"seconds":1,"source":{"name":"Zoom","allApps":false,"micOnly":false},"lines":[{"id":1,"stream":"them","start":0,"end":1,"text":"Hi."}],"myNotes":"","gaps":[],"finished":true,"notes":{"keyPoints":[],"decisions":[],"actions":[],"route":"Gemini","writtenAt":0,"dropped":0}}"#
+            let old = try? JSONDecoder().decode(Meeting.self, from: Data(w7b.utf8))
+            check(old != nil && old?.separation == nil && old?.lines.first?.speaker == nil && old?.label(old!.lines[0]) == "Them", "a W7b record without speakers decodes")
+
+            // Kept Them audio: not a leftover, kept for 24 hours, gone with the meeting.
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("murmur-kept-" + UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let id = UUID().uuidString
+            let kept = MeetingAudio.kept(root, meeting: id)
+            try FileManager.default.createDirectory(at: kept, withIntermediateDirectories: true)
+            for (name, age) in [("them-0.wav", 3600.0), ("them-15000.wav", 25 * 3600.0)] {
+                let url = kept.appendingPathComponent(name)
+                FileManager.default.createFile(atPath: url.path, contents: Data([0]))
+                try FileManager.default.setAttributes([.creationDate: Date().addingTimeInterval(-age)], ofItemAtPath: url.path)
+            }
+            check(MeetingAudio.leftovers(root, meeting: id).isEmpty, "kept audio is not offered as leftovers")
+            MeetingAudio.purge(root, keep: [id])
+            check(MeetingAudio.keptChunks(root, meeting: id).map(\.start) == [0], "kept Them audio older than 24 hours is deleted")
+            MeetingAudio.purge(root, keep: [])
+            check(!FileManager.default.fileExists(atPath: kept.path), "kept audio goes with its meeting")
+        }
+
         if failures > 0 { print("\(failures) meeting check(s) failed"); exit(1) }
         print("All meeting checks passed.")
     }
