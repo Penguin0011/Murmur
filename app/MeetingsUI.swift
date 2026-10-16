@@ -59,7 +59,9 @@ struct MeetingsPage: View {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Meetings").font(.system(size: 28, weight: .bold)).tracking(-0.8)
-                    lede("Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Audio is deleted as soon as it is transcribed.")
+                    lede(controller.speakerSettings.enabled
+                         ? "Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Your audio is deleted as soon as it is transcribed; the call’s is kept until its speakers are separated, at most 24 hours."
+                         : "Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Audio is deleted as soon as it is transcribed.")
                 }
                 Spacer()
                 if let live = recorder.live {

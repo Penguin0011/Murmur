@@ -58,6 +58,20 @@ Optional download from Settings → Dictionary. It rescores on-device transcript
 - License: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/. It is recorded in `module-one/models/artifact-pins.json`, so the app shows it as pinned before download. [Certain]
 - Attribution: "Parakeet TDT-CTC 110M" by NVIDIA, converted to Core ML by FluidInference, used under CC BY 4.0. Murmur uses the files unmodified. [Likely]
 
+### Speaker diarization, pyannote community-1 (speaker separation)
+
+Optional download from Settings → Meetings → "Separate speakers after a meeting" (PRD 11.8, W7d). It is not bundled; Murmur downloads the pinned files to `~/Library/Caches/Dictation/module-one/speaker-diarization-df2625a` and verifies their checksums. The helper loads them directly; FluidAudio's own downloader is never used for them. [Certain]
+
+- Converted models used by the app: `FluidInference/speaker-diarization-coreml`, revision `df2625ac79a7ac6b65ad868fee6d80f320da4232` (the revision FluidAudio `0b1f462` pins in `ModelNames.swift`), https://huggingface.co/FluidInference/speaker-diarization-coreml. Files: `Segmentation.mlmodelc`, `FBank.mlmodelc`, `Embedding.mlmodelc`, `PldaRho.mlmodelc` and `plda-parameters.json`, 21 files, 21,599,417 bytes. The legacy online files (`pyannote_segmentation`, `wespeaker*`) and `PLDA.mlmodelc` are not downloaded. [Certain]
+- License: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/. The repository's `NOTICE.md` at that revision scopes CC-BY-4.0 to exactly these Community-1-derived files, and its `LICENSE` is the CC-BY-4.0 text. Checked October 16, 2026. [Certain]
+- Upstream: the pyannote speaker-diarization-community-1 pipeline, published by pyannote under CC-BY-4.0, https://huggingface.co/pyannote/speaker-diarization-community-1. The PLDA parameters come from Brno University of Technology / BUT Speech@FIT, licensed CC-BY-4.0 by the rights holder. [Certain]
+- Modification: Fluid Inference converted the PyTorch components to Core ML, fixed and enumerated input shapes, applied mixed-precision storage, separated the FBank frontend from the embedding backend, and compiled them for Apple platforms. Murmur uses the converted files unmodified. [Certain]
+- Attribution, shown in Settings and in the download sheet: "Speaker separation uses modified Core ML conversions by Fluid Inference of the pyannote speaker-diarization-community-1 pipeline (pyannote segmentation, WeSpeaker embeddings) with PLDA parameters from BUT Speech@FIT, licensed under CC-BY-4.0." [Certain]
+- Citations retained from the repository's README:
+  - Plaquet, A. and Bredin, H. "Powerset multi-class cross entropy loss for neural speaker diarization." Proc. INTERSPEECH 2023.
+  - Wang, H., Liang, C., Wang, S., Chen, Z., Zhang, B., Xiang, X., Deng, Y. and Qian, Y. "Wespeaker: A research and production oriented speaker embedding learning toolkit." ICASSP 2023.
+  - Landini, F., Profant, J., Diez, M. and Burget, L. "Bayesian HMM clustering of x-vector sequences (VBx) in speaker diarization: theory, implementation and analysis on standard tasks." Computer Speech & Language, 2022.
+
 ## Cloud services
 
 Gemini API and any custom OpenAI-compatible endpoint the user configures are optional services reached with the user's own API keys. No provider code or SDK is bundled; Murmur sends plain HTTPS requests. Their terms apply to the user's account, not to redistribution. [Certain] See `app/PROVIDERS.md` for data-use terms.

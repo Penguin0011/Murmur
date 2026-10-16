@@ -218,7 +218,7 @@ enum SpeakerAudio {
 /// Runs `ModelBench DIARIZER_DIRECTORY --diarize KEPT_WAV THRESHOLD` once per meeting. The process
 /// exits when it is done, so its memory goes back; Skip, deletion and quitting terminate it.
 final class SpeakerRunner: @unchecked Sendable {
-    /// A 2-hour meeting took about a minute on the M3 (PR evidence); far beyond that, give up.
+    /// A 2-hour meeting took 32 s on the M3 (PRD 11.11, W7d status); far beyond that, give up.
     static let timeout: TimeInterval = 30 * 60
     private let lock = NSLock()
     private var running: [String: Process] = [:]

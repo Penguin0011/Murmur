@@ -711,6 +711,25 @@ The fixes:
 - **Meters:** each meter is scaled to its own recent loudness, with a floor.
 - **Panel:** the live panel minimizes to a pill (red dot, timer, Stop), can be dragged, and remembers both. [Certain]
 
+**W7d status (October 16, 2026): built, in review, not live-tested.** Speaker separation runs after Stop as described in 11.8. Measured on the MacBook Air M3 (Mac15,12), 16 GB, macOS 27.0.1, app 0.1.0 (1), with `app/tools/measure_speakers.swift`. [Certain]
+- **What was built:**
+  - The pinned download: `FluidInference/speaker-diarization-coreml` at `df2625a`, 21 files, 21,599,417 bytes, hash-checked like the other models. The helper loads the files directly; FluidAudio's downloader is never used, so nothing is fetched or purged on its own.
+  - A one-shot helper, `ModelBench DIR --diarize KEPT_WAV THRESHOLD`. It prints only speaker ids and times, then exits. It reads the kept file memory-mapped, so nothing is copied to a temporary folder.
+  - The kept Them stream: `retry-audio/speakers/<id>.wav`, 16 kHz mono 16-bit, owner-only. It is deleted after diarization, Skip, meeting deletion or retention, and at 24 hours. Delete All Data covers it through the retry-audio folder.
+  - Word timings: a timed request to the warm helper returns word times for Them chunks while separation is pending. A line is split where the voice changes, and the first piece keeps its id.
+  - Rename, merge and reassign, per meeting.
+- **Deviation from 11.8:** lines without word times are assigned whole to the speaker with the most overlap, not re-transcribed per segment. This applies to the cloud route, and to lines where the dictionary changed the word count. [Certain]
+- **Clustering threshold:** 0.6, FluidAudio's community-1 default, fixed before scoring. [Certain]
+- **Corpus:** 12 synthetic calls, about 8 minutes each, with 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6 and 6 remote speakers. They are LibriSpeech test-clean turns, 0.2–1.0 s apart, with no overlap. They ran through the real Chunker, pump, timed helper request, kept WAV, diarizer and assignment. This is read speech, not consented calls, so it is a proxy. The 11.10 bars, which are set on calls, stay open. [Certain]
+  - DER (10 ms frames, 0.25 s collar): mean 7.96%, per call 3.97–12.41%. Bar ≤ 20%.
+  - Correct speaker count on 11 of 12 calls (92%); one 6-speaker call found 5. Bar ≥ 80%.
+  - Words attributed correctly on calls with 3+ speakers: 98.5% of 12,115. Bar ≥ 85%.
+- **Processing time and memory** (6 speakers, diarization alone):
+  - 1 hour: 18.1 s, peak footprint 885 MB, max RSS 568 MB, wired memory +572 MB while the helper ran.
+  - 2 hours: 31.7 s, peak footprint 1,010 MB, max RSS 841 MB, wired memory +638 MB.
+  - Bar: at most 2 minutes for 1 hour (passed). The memory is given back when the helper exits.
+- **Not verified in the live app:** a real call, Them audio deleted after a real separation and at 24 hours, and notes marked out of date. Notes are W7b's: speaker edits record `speakers.editedAt` for that check, and the merge wires it in. [Certain]
+
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
 ### 11.12 Amendments (applied October 15, 2026)

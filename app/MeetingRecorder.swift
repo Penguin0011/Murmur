@@ -548,11 +548,11 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     @Published private(set) var status: ModelStatus = .notDownloaded
     @Published var message = ""
     let downloader: ModelDownloader?
-    var row: ModelRowPresentation { ModelRowPresentation.make(downloader == nil ? nil : status) }
-    var summary: String { downloader.map { Self.summary(downloadSize: $0.downloadSize) } ?? "" }
+    var row: ModelRowPresentation { ModelRowPresentation.make(downloader == nil && !fixture ? nil : status) }
+    var summary: String { Self.summary(downloadSize: downloader?.downloadSize ?? 21_599_417) }
     private let defaults: UserDefaults
     private let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json")
-    private var inFlight = false, verified = false, verifying = false
+    private var inFlight = false, verified = false, verifying = false, fixture = false
     private weak var recorder: MeetingRecorder?
     private var isBusy: () -> Bool = { false }
     private var preview = false
@@ -648,5 +648,5 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         }
     }
     /// UI fixture only (check_ui.swift).
-    func showFixture(enabled: Bool, status: ModelStatus) { self.enabled = enabled; self.status = status }
+    func showFixture(enabled: Bool, status: ModelStatus) { fixture = true; self.enabled = enabled; self.status = status }
 }
