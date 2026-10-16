@@ -40,6 +40,10 @@ import SwiftUI
         } else {
             WelcomeGuide.complete(.standard)
         }
+        // Catch missing bundled typography instead of silently accepting a system-font fallback.
+        _ = WindowType.display(64); _ = WindowType.body(14)
+        precondition(NSFont(name: "InstrumentSerif-Regular", size: 64) != nil)
+        precondition(NSFont(name: "DMSans-9ptRegular", size: 14) != nil)
         let controller = AppController(preview: true)
         if CommandLine.arguments.contains("--custom-transcription") {
             controller.transcriptionRoute = .cloud
@@ -100,7 +104,12 @@ import SwiftUI
             }
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }
-            if args.contains("--settings") || args.contains("--dictionary") { controller.screenRequest = "settings" }
+            if args.contains("--history") { controller.screenRequest = "history" }
+            if args.contains("--settings") { controller.screenRequest = "settings" }
+            if args.contains("--dictionary") { controller.screenRequest = "settings-4" }
+            if let flag = args.firstIndex(of: "--section"), args.indices.contains(flag + 1) {
+                controller.screenRequest = "settings-" + args[flag + 1]
+            }
             if args.contains("--speaker-settings") { controller.speakerSettings.showFixture(enabled: true, status: args.contains("--ready") ? .ready : .notDownloaded) }
             if args.contains("--meeting-settings") { controller.meetingTranscription = args.contains("--cloud") ? .cloud : .local; controller.screenRequest = "meeting-settings" }
             controller.voiceLevel = 0.6
@@ -108,6 +117,7 @@ import SwiftUI
             controller.message = CommandLine.arguments.contains("--credential-warning")
                 ? "Save the API key again for this server address."
                 : "Model verification failed. Choose the pinned model folder."
+            if args.contains("--quiet") { controller.dismissStatus() }
             if CommandLine.arguments.contains("--recovery") { controller.hasRecoveryAudio = true }
             if CommandLine.arguments.contains("--live-words") {
                 controller.showLiveWordsFixture("Synthetic live words keep the newest tail of a long dictation on two lines, with only the last word dimm")

@@ -1,2 +1,5 @@
 spike/.build/
 runtime/
+
+# Local synthetic UI review captures.
+.impeccable/review/

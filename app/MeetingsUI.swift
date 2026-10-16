@@ -8,7 +8,7 @@ private func mono(_ text: String, size: CGFloat = 12, color: Color = Palette.ink
     Text(text).font(.system(size: size, design: .monospaced)).tracking(size * 0.08).textCase(.uppercase).foregroundStyle(color)
 }
 private func lede(_ text: String, color: Color = Palette.ink70) -> some View {
-    Text(text).font(.system(size: 14)).lineSpacing(2).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
+    Text(text).font(WindowType.body(14)).lineSpacing(2).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
 }
 
 /// The Start menu (Q1): running call apps first, then All apps, then the microphone alone.
@@ -26,8 +26,8 @@ struct MeetingStartMenu: View {
             Button("All apps (includes music and notifications)") { controller.startMeeting(.everything) }
             Button("Only my microphone") { controller.startMeeting(.microphoneOnly) }
         } label: {
-            Text(title).font(.system(size: 15, weight: .semibold)).padding(.horizontal, 16).frame(height: 44)
-                .foregroundStyle(Palette.paper).background(Palette.ink)
+            Text(title).font(WindowType.body(14, weight: .semibold)).padding(.horizontal, 18).frame(height: 36)
+                .foregroundStyle(Palette.paper).background(Palette.ink, in: Capsule())
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .disabled(controller.meetingRecorder.live != nil)
@@ -59,13 +59,13 @@ struct MeetingsPage: View {
         guard !query.isEmpty else { return recorder.meetings }
         return recorder.meetings.filter { $0.title.lowercased().contains(query) || $0.lines.contains { $0.text.lowercased().contains(query) } }
     }
-    private var selected: Meeting? { recorder.meetings.first { $0.id == selectedID } ?? filtered.first }
+    private var selected: Meeting? { filtered.first { $0.id == selectedID } ?? filtered.first }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Meetings").font(.system(size: 28, weight: .bold)).tracking(-0.8)
+                    Text("Meetings").font(WindowType.display(64)).tracking(-1.28)
                     lede(controller.speakerSettings.enabled
                          ? "Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Your audio is deleted as soon as it is transcribed; the call’s is kept until its speakers are separated, at most 24 hours."
                          : "Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Audio is deleted as soon as it is transcribed.")
@@ -84,7 +84,7 @@ struct MeetingsPage: View {
             .padding(.horizontal, 24).padding(.vertical, 20)
             if let message = recorder.message {
                 HStack {
-                    Text(message).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
+                    Text(message).font(WindowType.body(14)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button { recorder.message = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("Dismiss")
                 }
@@ -101,10 +101,24 @@ struct MeetingsPage: View {
                 }
                 .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                HStack(spacing: 0) {
-                    list.frame(width: 280)
-                    Rectangle().fill(Palette.ink20).frame(width: 1)
-                    if let meeting = selected { detail(meeting) } else { Spacer() }
+                GeometryReader { geometry in
+                    if geometry.size.width < 680 {
+                        VStack(spacing: 12) {
+                            TextField("Search meetings", text: $search).textFieldStyle(.roundedBorder)
+                            Picker("Meeting", selection: Binding(get: { selected?.id ?? "" }, set: { selectedID = $0 })) {
+                                ForEach(filtered) { meeting in Text(meeting.title).tag(meeting.id) }
+                            }
+                            if let meeting = selected { detail(meeting) }
+                            else { lede("No matching meetings.") }
+                        }
+                        .padding(.horizontal, 24).padding(.top, 12)
+                    } else {
+                        HStack(spacing: 0) {
+                            list.frame(width: 200)
+                            Rectangle().fill(Palette.ink20).frame(width: 1)
+                            if let meeting = selected { detail(meeting) } else { Spacer() }
+                        }
+                    }
                 }
             }
         }
@@ -128,14 +142,14 @@ struct MeetingsPage: View {
 
     private var list: some View {
         VStack(spacing: 0) {
-            TextField("Search meetings", text: $search).textFieldStyle(.plain).font(.system(size: 14))
+            TextField("Search meetings", text: $search).textFieldStyle(.plain).font(WindowType.body(14))
                 .padding(.horizontal, 12).frame(height: 40).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink20).frame(height: 1) }
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(filtered) { meeting in
                         Button { selectedID = meeting.id; notesDraft = meeting.myNotes } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(meeting.title).font(.system(size: 14, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                                Text(meeting.title).font(WindowType.body(14, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
                                 HStack(spacing: 8) {
                                     mono(MeetingExport.clock(meeting.seconds), size: 11, color: Palette.ink70)
                                     if recorder.finishing.contains(meeting.id) { mono("Finishing", size: 11, color: Palette.accentDeep) }
@@ -157,14 +171,17 @@ struct MeetingsPage: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(meeting.title).font(.system(size: 22, weight: .bold)).tracking(-0.5).textSelection(.enabled)
+                    Text(meeting.title).font(WindowType.body(22, weight: .bold)).tracking(-0.5).textSelection(.enabled)
                     mono("\(MeetingExport.clock(meeting.seconds)) · \(meeting.source.micOnly ? "My microphone only" : "Me and \(meeting.source.name)") · \(meeting.transcribedBy.map { "Transcribed by \($0)" } ?? "Transcribed on this Mac")", size: 11, color: Palette.ink70)
-                    HStack(spacing: 12) {
+                    let actions = Group {
                         if meeting.notes?.isEmpty == false { Button("Copy Notes") { recorder.copyNotes(meeting) }.buttonStyle(InkButtonStyle(kind: .outline)) }
                         Button("Copy Transcript") { recorder.copyTranscript(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
                         Button("Save Markdown…") { recorder.saveMarkdown(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
-                        Spacer()
                         Button("Delete…") { confirmDelete = meeting }.buttonStyle(InkButtonStyle(kind: .plain))
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { actions }.fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: 8) { actions }
                     }
                     if recorder.finishing.contains(meeting.id) { lede("Finishing the transcript…", color: Palette.accentDeep) }
                     else if let left = recorder.leftovers[meeting.id] {
@@ -173,12 +190,13 @@ struct MeetingsPage: View {
                             Button("Finish Transcript") { recorder.finishLeftovers(meeting.id) }.buttonStyle(InkButtonStyle(kind: .filled))
                         }
                     }
-                    HStack(spacing: -1.5) {
+                    HStack(spacing: 12) {
                         ForEach(DetailTab.allCases, id: \.self) { item in
                             Button { tab = item } label: {
-                                Text(item.rawValue).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 14).frame(height: 32)
-                                    .foregroundStyle(tab == item ? Palette.paper : Palette.ink).background(tab == item ? Palette.ink : Color.clear)
-                                    .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).contentShape(Rectangle())
+                                Text(item.rawValue).font(WindowType.body(13, weight: .semibold)).padding(.horizontal, 14).frame(height: 32)
+                                    .foregroundStyle(tab == item ? Palette.ink : Palette.ink70)
+                                    .overlay(alignment: .bottom) { Rectangle().fill(tab == item ? Palette.accentInk : Color.clear).frame(height: 2) }
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain).accessibilityAddTraits(tab == item ? .isSelected : [])
                         }
@@ -187,7 +205,7 @@ struct MeetingsPage: View {
                     switch tab {
                     case .notes: notesTab(meeting)
                     case .mine:
-                        TextEditor(text: $notesDraft).font(.system(size: 14)).scrollContentBackground(.hidden).frame(minHeight: 160)
+                        TextEditor(text: $notesDraft).font(WindowType.body(14)).scrollContentBackground(.hidden).frame(minHeight: 160)
                             .padding(6).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
                             .onChange(of: notesDraft) { if notesDraft != meeting.myNotes { recorder.setNotes(notesDraft, for: meeting.id) } }
                             .onAppear { notesDraft = meeting.myNotes }
@@ -197,7 +215,7 @@ struct MeetingsPage: View {
                         HStack {
                             Spacer()
                             if meeting.lines.contains(where: { $0.shown != nil }) {
-                                Toggle("Show hidden echo", isOn: $showEcho).toggleStyle(.checkbox).font(.system(size: 13))
+                                Toggle("Show hidden echo", isOn: $showEcho).toggleStyle(.checkbox).font(WindowType.body(13))
                             }
                         }
                         if meeting.lines.isEmpty { lede("No words were transcribed.") }
@@ -247,7 +265,7 @@ struct MeetingsPage: View {
                 }
             }
             if notes.isEmpty { lede("Nothing in the transcript could be written up as a point, decision or action item.") }
-            if let summary = notes.summary { Text(summary).font(.system(size: 15)).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+            if let summary = notes.summary { Text(summary).font(WindowType.body(15)).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
             noteSection("Key points", notes.keyPoints, meeting: meeting)
             noteSection("Decisions", notes.decisions, meeting: meeting)
             noteSection("Action items", notes.actions, meeting: meeting, actions: true)
@@ -316,9 +334,9 @@ struct MeetingsPage: View {
                         if actions {
                             Toggle("", isOn: Binding(get: { item.done == true }, set: { _ in recorder.toggleAction(index, of: meeting.id) }))
                                 .toggleStyle(.checkbox).labelsHidden().accessibilityLabel(item.done == true ? "Done" : "Not done")
-                        } else { Text("•").font(.system(size: 14)).accessibilityHidden(true) }
+                        } else { Text("•").font(WindowType.body(14)).accessibilityHidden(true) }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(item.text).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            Text(item.text).font(WindowType.body(14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                                 .strikethrough(item.done == true)
                             HStack(spacing: 8) {
                                 if let owner = item.owner { mono(owner, size: 10, color: Palette.ink70) }
@@ -348,7 +366,7 @@ struct MeetingNotesRoutePicker: View {
             Picker("Meeting notes", selection: $selection) {
                 ForEach(MeetingNotesRoute.allCases, id: \.self) { Text($0.label).tag($0) }
             }
-            .pickerStyle(.radioGroup).labelsHidden().font(.system(size: 14))
+            .pickerStyle(.radioGroup).labelsHidden().font(WindowType.body(14))
             lede(controller.meetingNotesDisclosure(selection), color: Palette.ink)
             if selection != MeetingNotesRoute.none, let refusal = controller.meetingNotesSetupProblem(selection) { lede(refusal, color: Palette.accentDeep) }
         }
@@ -362,7 +380,7 @@ struct MeetingNotesChoiceSheet: View {
     @State private var route = MeetingNotesRoute.none
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Write notes for your meetings?").font(.system(size: 20, weight: .bold))
+            Text("Write notes for your meetings?").font(WindowType.body(20, weight: .bold))
             lede("After Stop, a model can write a title, a summary, key points, decisions and action items from the transcript. Each item cites the lines it rests on, and items the transcript does not support are left out. You can change this in Settings → Meetings.")
             MeetingNotesRoutePicker(controller: controller, selection: $route)
             HStack {
@@ -401,7 +419,7 @@ struct MeetingLineRow: View {
             }
             .frame(width: label == nil ? 44 : 96, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
-                Text(showEcho ? line.text : line.visibleText).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text(showEcho ? line.text : line.visibleText).font(WindowType.body(14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(line.isHidden ? Palette.ink45 : Palette.ink)
                 if line.localFallback == true { mono("Transcribed on this Mac: the cloud failed", size: 10, color: Palette.ink45) }
                 if showEcho && line.shown != nil { mono(line.isHidden ? "Hidden as echo" : "Echo partly hidden", size: 10, color: Palette.ink45) }
@@ -418,9 +436,9 @@ struct MeetingConsentSheet: View {
     @State private var ticked = false
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(MeetingConsent.title).font(.system(size: 20, weight: .bold))
+            Text(MeetingConsent.title).font(WindowType.body(20, weight: .bold))
             lede(MeetingConsent.body)
-            Toggle(MeetingConsent.acknowledgement, isOn: $ticked).toggleStyle(.checkbox).font(.system(size: 14, weight: .semibold))
+            Toggle(MeetingConsent.acknowledgement, isOn: $ticked).toggleStyle(.checkbox).font(WindowType.body(14, weight: .semibold))
             HStack {
                 Spacer()
                 Button("Cancel") { done(false) }.buttonStyle(InkButtonStyle(kind: .plain)).keyboardShortcut(.cancelAction)
@@ -634,7 +652,7 @@ struct SpeakerSettingsSection: View {
                     lede(SpeakerFacts.explanation)
                 }
             }
-            .toggleStyle(SquareToggleStyle())
+            .toggleStyle(MurmurToggleStyle())
             if settings.enabled {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {

@@ -21,6 +21,7 @@ swiftc -swift-version 5 -target arm64-apple-macos26.0 \
   -o "$fixture_path/Contents/MacOS/UIQA"
 mkdir -p "$fixture_path/Contents/Resources"
 cp -R "$project_root/app/Fonts" "$fixture_path/Contents/Resources/"
+cp "$project_root/module-one/models/artifact-pins.json" "$fixture_path/Contents/Resources/artifact-pins.json"
 cp "$project_root/app/Info.plist" "$fixture_path/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable UIQA' "$fixture_path/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier cc.clouddev.dictation.uiqa' "$fixture_path/Contents/Info.plist"
