@@ -99,7 +99,7 @@ struct InkButtonStyle: ButtonStyle {
 }
 
 /// A square switch; VoiceOver still sees a native toggle.
-private struct SquareToggleStyle: ToggleStyle {
+struct SquareToggleStyle: ToggleStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 24) {
@@ -490,6 +490,7 @@ struct SettingsView: View {
                 help("No cloud transcriber is set up. Choose one and save its key in Settings → Transcription and API Keys.", color: Palette.ink)
             }
             help("A change applies to meetings started afterwards; a meeting in progress keeps its route. Dictation’s route is set separately in Transcription.", color: Palette.ink64)
+            SpeakerSettingsSection(settings: controller.speakerSettings)
         }
     }
 

@@ -4,7 +4,7 @@
 // microphone, tap or network. The helper client is a serial queue, like WarmRunner.
 //
 //   SDKROOT="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk" swiftc -O -swift-version 5 -parse-as-library -suppress-warnings \
-//     module-one/capture/Capture.swift app/Retention.swift app/Meetings.swift app/MeetingCapture.swift app/tools/measure_meeting.swift -o /tmp/mm
+//     module-one/capture/Capture.swift app/Retention.swift app/Meetings.swift app/MeetingSpeakers.swift app/MeetingCapture.swift app/tools/measure_meeting.swift -o /tmp/mm
 //   /tmp/mm HELPER MODELS BENCH_DIR MINUTES SPEED [--dictation]
 //
 // BENCH_DIR holds test-clean-100.jsonl and wav/ (MODEL_BENCHMARK.md). MINUTES of meeting audio per

@@ -43,6 +43,9 @@ struct MeetingsPage: View {
     @State private var search = ""
     @State private var notesDraft = ""
     @State private var confirmDelete: Meeting?
+    /// The speaker being renamed (W7d) and the name typed so far.
+    @State private var renaming: Int?
+    @State private var nameDraft = ""
 
     private var filtered: [Meeting] {
         let query = search.trimmingCharacters(in: .whitespaces).lowercased()
@@ -121,6 +124,7 @@ struct MeetingsPage: View {
                                 HStack(spacing: 8) {
                                     mono(MeetingExport.clock(meeting.seconds), size: 11, color: Palette.ink70)
                                     if recorder.finishing.contains(meeting.id) { mono("Finishing", size: 11, color: Palette.accentDeep) }
+                                    else if recorder.separating.contains(meeting.id) { mono("Separating speakers", size: 11, color: Palette.accentDeep) }
                                     else if let left = recorder.leftovers[meeting.id] { mono("\(left) parts left", size: 11, color: Palette.accentDeep) }
                                 }
                             }
@@ -152,6 +156,7 @@ struct MeetingsPage: View {
                         Button("Finish Transcript") { recorder.finishLeftovers(meeting.id) }.buttonStyle(InkButtonStyle(kind: .filled))
                     }
                 }
+                speakers(meeting)
                 mono("My notes", size: 11, color: Palette.accentInk).padding(.top, 6)
                 TextEditor(text: $notesDraft).font(.system(size: 14)).scrollContentBackground(.hidden).frame(minHeight: 70)
                     .padding(6).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
@@ -169,11 +174,59 @@ struct MeetingsPage: View {
                 if meeting.lines.isEmpty { lede("No words were transcribed.") }
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(meeting.lines.filter { showEcho || !$0.isHidden }) { line in
-                        MeetingLineRow(line: line, showEcho: showEcho)
+                        MeetingLineRow(line: line, showEcho: showEcho, label: MeetingSpeakers.label(line, in: meeting),
+                                       moveTo: meeting.speakers?.state == .done && line.stream == .them ? { recorder.reassignLine(line.id, to: $0, in: meeting.id) } : nil,
+                                       speakers: MeetingSpeakers.numbers(meeting).map { ($0, meeting.speakers?.names[$0] ?? "Speaker \($0)") })
                     }
                 }
             }
             .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .alert("Rename speaker", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("Name", text: $nameDraft)
+            Button("Rename") { if let number = renaming { recorder.renameSpeaker(number, to: nameDraft, in: meeting.id) }; renaming = nil }
+            Button("Cancel", role: .cancel) { renaming = nil }
+        } message: { Text("The name is kept with this meeting only. Leave it empty to go back to “Speaker \(renaming ?? 0)”.") }
+    }
+
+    /// Speaker separation (W7d, PRD 11.8 and 11.9): progress with Skip, then each speaker with
+    /// Rename and Merge. Names and merges belong to this meeting only.
+    @ViewBuilder private func speakers(_ meeting: Meeting) -> some View {
+        if let status = SpeakerFacts.status(meeting.speakers, running: recorder.separating.contains(meeting.id)) {
+            HStack(spacing: 12) {
+                lede(status, color: meeting.speakers?.state == .failed ? Palette.ink70 : Palette.accentDeep)
+                Spacer()
+                if meeting.speakers?.state == .pending { Button("Skip") { recorder.skipSeparation(meeting.id) }.buttonStyle(InkButtonStyle(kind: .outline)) }
+            }
+        }
+        let numbers = MeetingSpeakers.numbers(meeting)
+        if meeting.speakers?.state == .done, !numbers.isEmpty {
+            mono("Speakers", size: 11, color: Palette.accentInk).padding(.top, 6)
+            FlowRow(numbers.map { number in
+                AnyView(Menu(meeting.speakers?.names[number] ?? "Speaker \(number)") {
+                    Button("Rename…") { nameDraft = meeting.speakers?.names[number] ?? ""; renaming = number }
+                    if numbers.count > 1 {
+                        Menu("Merge into") {
+                            ForEach(numbers.filter { $0 != number }, id: \.self) { other in
+                                Button(meeting.speakers?.names[other] ?? "Speaker \(other)") { recorder.mergeSpeaker(number, into: other, in: meeting.id) }
+                            }
+                        }
+                    }
+                }.menuStyle(.button).fixedSize())
+            })
+            lede("Names stay with this meeting. To move one line, use its speaker label.", color: Palette.ink64)
+        }
+    }
+}
+
+/// Lays chips out left to right; SwiftUI's HStack would not wrap on a narrow window.
+private struct FlowRow: View {
+    let items: [AnyView]
+    init(_ items: [AnyView]) { self.items = items }
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { ForEach(items.indices, id: \.self) { items[$0] } }
+            VStack(alignment: .leading, spacing: 6) { ForEach(items.indices, id: \.self) { items[$0] } }
         }
     }
 }
@@ -183,10 +236,27 @@ private struct ConsentItem: Identifiable { let source: MeetingSource; var id: St
 struct MeetingLineRow: View {
     let line: MeetingLine
     var showEcho = false
+    /// "Speaker 2" or a given name once speakers are separated (W7d); the stream's label otherwise.
+    var label: String? = nil
+    /// Set on Them lines after separation: moves this line to another (or a new) speaker.
+    var moveTo: ((Int) -> Void)? = nil
+    var speakers: [(Int, String)] = []
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             mono(MeetingExport.clock(line.start), size: 11, color: Palette.ink64).frame(width: 56, alignment: .leading)
-            mono(MeetingExport.label(line.stream), size: 11, color: line.stream == .me ? Palette.accentInk : Palette.ink).frame(width: 44, alignment: .leading)
+            let name = label ?? MeetingExport.label(line.stream)
+            Group {
+                if let moveTo {
+                    Menu {
+                        ForEach(speakers.filter { $0.0 != line.speaker }, id: \.0) { speaker in Button("Move to \(speaker.1)") { moveTo(speaker.0) } }
+                        Button("Move to a new speaker") { moveTo((speakers.map(\.0).max() ?? 0) + 1) }
+                    } label: { mono(name, size: 11, color: Palette.ink).lineLimit(1) }
+                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).accessibilityLabel("\(name), change speaker")
+                } else {
+                    mono(name, size: 11, color: line.stream == .me ? Palette.accentInk : Palette.ink).lineLimit(1)
+                }
+            }
+            .frame(width: label == nil ? 44 : 96, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
                 Text(showEcho ? line.text : line.visibleText).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(line.isHidden ? Palette.ink45 : Palette.ink)
@@ -394,5 +464,43 @@ private struct LivePanelRoot: View {
         MeetingLiveView(recorder: recorder, collapsed: $collapsed)
             .onChange(of: collapsed) { changed(collapsed) }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+    }
+}
+
+/// Settings → Meetings → speaker separation (W7d): the switch, then its optional download while on.
+struct SpeakerSettingsSection: View {
+    @ObservedObject var settings: SpeakerModelSettings
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            mono("Speakers", size: 11, color: Palette.accentInk).padding(.top, 18)
+            Toggle(isOn: $settings.enabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(SpeakerFacts.displayName).font(.system(size: 16, weight: .semibold))
+                    lede(SpeakerFacts.explanation)
+                }
+            }
+            .toggleStyle(SquareToggleStyle())
+            if settings.enabled {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(settings.summary).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                        if settings.row.isReady { mono("Ready ✓", color: Palette.accentInk) }
+                        else { lede(settings.row.statusText) }
+                    }
+                    Spacer()
+                    let row = settings.row
+                    if row.actions.contains(.download) { Button("Download…", action: settings.download).buttonStyle(InkButtonStyle()).fixedSize() }
+                    if row.actions.contains(.retry) { Button("Retry…", action: settings.download).buttonStyle(InkButtonStyle()).fixedSize() }
+                    if row.actions.contains(.cancel) { Button("Cancel", action: settings.cancelDownload).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+                    if row.actions.contains(.remove) { Button("Remove…", role: .destructive, action: settings.remove).buttonStyle(InkButtonStyle(kind: .outline)).fixedSize() }
+                }
+                if let progress = settings.row.progress {
+                    ProgressView(value: progress).accessibilityLabel("Download progress")
+                }
+                if !settings.row.isReady { lede("Until it is downloaded, the call’s side is labelled Them and no audio is kept.", color: Palette.ink64) }
+                if !settings.message.isEmpty { lede(settings.message, color: Palette.ink) }
+                lede(SpeakerFacts.credits, color: Palette.ink64)
+            }
+        }
     }
 }

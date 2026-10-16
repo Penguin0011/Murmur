@@ -28,7 +28,7 @@ swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-c
 /tmp/dictation-launch-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
 /tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Insights.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/Meetings.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/MeetingsUI.swift app/check_controller.swift -o /tmp/dictation-controller-check
+swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Insights.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/Meetings.swift app/MeetingSpeakers.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/MeetingsUI.swift app/check_controller.swift -o /tmp/dictation-controller-check
 /tmp/dictation-controller-check
 swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/check_recording.swift -o /tmp/murmur-recording-check
 /tmp/murmur-recording-check
@@ -104,7 +104,7 @@ swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check
 /tmp/murmur-updates-check
 swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check
 /tmp/murmur-insights-check
-swiftc app/Retention.swift app/Meetings.swift app/check_meetings.swift -o /tmp/murmur-meetings-check
+swiftc app/Retention.swift app/Meetings.swift app/MeetingSpeakers.swift app/check_meetings.swift -o /tmp/murmur-meetings-check
 /tmp/murmur-meetings-check
 ```
 
