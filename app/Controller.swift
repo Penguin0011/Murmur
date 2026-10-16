@@ -67,6 +67,10 @@ final class WarmRunner: @unchecked Sendable {
         send(boundary ? (try? JSONSerialization.data(withJSONObject: ["boundary": audio.path])).map { String(decoding: $0, as: UTF8.self) } : audio.path,
              helper: helper, launch: launch, completion: completion)
     }
+    /// A meeting's Them chunk with speaker separation on: the answer adds `words` (W7d).
+    func transcribeTimed(_ audio: URL, helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
+        send((try? JSONSerialization.data(withJSONObject: ["timed": audio.path])).map { String(decoding: $0, as: UTF8.self) }, helper: helper, launch: launch, completion: completion)
+    }
     /// 16 kHz mono samples held in memory (an undone cancel); the answer is like an audio path's.
     func transcribe(samples: [Float], helper: URL, launch: HelperLaunch, completion: @escaping (Data?) -> Void) {
         let encoded = samples.withUnsafeBytes { Data($0).base64EncodedString() }
@@ -447,8 +451,12 @@ final class PreStart: @unchecked Sendable {
     var openSettings: (() -> Void)?
     var updateMenu: (() -> Void)?
     lazy var bubble = BubblePresenter(controller: self)
+    /// Meeting detection (PRD 11.7): offers meeting notes when a call app or browser uses the microphone.
+    lazy var callOffers = CallOfferPresenter(controller: self)
     /// Meeting notes (PRD section 11): its own capture and store, sharing the warm helper.
     let meetingRecorder = MeetingRecorder()
+    /// Settings → Meetings → speaker separation (W7d): the switch and its optional download.
+    let speakerSettings = SpeakerModelSettings()
     private var store: HistoryStore?
     /// All history reads and writes; it keeps entries in memory only when history is off.
     private var records: HistoryRouter<HistoryEntry>?
@@ -663,6 +671,7 @@ final class PreStart: @unchecked Sendable {
                 guard let self else { return }
                 self.voiceLevel = self.capture?.queue.sync { self.capture?.level ?? 0 } ?? 0
                 self.meetingRecorder.tick()
+                if !self.preview { self.callOffers.tick() }
                 // A canceled or empty recording's audio is gone; drop its chunk transcripts.
                 for (audio, job) in self.chunkJobs where !FileManager.default.fileExists(atPath: audio.path) { job.discard(); self.chunkJobs[audio] = nil }
                 // Download progress and the verifying phase are sampled here, on the main thread.
@@ -1932,8 +1941,29 @@ final class PreStart: @unchecked Sendable {
                            persists: appliedHistoryMode.persistsTranscripts)
         recorder.applyDictionary = { [weak self] text in self?.processing?.dictionary.apply(to: text, isCommonWord: isCommonEnglishWord) ?? text }
         recorder.onLiveChange = { [weak self] in self?.updateMenu?(); self?.meetingPanelChanged?() }
+        recorder.notesRoute = { [weak self] in self?.meetingNotesRoute }
+        recorder.notesWriter = { [weak self] meeting in
+            guard let self else { throw NotesFailure.failed("Murmur is closing.") }
+            return try await self.writeMeetingNotes(meeting)
+        }
+        recorder.onNotesChoiceNeeded = { [weak self] in self?.screenRequest = "meetings"; self?.openSettings?() }
+        speakerSettings.attach(recorder, preview: preview) { [weak self] in self?.isBusy ?? true }
         guard !preview, let helper = Bundle.main.url(forAuxiliaryExecutable: "ModelBench"), let manifest = Bundle.main.url(forResource: "artifact-pins", withExtension: "json") else { return }
         let warm = warm
+        recorder.helper = helper
+        recorder.transcribeTimed = { [weak self] url, done in
+            guard let self else { done(nil); return }
+            let models = URL(fileURLWithPath: self.modelDirectory), vocabulary = self.vocabularyFile, dictionaryModel = self.dictionaryModelDirectory
+            DispatchQueue.global(qos: .utility).async {
+                guard (try? ModelVerificationCache.shared.verify(models, manifest: manifest)) != nil,
+                      let launch = HelperLaunch.make(models: models, manifest: manifest, vocabulary: vocabulary, dictionaryModel: dictionaryModel) else { done(nil); return }
+                warm.transcribeTimed(url, helper: helper, launch: launch) { line in
+                    let answer = line.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                    guard let text = answer?["text"] as? String else { done(nil); return }
+                    done(ChunkText(text: text, words: answer?["words"] as? [[Double]]))
+                }
+            }
+        }
         recorder.transcribe = { [weak self] url, done in
             guard let self else { done(nil); return }
             let models = URL(fileURLWithPath: self.modelDirectory), vocabulary = self.vocabularyFile, dictionaryModel = self.dictionaryModelDirectory
@@ -1959,6 +1989,73 @@ final class PreStart: @unchecked Sendable {
         guard let disclosure = plan.stages.first(where: { $0.disclosure.stage == .transcription })?.disclosure else { return nil }
         return (disclosure.summary, MeetingRoute.cloudNote(provider: disclosure.provider.displayName, host: disclosure.destinationHost, storesAudio: routes.cloudTranscriber == .gemini))
     }
+    /// Settings → Meetings → Meeting notes (Q3). Nil until the first Stop asks, with None preselected.
+    @Published var meetingNotesRoute = MeetingNotesRoute.load(.standard) {
+        didSet {
+            if let route = meetingNotesRoute { UserDefaults.standard.set(route.rawValue, forKey: MeetingNotesRoute.key) }
+            else { UserDefaults.standard.removeObject(forKey: MeetingNotesRoute.key) }
+        }
+    }
+
+    /// The notes route's provider, built from the applied settings and the Keychain like cleanup's,
+    /// or why it cannot run. Never falls back to another route.
+    func meetingNotesProvider(_ route: MeetingNotesRoute) -> (provider: CleanupProvider?, refusal: String?) {
+        let choice: CleanupChoice
+        switch route {
+        case .none: return (nil, "Meeting notes are off. Choose a notes route in Settings → Meetings.")
+        case .appleIntelligence:
+            let apple = AppleCleanupProvider()
+            return apple.status().map { (nil, $0.userMessage) } ?? (apple, nil)
+        case .gemini: choice = .gemini
+        case .customAPI: choice = .customAPI
+        }
+        var routes = appliedRoutes; routes.transcription = .local; routes.cleanup = choice
+        let plan = routePlan(routes, cleanupSendsText: true)
+        guard let cleaner = plan.cleaner else { return (nil, (plan.refusal ?? "\(route.label) is not set up.") + " Set it up in Settings → Cleanup and API Keys.") }
+        // A whole meeting takes longer than a dictation: allow the longest wait each route permits.
+        if var gemini = cleaner as? GeminiCleanupProvider { gemini.timeout = 120; return (gemini, nil) }
+        if var custom = cleaner as? OpenAICompatibleCleanupProvider { custom.timeout = OpenAICompatibleCleanupProvider.maximumTimeout; return (custom, nil) }
+        return (cleaner, nil)
+    }
+
+    /// Why a notes route cannot run, for Settings. Checks only that a key exists, so rendering never
+    /// reads the Keychain; the key is read when notes are written.
+    func meetingNotesSetupProblem(_ route: MeetingNotesRoute) -> String? {
+        switch route {
+        case .none: return nil
+        case .appleIntelligence: return AppleCleanupProvider().status()?.userMessage
+        case .gemini, .customAPI:
+            var routes = appliedRoutes; routes.transcription = .local; routes.cleanup = route == .gemini ? .gemini : .customAPI
+            let plan = RoutePlan.make(routes, cleanupSendsText: true) { self.credentials.exists($0) ? APIKey("disclosure-only") : nil }
+            return plan.cleaner == nil ? (plan.refusal ?? "\(route.label) is not set up.") + " Set it up in Settings → Cleanup and API Keys." : nil
+        }
+    }
+
+    /// Who receives the transcript on a notes route, for Settings and the first-Stop question.
+    func meetingNotesDisclosure(_ route: MeetingNotesRoute) -> String {
+        guard route == .gemini || route == .customAPI else { return MeetingNotesRoute.disclosure(route, host: nil, local: true, retention: nil) }
+        var routes = appliedRoutes; routes.transcription = .local; routes.cleanup = route == .gemini ? .gemini : .customAPI
+        let disclosure = RoutePlan.make(routes, cleanupSendsText: true) { _ in APIKey("disclosure-only") }.stages.first?.disclosure
+        let local = disclosure?.staysOnThisMac ?? false
+        let warning = disclosure?.warning.map { " " + $0 } ?? ""
+        return MeetingNotesRoute.disclosure(route, host: disclosure?.destinationHost, local: local, retention: (disclosure?.retentionNote ?? "") + warning)
+    }
+
+    /// Writes notes for a finished meeting on the route chosen now (PRD 11.6).
+    func writeMeetingNotes(_ meeting: Meeting) async throws -> MeetingNotesWriter.Outcome {
+        let route = meetingNotesRoute ?? .none
+        let built = meetingNotesProvider(route)
+        guard let provider = built.provider else { throw NotesFailure.failed(built.refusal ?? "Notes could not be written.") }
+        let name = route == .appleIntelligence ? "Apple Intelligence (on-device, less accurate)" : provider.id.displayName
+        let structured = route == .appleIntelligence
+        return try await MeetingNotesWriter.write(meeting, route: route, routeName: name, structured: structured) { system, user in
+            do { return structured ? try await AppleSystemModel.notes(system: system, user: user) : try await provider.cleanup(CleanupMessages(system: system, user: user)) }
+            catch ProviderError.payloadTooLarge { throw NotesFailure.tooLarge }
+            catch let error as ProviderError { throw NotesFailure.failed(error.userMessage) }
+            catch { throw NotesFailure.failed("Notes could not be written.") }
+        }
+    }
+
     /// Shows or hides the live meeting panel; set by the app delegate.
     var meetingPanelChanged: (() -> Void)?
     /// Start from the Meetings page, Home or the menu bar. Meetings need the local model (Q2).

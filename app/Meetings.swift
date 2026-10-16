@@ -19,6 +19,11 @@ struct MeetingLine: Codable, Equatable, Identifiable {
     var shown: String? = nil
     /// True when the meeting's cloud route failed for this chunk and this Mac transcribed it.
     var localFallback: Bool? = nil
+    /// Them lines after speaker separation (W7d, PRD 11.8): the speaker's number in this meeting.
+    var speaker: Int? = nil
+    /// Them lines while speaker separation is pending: [start, end] of each word in `text`, in
+    /// seconds from `start`, so the line can be split where the voice changes. Dropped once used.
+    var words: [[Double]]? = nil
 
     var isHidden: Bool { shown == "" }
     /// What the transcript, exports and (later) notes use.
@@ -51,19 +56,26 @@ struct Meeting: Codable, Identifiable, Equatable {
     var finished = false
     /// The cloud transcriber's name when the meeting used the cloud route; nil means this Mac.
     var transcribedBy: String? = nil
+    /// Written after Stop by the notes route (W7b, PRD 11.6). Optional, so W7a records still decode.
+    var notes: MeetingNotes? = nil
+    /// Speaker separation (W7d): nil when it was off for this meeting.
+    var speakers: SpeakerSeparation? = nil
 
-    var title: String {
+    /// The notes' title once they have one, otherwise the source and date.
+    var title: String { notes?.title ?? defaultTitle }
+    var defaultTitle: String {
         let date = DateFormatter.localizedString(from: recordedAt, dateStyle: .medium, timeStyle: .short)
         if source.micOnly { return "Meeting notes, \(date)" }
         return source.allApps ? "Meeting, \(date)" : "Meeting with \(source.name), \(date)"
     }
 
     /// Inserts a transcribed line in capture-time order and re-runs echo suppression near it.
-    mutating func insert(stream: MeetingStream, start: Double, end: Double, text: String, localFallback: Bool = false) {
+    mutating func insert(stream: MeetingStream, start: Double, end: Double, text: String, localFallback: Bool = false, words: [[Double]]? = nil) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         var line = MeetingLine(id: (lines.map(\.id).max() ?? 0) + 1, stream: stream, start: start, end: end, text: trimmed)
         if localFallback { line.localFallback = true }
+        if let words, words.count == trimmed.split(whereSeparator: \.isWhitespace).count { line.words = words }
         let index = lines.firstIndex { $0.start > start || ($0.start == start && $0.stream == .them && stream == .me) } ?? lines.endIndex
         lines.insert(line, at: index)
         seconds = max(seconds, end)
@@ -262,6 +274,8 @@ enum MeetingTranscription: String, Codable, CaseIterable {
 struct ChunkText: Equatable {
     let text: String
     var localFallback = false
+    /// Word times for a Them chunk while speaker separation is pending (W7d); nil otherwise.
+    var words: [[Double]]? = nil
 }
 
 enum MeetingCloudResult: Equatable { case text(String), noSpeech, failed }
@@ -452,20 +466,50 @@ enum MeetingExport {
     static func label(_ stream: MeetingStream) -> String { stream == .me ? "Me" : "Them" }
     /// Visible lines only: hidden echo is left out of exports.
     static func transcript(_ meeting: Meeting) -> String {
-        meeting.lines.filter { !$0.isHidden }.map { "[\(clock($0.start))] \(label($0.stream)): \($0.visibleText)" }.joined(separator: "\n")
+        meeting.lines.filter { !$0.isHidden }.map { "[\(clock($0.start))] \(MeetingSpeakers.label($0, in: meeting)): \($0.visibleText)" }.joined(separator: "\n")
     }
     static func markdown(_ meeting: Meeting) -> String {
-        var out = "# \(meeting.title)\n\n"
+        var out = "# \(escape(meeting.title))\n\n"
         out += "- Date: \(ISO8601DateFormatter().string(from: meeting.recordedAt))\n- Length: \(clock(meeting.seconds))\n"
         out += "- Audio: \(meeting.source.micOnly ? "my microphone only" : "my microphone and \(meeting.source.name)")\n"
         out += "- Transcribed: \(meeting.transcribedBy.map { "by \($0)" } ?? "on this Mac")\n"
-        let notes = meeting.myNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !notes.isEmpty { out += "\n## My notes\n\n\(notes)\n" }
+        if meeting.speakers?.state == .done {
+            let names = MeetingSpeakers.numbers(meeting).map { meeting.speakers?.names[$0] ?? "Speaker \($0)" }
+            if !names.isEmpty { out += "- Speakers: \(escape((["Me"] + names).joined(separator: ", ")))\n" }
+        }
+        if let notes = meeting.notes, !notes.isEmpty { out += "\n## Notes\n\n" + self.notes(meeting, markdown: true) + "\n" }
+        let mine = meeting.myNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !mine.isEmpty { out += "\n## My notes\n\n\(mine)\n" }
         out += "\n## Transcript\n\n"
         for line in meeting.lines where !line.isHidden {
-            out += "**\(label(line.stream))** [\(clock(line.start))]: \(escape(line.visibleText))\n\n"
+            out += "**\(escape(MeetingSpeakers.label(line, in: meeting)))** [\(clock(line.start))]: \(escape(line.visibleText))\n\n"
         }
         return out
+    }
+    /// The generated notes (PRD 11.6) for Copy Notes, or the Markdown export's Notes section. Each
+    /// item ends with the time of the first line it cites. Model text is escaped like transcript text.
+    static func notes(_ meeting: Meeting, markdown: Bool = false) -> String {
+        guard let notes = meeting.notes else { return "" }
+        let times = Dictionary(meeting.lines.map { ($0.id, $0.start) }, uniquingKeysWith: { a, _ in a })
+        let text: (String) -> String = markdown ? escape : { $0 }
+        func item(_ item: NoteItem, box: Bool) -> String {
+            var line = (box ? (item.done == true ? "- [x] " : "- [ ] ") : "- ") + text(item.text)
+            var extra: [String] = []
+            if let owner = item.owner { extra.append(text(owner)) }
+            if let due = item.due { extra.append("due " + text(due)) }
+            if !extra.isEmpty { line += " (" + extra.joined(separator: ", ") + ")" }
+            if let first = item.lines.compactMap({ times[$0] }).min() { line += " [\(clock(first))]" }
+            return line
+        }
+        var sections: [String] = []
+        if !markdown { sections.append(meeting.title) }
+        if let summary = notes.summary { sections.append(text(summary)) }
+        let heading = markdown ? "### " : ""
+        if !notes.keyPoints.isEmpty { sections.append(heading + "Key points\n" + notes.keyPoints.map { item($0, box: false) }.joined(separator: "\n")) }
+        if !notes.decisions.isEmpty { sections.append(heading + "Decisions\n" + notes.decisions.map { item($0, box: false) }.joined(separator: "\n")) }
+        if !notes.actions.isEmpty { sections.append(heading + "Action items\n" + notes.actions.map { item($0, box: true) }.joined(separator: "\n")) }
+        sections.append("Written by \(notes.route) from the transcript\(notes.outdated == true ? "; out of date" : "").")
+        return sections.joined(separator: "\n\n")
     }
     /// Transcript text is data: a line that starts like Markdown structure stays plain text.
     static func escape(_ text: String) -> String {

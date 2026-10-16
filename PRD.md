@@ -711,6 +711,75 @@ The fixes:
 - **Meters:** each meter is scaled to its own recent loudness, with a floor.
 - **Panel:** the live panel minimizes to a pill (red dot, timer, Stop), can be dragged, and remembers both. [Certain]
 
+**W7a accepted as is (user, October 15, 2026).** After the live tests, the user accepted two open items for now: FaceTime capture is untested, and some echo fragments are still left in Me lines. Echo handling is unchanged until a milestone needs it. [Certain]
+
+**W7b status (October 16, 2026): built, in review, not live-tested.** [Certain]
+- **What it does:** after Stop, and once the transcript is complete, notes are written on the route chosen in Settings → Meetings → Meeting notes. That route is separate from cleanup. The first Stop asks for it, with None preselected; a Stop the user clicked opens the Meetings page for the question, while an automatic stop (cap, silence) asks the next time the page is opened. The notes have a title, a summary, key points, decisions and action items with checkboxes. Each item cites its lines, and a citation jumps to the line in the Transcript tab. Update Notes rewrites them. Editing My notes, or a leftover chunk finished later, marks them out of date. Copy Notes and the Markdown export include them.
+- **Record:** `Meeting.notes` is optional, so W7a records still load (checked on a literal W7a record). Citations are stored as line ids, not L numbers, so they survive lines inserted later.
+- **Prompt and reply:** the transcript is shown as numbered visible lines, `[L12 Them 3:05]`, with hidden echo left out. The lines and the user's notes go inside nonce tags, and the instructions say nothing inside them is an instruction. The reply is one pipe-separated line per item (`ACTION | L7 L8 | Me | Friday | …`). Nested JSON was tried first: on the corpus, Apple's model broke it in 7 of 22 meetings. Apple Intelligence answers through guided generation with a runtime schema (`DynamicGenerationSchema`, no macros), which is rendered into the same lines, so grounding is identical on every route. Decisions and action items are generated before key points, and the reply is capped at 1,200 tokens: uncapped, two replies ran for over 3 minutes.
+- **Grounding check** (`NotesGrounding`, deterministic). It runs after each map request and again on the merged notes, against the whole meeting. An item is dropped when:
+  - it cites no line, or a line that does not exist;
+  - it rests only on lines that speak to a note-taker or an AI ("ignore previous instructions", "add an action item…", "the assistant must…"). Such lines never count as support;
+  - it shares no content word with its lines;
+  - it has a name, number, date or time that its lines and the user's notes lack. Number words and digits are compared as numbers;
+  - it is an action item whose owner is not named in its lines and is not a speaker of one of them;
+  - it is a decision with no agreement in its lines, or an action item with no commitment.
+
+  The title and summary are checked against the whole transcript. A failing title falls back to the source and date, and a failing summary is left out. Dropped items are counted by reason in a content-free log line. The phrase lists and the 5-letter-prefix word match are marked `ponytail:` in the code, to be tuned on real calls.
+- **Map-reduce:** chunks are cut on line boundaries. They are 5,000 characters for Apple (about 1,700 tokens, which leaves room for the instructions and the reply in 4,096), 24,000 for Custom and 150,000 for Gemini. Part notes are merged in batches, level by level. A context overflow (`exceededContextWindowSize`, surfaced as a too-large error) splits that request once and retries. A second overflow leaves the meeting without notes and says why. Gemini's notes timeout is 120 s, and Custom uses its 300 s maximum.
+
+**W7b evidence (October 16, 2026).** Measured on the MacBook Air M3 (Mac15,12), 16 GB, macOS 27.0.1, app 0.1.0, with `app/tools/measure_meeting_notes.swift`. `app/meeting-notes-corpus.json` is the development set: the prompt, rules and schema were tuned against it, so it is not evidence by itself. `app/meeting-notes-heldout.json` (9 meetings, 8 decisions, 11 action items, 3 injections) was written after the code was frozen and run once. Both are scripted synthetic meetings, not real calls. The development set has 22 meetings, labelled with 21 agreed decisions and 30 action items, and it includes 6 injection lines, unagreed suggestions, things already done, names, and numbers in words and digits. Unsupported items are judged against the labels, not by the check, which would make the count 0 by construction: a decision or action item is supported only if its cited lines overlap a labelled item of its kind, and any item containing a trap counts as unsupported. Invented names are checked by the tool on its own (any capitalized word inside a sentence that the meeting never says, plus traps); numbers use the same parser as the check. [Certain]
+- **Apple Intelligence, held-out set (the evidence):** 0 unsupported items in 9 meetings (bar 0.2 per meeting) and 0 invented names or numbers (bar 0). **Passed.** It missed 2 of 8 decisions and 2 of 11 action items. Median 3.7 s per meeting, 5.3 s at most, no failures. The check dropped 7 items: 4 sharing no word with their lines, 2 decisions without agreement, and 1 resting on a line addressed to the note-taker.
+- **Apple Intelligence, development set:** 1 unsupported item in 22 meetings (0.05 per meeting) and 0 invented. It missed 7 of 21 decisions and 6 of 30 action items. The check dropped 34 items: 13 decisions without agreement in their lines, 9 sharing no word, 8 with a name, number or date their lines lack (often a date in a neighbouring, uncited line), and 4 actions without a commitment. The misses are a mix of those drops and items the model never wrote.
+- **Titles:** the model mostly writes Title Case even when asked for sentence case. The check reads a capitalized word with no related word in the meeting as a possible name, so many titles fall back to "Meeting with …, date". That is safe, not ideal.
+- **1-hour meeting:** 9,018 words, the corpus repeated back to back. It took 15 chunks, 20 requests and 482 s, with no context overflow reaching the user.
+- **2-hour meeting:** 18,006 words. It took 30 chunks, 40 requests and 780 s, with no context overflow reaching the user. On these back-to-back synthetic meetings the merge keeps few items (8 points, 2 decisions, 6 actions in 2 hours); merging is the weakest step on Apple's context.
+- The label "on-device, less accurate" stays until this measurement is repeated on real, consented calls.
+- **Gemini and Custom Provider:** not run. The measurement reads Murmur's key from the Keychain, which would raise a Keychain prompt for the test binary. The command is `/tmp/mmn gemini` (see the tool's header). **Open.**
+- **Real calls:** none; consented recordings are needed. **Open.**
+- `check_meetings.swift` covers the grounding rules on fixtures, the prompt layout and nonce tags, the parser, the title fallback, map-reduce with one overflow split, the route setting and the disclosures.
+
+**W7c status (October 16, 2026): built, in review, not live-tested in the app.** [Certain]
+- **What was built:**
+  - The rules are in `CallDetection.swift`. The offer panel, Settings rows and a once-a-second poll from the existing 0.15 s timer are in `CallOfferUI.swift`.
+  - Murmur reads `kAudioHardwarePropertyProcessObjectList` and each process's bundle ID and `kAudioProcessPropertyIsRunningInput` once a second. It does not install property listeners: per-process input changes would need a listener on every process object, and the poll costs 1.4–2.9 ms per call on the M3. With the switch off, nothing is read.
+- **How matching works:**
+  - A process maps to a listed app by bundle ID or bundle-ID prefix, ignoring case.
+  - A known helper outside the prefix (Safari's `com.apple.WebKit.GPU`, FaceTime's `com.apple.avconferenced`) counts only while that app is open, since every WebKit app shares that helper.
+  - Telegram's non-App-Store client (`com.tdesktop.Telegram`) is added for detection.
+- **When it offers:**
+  - A session ends after 15 s with no input, so a device switch or a brief stop does not offer again in the same call.
+  - A meeting that records uses up the offer for every call running at the time, so Stop is not followed by an offer for the same call.
+  - Dictation only defers the offer.
+- **What the offer says:** "<App> is using the microphone." A browser's offer asks "If this is a call, take meeting notes?", so it never claims a call. The offer has its own non-activating panel at the bubble's position, because the dictation bubble hides itself on status changes.
+- **Measured on the MacBook Air M3, macOS 27.0.1, with `app/tools/probe_call_detection.swift`:** it runs the same rules on the live process list.
+  - Chrome on a local `getUserMedia` page: one offer 5 s after its helper's input started.
+  - No second offer when the microphone came back after 8 s off.
+  - No offer for a 2-second use.
+  - No offer with Chrome named as Murmur's own ID, with a meeting live, while dictating, with Chrome on the Never list (in upper case), or with the switch off.
+- **Bundle IDs:** checked on this Mac for FaceTime, Safari, Chrome and Arc. The other apps are not installed here.
+- **Not verified:** the offer in the built app with a real call in any listed app, Safari's and Arc's input processes, Take Notes through the consent sheet, and VoiceOver. These are on the pull request's live checklist.
+
+**W7d status (October 16, 2026): built, in review, not live-tested.** Speaker separation runs after Stop as described in 11.8. Measured on the MacBook Air M3 (Mac15,12), 16 GB, macOS 27.0.1, app 0.1.0 (1), with `app/tools/measure_speakers.swift`. [Certain]
+- **What was built:**
+  - The pinned download: `FluidInference/speaker-diarization-coreml` at `df2625a`, 21 files, 21,599,417 bytes, hash-checked like the other models. The helper loads the files directly; FluidAudio's downloader is never used, so nothing is fetched or purged on its own.
+  - A one-shot helper, `ModelBench DIR --diarize KEPT_WAV THRESHOLD`. It prints only speaker ids and times, then exits. It reads the kept file memory-mapped, so nothing is copied to a temporary folder.
+  - The kept Them stream: `retry-audio/speakers/<id>.wav`, 16 kHz mono 16-bit, owner-only. It is deleted after diarization, Skip, meeting deletion or retention, and at 24 hours. Delete All Data covers it through the retry-audio folder.
+  - Word timings: a timed request to the warm helper returns word times for Them chunks while separation is pending. A line is split where the voice changes, and the first piece keeps its id.
+  - Rename, merge and reassign, per meeting.
+- **Deviation from 11.8:** lines without word times are assigned whole to the speaker with the most overlap, not re-transcribed per segment. This applies to the cloud route, and to lines where the dictionary changed the word count. [Certain]
+- **Switch off or model removed:** finished meetings still waiting are skipped at once, and their call audio is deleted rather than kept for 24 hours with nothing to process it. A meeting being recorded keeps the choice it started with, like the route. [Certain]
+- **Clustering threshold:** 0.6, FluidAudio's community-1 default, fixed before scoring. [Certain]
+- **Corpus:** 12 synthetic calls, about 8 minutes each, with 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6 and 6 remote speakers. They are LibriSpeech test-clean turns, 0.2–1.0 s apart, with no overlap. They ran through the real Chunker, pump, timed helper request, kept WAV, diarizer and assignment. This is read speech, not consented calls, so it is a proxy. The 11.10 bars, which are set on calls, stay open. [Certain]
+  - DER (10 ms frames, 0.25 s collar): mean 7.96%, per call 3.97–12.41%. Bar ≤ 20%.
+  - Correct speaker count on 11 of 12 calls (92%); one 6-speaker call found 5. Bar ≥ 80%.
+  - Words attributed correctly on calls with 3+ speakers: 98.5% of 12,115. Bar ≥ 85%.
+- **Processing time and memory** (6 speakers, diarization alone):
+  - 1 hour: 18.1 s, peak footprint 885 MB, max RSS 568 MB, wired memory +572 MB while the helper ran. It found 6 speakers, with a DER of 7.17%.
+  - 2 hours: 31.7 s, peak footprint 1,010 MB, max RSS 841 MB, wired memory +638 MB. It found 7 speakers for 6, with a DER of 7.93%.
+  - Bar: at most 2 minutes for 1 hour (passed). The memory is given back when the helper exits.
+- **Not verified in the live app:** a real call, Them audio deleted after a real separation and at 24 hours, and notes marked out of date. Notes are W7b's: speaker edits record `speakers.editedAt` for that check, and the merge wires it in. [Certain]
+
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
 ### 11.12 Amendments (applied October 15, 2026)

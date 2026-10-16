@@ -5,7 +5,7 @@ import Foundation
 
 // Explicit local directory: no mutable-main download or implicit network access.
 @main struct ModelBench {
-    static let usage = "Usage: ModelBench MODEL_DIRECTORY (AUDIO_FILE [--single] | --serve | --stream SAMPLE_RATE) [--ctc CTC_DIRECTORY --vocabulary VOCABULARY_JSON]"
+    static let usage = "Usage: ModelBench MODEL_DIRECTORY (AUDIO_FILE [--single] | --serve | --stream SAMPLE_RATE | --diarize KEPT_WAV THRESHOLD) [--ctc CTC_DIRECTORY --vocabulary VOCABULARY_JSON]"
 
     static func main() async throws {
         var arguments = Array(CommandLine.arguments.dropFirst())
@@ -21,6 +21,9 @@ import Foundation
         }
         if arguments.count == 3 && arguments[1] == "--stream", let rate = Double(arguments[2]), rate >= 8_000, rate <= 192_000, ctc == nil {
             try await stream(models: URL(fileURLWithPath: arguments[0]), sampleRate: rate); return
+        }
+        if arguments.count == 4 && arguments[1] == "--diarize", let threshold = Double(arguments[3]), threshold > 0, threshold < 2, ctc == nil {
+            try await Diarize.run(models: URL(fileURLWithPath: arguments[0]), audio: URL(fileURLWithPath: arguments[2]), threshold: threshold); return
         }
         if arguments.count == 2 && arguments[1] == "--serve" {
             try await serve(models: URL(fileURLWithPath: arguments[0]), ctc: ctc, vocabulary: vocabulary); return
@@ -69,6 +72,11 @@ import Foundation
                           let text = try? await transcribe(floats(data), manager, dictionary)
                     else { try emit(["error": "transcription failed"]); continue }
                     try emit(["text": text]); continue
+                }
+                if let timed = request?["timed"] as? String {
+                    guard let samples = try? readSamples(timed), let answer = try? await transcribeTimed(samples, manager, dictionary)
+                    else { try emit(["error": "transcription failed"]); continue }
+                    try emit(answer); continue
                 }
                 guard let clip = request?["boundary"] as? String else { try emit(["error": "unknown request"]); continue }
                 let found = (try? await boundaryReplacements(clip, manager, dictionary)) ?? []
@@ -161,6 +169,26 @@ import Foundation
         return await MainActor.run {
             BoostFilter.filter(raw: raw.text, rescored: rescored.text, aliases: dictionary.aliases, isCommonWord: isCommonEnglishWord)
         }
+    }
+
+    /// A meeting's Them chunk with speaker separation on (PRD 11.8): the text as `transcribe` gives
+    /// it, plus `words`, one [start, end] in seconds per word of the raw transcript, so the app can
+    /// split a line where the voice changes. `words` is left out when the dictionary changed the
+    /// word count, since the times would no longer line up with the text.
+    static func transcribeTimed(_ samples: [Float], _ manager: UnifiedAsrManager, _ dictionary: Dictionary?) async throws -> [String: Any] {
+        let raw = try await manager.transcribeWithTimings(samples)
+        var text = raw.text
+        if let dictionary, let rescored = await dictionary.session.rescore(text: raw.text, tokenTimings: raw.tokenTimings, audioSamples: samples), rescored.text != raw.text {
+            text = await MainActor.run { BoostFilter.filter(raw: raw.text, rescored: rescored.text, aliases: dictionary.aliases, isCommonWord: isCommonEnglishWord) }
+        }
+        // A token starting with a space ("▁" in the vocabulary) begins a word.
+        var words: [[Double]] = []
+        for token in raw.tokenTimings {
+            if token.token.hasPrefix(" ") || words.isEmpty { words.append([token.startTime, token.endTime]) }
+            else { words[words.count - 1][1] = token.endTime }
+        }
+        guard words.count == text.split(whereSeparator: \.isWhitespace).count else { return ["text": text] }
+        return ["text": text, "words": words]
     }
 
     static func boundaryReplacements(_ path: String, _ manager: UnifiedAsrManager, _ dictionary: Dictionary?) async throws -> [(from: String, to: String)] {
