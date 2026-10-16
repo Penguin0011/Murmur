@@ -87,7 +87,7 @@ enum AppleSystemModel {
         let item = DynamicGenerationSchema(name: "Item", properties: [cites, .init(name: "text", schema: text)])
         let action = DynamicGenerationSchema(name: "Action", properties: [
             cites,
-            .init(name: "owner", description: "Who took it on, as named in the lines, or Me or Them", schema: text, isOptional: true),
+            .init(name: "owner", description: "Who took it on, as named in the lines, or Me, or the other side’s speaker label as written in the lines (Them, Speaker 2 or a name)", schema: text, isOptional: true),
             .init(name: "due", description: "When it is due, only if said", schema: text, isOptional: true),
             .init(name: "text", description: "The task", schema: text),
         ])

@@ -287,11 +287,15 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
 
     // MARK: Notes (W7b, PRD 11.6)
 
-    /// The transcript is complete: write notes on the chosen route, or ask for one the first time.
-    /// Notes already written are left alone (a finished leftover marks them out of date instead).
+    /// The transcript is complete and its speakers separated (or that failed or was skipped): write
+    /// notes on the chosen route, or ask for one the first time. Called again when separation ends,
+    /// so notes use speaker labels. Notes already written are left alone (a finished leftover marks
+    /// them out of date instead).
     private func transcriptDone(_ id: String) {
+        guard pumps[id] == nil, !finishing.contains(id), let meeting = meetings.first(where: { $0.id == id }),
+              meeting.speakers?.state != .pending else { return }
         let manual = askOnDone.remove(id) != nil
-        guard let meeting = meetings.first(where: { $0.id == id }), meeting.notes == nil,
+        guard meeting.notes == nil,
               meeting.lines.contains(where: { !$0.isHidden }) else { return }
         switch notesRoute() {
         case nil:
@@ -303,9 +307,10 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     }
 
     /// Writes (or rewrites: "Update Notes") a finished meeting's notes. Failure keeps the meeting and says why.
+    /// Not while its speakers are being separated: the notes would say Them instead of their names.
     func writeNotes(_ id: String) {
         guard let writer = notesWriter, !notesWriting.contains(id), !finishing.contains(id),
-              let meeting = meetings.first(where: { $0.id == id }) else { return }
+              let meeting = meetings.first(where: { $0.id == id }), meeting.speakers?.state != .pending else { return }
         guard meeting.lines.contains(where: { !$0.isHidden }) else { notesProblem[id] = "There is no transcript to write notes from."; return }
         notesWriting.insert(id); notesProblem[id] = nil
         Task { [weak self] in
@@ -591,7 +596,11 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         separating.remove(id)
         guard meetings.first(where: { $0.id == id })?.speakers?.state == .pending else { return }
         update(id) { meeting in
-            if let segments { MeetingSpeakers.apply(segments, to: &meeting) }
+            if let segments {
+                MeetingSpeakers.apply(segments, to: &meeting)
+                // Written before separation (an older version of Murmur): they say Them, not the speakers.
+                if meeting.notes != nil { meeting.notes?.outdated = true }
+            }
             else {
                 meeting.speakers?.state = .failed; meeting.speakers?.failure = reason
                 for i in meeting.lines.indices { meeting.lines[i].words = nil }
@@ -600,6 +609,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         deleteKeptAudio(id)
         let found = Set(meetings.first { $0.id == id }?.lines.compactMap(\.speaker) ?? []).count
         meetingLog.notice("speakers-finished ok=\(segments != nil, privacy: .public) speakers=\(found) reason=\(segments == nil ? reason : "-", privacy: .public)")
+        transcriptDone(id)
     }
 
     /// "Separating speakers" → Skip: stops the helper, deletes the kept audio, keeps the Them labels.
@@ -611,6 +621,7 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
             for i in meeting.lines.indices { meeting.lines[i].words = nil }
         }
         deleteKeptAudio(id)
+        transcriptDone(id)
     }
 
     private func deleteKeptAudio(_ id: String) {
@@ -618,8 +629,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
         try? FileManager.default.removeItem(at: SpeakerAudio.file(speakerRoot, meeting: id))
     }
 
-    // Renaming, merging and reassigning are per meeting and saved with it.
-    // ponytail: notes are marked out of date through `speakers.editedAt`; W7b's notes record compares it (merge note).
+    // Renaming, merging and reassigning are per meeting and saved with it. A rename or merge
+    // relabels notes already written; a reassignment marks them out of date (MeetingSpeakers.swift).
     func renameSpeaker(_ number: Int, to name: String, in id: String) { update(id) { $0.renameSpeaker(number, to: name) } }
     func mergeSpeaker(_ from: Int, into: Int, in id: String) { update(id) { $0.mergeSpeaker(from, into: into) } }
     func reassignLine(_ line: Int, to speaker: Int, in id: String) { update(id) { $0.reassignLine(line, to: speaker) } }
