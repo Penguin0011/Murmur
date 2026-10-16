@@ -371,16 +371,16 @@ enum CorrectionFilter {
 /// Persists `ledger.json` in `directory`. Lifecycle per dictation session:
 /// `record` (provisional, replaces that session's earlier evidence) while the observation window
 /// is open, then `settle` when it closes; `revert` removes the session's evidence at any time
-/// (and withdraws a promotion it supported). Learning has two tiers (user decision, October 4, 2026):
-/// one settled fix adds the target as a vocabulary hint (a learned entry with no variants, so
-/// transcription is biased toward it but no text is replaced); a second consistent fix from another
-/// session adds the source as a variant of that same entry, so it is replaced from then on.
+/// (and withdraws a promotion it supported). One settled fix is enough (user decision, October 16,
+/// 2026, superseding the October 4 two-tier rule): it adds the target with the source as a variant,
+/// so the source is replaced from the next dictation on, or adds the source as another variant of
+/// the learned entry for that spelling. Hint-only entries left by the old first tier upgrade the
+/// same way at their next fix; nothing is promoted at load.
 /// A conflicting settled target suppresses the source until `reset()`. A learned entry the user
 /// deletes is tombstoned with its evidence cleared, and a tombstoned target is never learned again
 /// from any source; `reset()` clears tombstones.
 final class CorrectionLedger {
     static let fileName = "ledger.json"
-    static let requiredSessions = 2
 
     enum RecordOutcome: Equatable {
         case learningDisabled, sessionClosed, provisional, suppressed, tombstoned
@@ -413,7 +413,8 @@ final class CorrectionLedger {
         let pair: Pair
         let sessions: [UUID]
         /// nil: created the entry with `pair.source` as its variant (also every version-1 promotion
-        /// written before tiers). `.hint`: created the entry with no variant. `.variant`: added
+        /// written before tiers). `.hint`: created the entry with no variant (old first tier, read
+        /// only; no longer written). `.variant`: added
         /// `pair.source` to an entry another promotion created.
         var kind: Kind?
         var replaces: Bool { kind != .hint }
@@ -502,12 +503,12 @@ final class CorrectionLedger {
         try reconcile()
         let session = observed.sessionID
         let (fresh, outcome) = candidates(observed)
-        // A second-tier promotion consumes its evidence, so its session list also marks a settled pair.
+        // A promotion consumes its evidence, so its session list also marks a settled pair.
         let settled = Set(state.evidence.filter { $0.correction.sessionID == session && $0.settled }.map(\.pair))
             .union(state.promotions.filter { $0.sessions.contains(session) }.map(\.pair))
         let gone = settled.subtracting(fresh.map { Pair(of: $0.source, $0.target) })
-        // ponytail: withdrawing a second-tier promotion loses the other session's consumed evidence
-        // (as `revert` always has); keep promotion evidence if refinements after an early settle prove common.
+        // ponytail: withdrawing a promotion that several old (two-tier) sessions supported loses the
+        // others' consumed evidence (as `revert` always has); keep promotion evidence if that proves common.
         for promotion in state.promotions where promotion.sessions.contains(session) && gone.contains(promotion.pair) {
             withdraw(promotion, tombstone: false)
         }
@@ -555,7 +556,7 @@ final class CorrectionLedger {
 
     /// The session's observation window closed, or its text has been stable long enough (gap #9):
     /// commit its evidence and promote if consistent. Settling again without new evidence does nothing.
-    /// Returns entries newly added to the dictionary (a variant added to an existing entry is not).
+    /// Returns the entries that gained a replacement: new ones, and existing ones given a variant.
     @discardableResult
     func settle(sessionID: UUID) throws -> [DictionaryEntry] {
         try reconcile()
@@ -586,21 +587,24 @@ final class CorrectionLedger {
                     state.suppressed.insert(pair.source)
                     state.evidence.removeAll { $0.pair.source == pair.source }
                     for promotion in state.promotions where promotion.pair.source == pair.source { withdraw(promotion, tombstone: false) }
-                } else if !state.promotions.contains(where: { $0.pair == pair && $0.replaces }),
-                          let latest = settled.max(by: { $0.correction.observedAt < $1.correction.observedAt }) {
+                } else if state.promotions.contains(where: { $0.pair == pair && $0.replaces }) {
+                    // Already replaced: a repeat fix confirms it and adds nothing.
+                    state.evidence.removeAll { $0.pair == pair }
+                } else if let latest = settled.max(by: { $0.correction.observedAt < $1.correction.observedAt }) {
                     let sessions = Array(Set(settled.map(\.correction.sessionID)))
                     if let existing = dictionary.entry(forVariant: latest.correction.source) {
                         // A manual or other entry already owns this form; consume matching evidence only.
                         if TermText.fold(existing.preferred) == pair.folded {
                             state.evidence.removeAll { $0.pair.source == pair.source }
                         }
-                    } else if sessions.count >= Self.requiredSessions {
-                        // Second consistent fix: the misheard form is replaced from now on, as another
-                        // variant of the learned entry for this spelling when there is one.
+                    } else {
+                        // One fix: the misheard form is replaced from now on, as another variant of
+                        // the learned entry for this spelling when there is one (including an old hint).
                         if var owner = dictionary.entries.first(where: { $0.source == .learned && TermText.fold($0.preferred) == pair.folded }) {
                             owner.variants.append(latest.correction.source)
                             try dictionary.update(owner)
                             state.promotions.append(Promotion(entryID: owner.id, pair: pair, sessions: sessions, kind: .variant))
+                            promoted.append(owner)
                         } else {
                             let entry = try dictionary.add(preferred: latest.correction.target,
                                                            variants: [latest.correction.source], source: .learned)
@@ -609,11 +613,6 @@ final class CorrectionLedger {
                         }
                         // Evidence is consumed; the promotion keeps only session IDs for revert.
                         state.evidence.removeAll { $0.pair.source == pair.source }
-                    } else if !dictionary.entries.contains(where: { TermText.fold($0.preferred) == pair.folded }) {
-                        // First fix: a vocabulary hint only. Evidence stays for the second tier.
-                        let entry = try dictionary.add(preferred: latest.correction.target, variants: [], source: .learned)
-                        state.promotions.append(Promotion(entryID: entry.id, pair: pair, sessions: sessions, kind: .hint))
-                        promoted.append(entry)
                     }
                 }
             }
@@ -625,7 +624,7 @@ final class CorrectionLedger {
     /// Gap #10: the user corrected a dictation's final text in History. The edit is one more
     /// observation (a fresh session, settled at once) through the same filter, ledger, thresholds,
     /// tombstones and conflicts; it adds to automatic learning and never replaces it (PRD R10).
-    /// Returns entries newly added to the dictionary.
+    /// Returns the entries that gained a replacement.
     @discardableResult
     func learnFromEdit(original: String, edited: String, at date: Date = Date()) throws -> [DictionaryEntry] {
         guard original != edited else { return [] }
@@ -640,6 +639,15 @@ final class CorrectionLedger {
         try reconcile()
         state.evidence.removeAll { $0.correction.sessionID == sessionID }
         for promotion in state.promotions where promotion.sessions.contains(sessionID) { withdraw(promotion, tombstone: false) }
+        try save()
+    }
+
+    /// The notice's Undo: withdraws the latest promotion on the entry (its variant, or the entry it
+    /// created) and tombstones it. Does nothing if that was already withdrawn or deleted.
+    func undoLearned(entryID: UUID) throws {
+        try reconcile()
+        guard let promotion = state.promotions.last(where: { $0.entryID == entryID }) else { return }
+        withdraw(promotion, tombstone: true)
         try save()
     }
 
