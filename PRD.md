@@ -702,6 +702,15 @@ Each milestone is its own pull request with its own evidence (11.10) and live-te
   - A rebuilt microphone continued at once, with a dictation capture running alongside.
 - **Not reproduced:** a real FaceTime call, and the tap side, which needs System Audio Recording for the test process. [Certain]
 
+**Second live test (October 15, 2026).** An "All apps" meeting with a YouTube video took no notes. The new logs showed the root cause. Once a minute, the expiry timer's audio purge deleted files in the live meeting's chunk folder, including the chunk being written, and removed the folder once it was empty. Both streams then failed to write ("chunk-write-failed"), and the earlier FaceTime gaps were likely the same cause. [Certain]
+
+The fixes:
+- **Purge:** the purge now skips the live meeting and any meeting still transcribing, and the chunker re-creates a missing folder.
+- **Matching:** call-app processes match ignoring case, and are matched again at every refresh. Arc's audio helper is `company.thebrowser.browser.helper`.
+- **Idle tap:** a tap delivers nothing while no tapped app plays, so that is now idle rather than a stall. The silent time is filled with zeros, which keeps Them line times true.
+- **Meters:** each meter is scaled to its own recent loudness, with a floor.
+- **Panel:** the live panel minimizes to a pill (red dot, timer, Stop), can be dragged, and remembers both. [Certain]
+
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
 ### 11.12 Amendments (applied October 15, 2026)
