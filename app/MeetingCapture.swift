@@ -45,10 +45,18 @@ struct MeetingTapError: Error, CustomStringConvertible {
     init(_ step: String, _ status: OSStatus) { description = "\(step) failed (\(status))" }
 }
 
-/// What the tap captures: the processes of these bundle IDs, or everything except them.
+/// What the tap captures: one call app's processes (matched again at every refresh, so a helper
+/// that starts later is added), or everything except Murmur's own processes.
 enum TapTarget: Equatable {
-    case only([String])
+    case only(CallApp)
     case allExcept([String])
+
+    func includes(_ bundleID: String) -> Bool {
+        switch self {
+        case .only(let app): return app.matches(bundleID)
+        case .allExcept(let own): return !own.contains { $0.lowercased() == bundleID.lowercased() }
+        }
+    }
 }
 
 final class SystemAudioTap {
@@ -60,13 +68,24 @@ final class SystemAudioTap {
     private(set) var level = 0.0
     private(set) var heardSignal = false
     private(set) var lastBuffer: TimeInterval?
+    /// Queue-owned count of buffers received, for the stall watch.
+    private(set) var buffers: Int64 = 0
     private let chunker: Chunker
     private var tapID = AudioObjectID(kAudioObjectUnknown), aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var description: CATapDescription?
     private var inputFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
-    private var target: TapTarget = .allExcept([])
+    private(set) var target: TapTarget = .allExcept([])
+    /// Queue-owned: when the next buffer should start if audio were continuous. A tap delivers
+    /// nothing while no tapped app plays; that time is filled with silence so the Them stream's
+    /// sample clock (and so its line times) keeps step with the meeting.
+    private var nextExpected: TimeInterval?
+    private static let silence: AVAudioPCMBuffer = {
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1600)!
+        buffer.frameLength = 1600
+        return buffer  // zero-filled on allocation
+    }()
     private var tappedIDs: [AudioObjectID] = []
 
     init(chunkFolder: URL) { chunker = Chunker(format: Self.format, directory: chunkFolder, boundaries: false, fileSettings: Chunker.int16(Self.format)) }
@@ -74,14 +93,19 @@ final class SystemAudioTap {
     func attachChunks(_ handler: @escaping (Chunker.Event) -> Void) { queue.sync { chunker.attach(handler) } }
 
     /// Process objects for `target` among the current clients.
+    /// Process objects to name in the description: the app's processes to include, or Murmur's to exclude.
     static func processIDs(_ target: TapTarget, clients: [AudioProcessList.Client]) -> [AudioObjectID] {
-        let bundleIDs: [String]
-        switch target { case .only(let ids), .allExcept(let ids): bundleIDs = ids }
-        return clients.filter { bundleIDs.contains($0.bundleID) }.map(\.id)
+        switch target {
+        case .only(let app): return clients.filter { app.matches($0.bundleID) }.map(\.id)
+        case .allExcept: return clients.filter { !target.includes($0.bundleID) }.map(\.id)
+        }
     }
+    /// Whether any process this tap records is playing audio now; a tap delivers nothing while none is.
+    func isPlaying(_ clients: [AudioProcessList.Client]) -> Bool { clients.contains { $0.output && target.includes($0.bundleID) } }
 
     func start(_ target: TapTarget) throws {
         self.target = target
+        queue.sync { nextExpected = ProcessInfo.processInfo.systemUptime }
         let ids = Self.processIDs(target, clients: AudioProcessList.all())
         let description: CATapDescription
         switch target {
@@ -126,7 +150,14 @@ final class SystemAudioTap {
             guard status == noErr else { throw MeetingTapError("Reading the aggregate device", status) }
             status = AudioDeviceStart(device, procID)
             guard status == noErr else { throw MeetingTapError("Starting the aggregate device", status) }
-            meetingLog.notice("tap-started processes=\(ids.count)")
+            // Bundle IDs only (no audio or text): which processes were tapped, and which were playing
+            // audio, so a call app whose audio comes from another process shows up in the log.
+            let clients = AudioProcessList.all()
+            let named = clients.filter { ids.contains($0.id) }.map(\.bundleID).joined(separator: ",")
+            let playing = clients.filter(\.output).map(\.bundleID).joined(separator: ",")
+            let kind: String
+            if case .only = target { kind = "tapped" } else { kind = "excluded" }
+            meetingLog.notice("tap-started processes=\(ids.count) \(kind, privacy: .public)=\(named, privacy: .public) playing=\(playing, privacy: .public)")
         } catch { stop(); throw error }
     }
 
@@ -139,7 +170,14 @@ final class SystemAudioTap {
         for i in 0..<Int(converted.frameLength) { energy += Double(samples[0][i]) * Double(samples[0][i]) }
         if energy > 0 { heardSignal = true }
         level = min(1, sqrt(energy / Double(converted.frameLength)) * 8)
-        lastBuffer = ProcessInfo.processInfo.systemUptime
+        let now = ProcessInfo.processInfo.systemUptime
+        if let expected = nextExpected, now - expected > 0.2 {
+            // In 0.1 s pieces, so the chunker can still cut at its usual length.
+            var missing = Int((now - expected) * Self.format.sampleRate)
+            while missing >= 1600 { chunker.append(Self.silence); missing -= 1600 }
+        }
+        nextExpected = now + Double(converted.frameLength) / Self.format.sampleRate
+        lastBuffer = now; buffers += 1
         chunker.append(converted)
     }
 
@@ -196,8 +234,10 @@ final class MeetingStreamFeed {
     /// Called on the capture queue, in order.
     func receive(_ event: Chunker.Event) {
         switch event {
-        case .chunk(let url, _, _):
-            let duration = Self.seconds(url) ?? 0
+        case .chunk(let url, let last, _):
+            let (duration, peak) = Self.measure(url)
+            // Content-free: which stream, how long, how loud. A peak of 0 means the audio was silence.
+            meetingLog.notice("meeting-chunk stream=\(self.stream.rawValue, privacy: .public) seconds=\(duration, format: .fixed(precision: 1)) peak=\(peak, format: .fixed(precision: 4)) last=\(last, privacy: .public)")
             let start = offset + next
             next += duration
             let named = folder.appendingPathComponent(MeetingAudio.name(stream, start: start))
@@ -205,7 +245,17 @@ final class MeetingStreamFeed {
             enqueue(.init(stream: stream, url: final, start: start, duration: duration))
         case .boundary(let url): try? FileManager.default.removeItem(at: url)
         case .end: break
-        case .failed: failed()
+        case .failed: meetingLog.notice("meeting-chunk-write-failed stream=\(self.stream.rawValue, privacy: .public)"); failed()
         }
+    }
+
+    /// Length in seconds and peak sample of a chunk file.
+    static func measure(_ url: URL) -> (Double, Float) {
+        guard let file = try? AVAudioFile(forReading: url), file.fileFormat.sampleRate > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              (try? file.read(into: buffer)) != nil, let samples = buffer.floatChannelData else { return (seconds(url) ?? 0, 0) }
+        var peak: Float = 0
+        for i in 0..<Int(buffer.frameLength) { peak = max(peak, abs(samples[0][i])) }
+        return (Double(file.length) / file.fileFormat.sampleRate, peak)
     }
 }

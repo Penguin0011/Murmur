@@ -685,8 +685,31 @@ Each milestone is its own pull request with its own evidence (11.10) and live-te
 - **Lag at real time:** median 10.0 s, p90 14.7 s and max 16.9 s from a chunk's end to its line, inside the 25 s bar. The backlog never exceeded one chunk.
 - **Dictation during a meeting:** median 0.117 s and max 0.178 s for a 10 s clip, against 0.068 s alone. That is within the 0.5 s bar.
 - **CPU:** 20.6 CPU-seconds for 20 minutes of two-stream meeting, 1.7% of one core. At 12×, 105 CPU-seconds for 120 minutes.
-- **Memory (RSS):** the helper's stayed flat at 71–73 MB over 120 minutes. Wired model memory is not counted. The harness grew 35→46 MB between minute 10 and minute 120 in the first run, which had no autorelease pool in its loop. The app's capture queues drain theirs. The rerun with a pool is not recorded here.
+- **Memory (RSS), rerun with an autorelease pool and 16-bit chunks:**
+  - The harness, standing in for the app's meeting side, read 31 MB at minute 10. It then held at 38–45 MB from minute 20 to 120, with no steady climb.
+  - The helper read 73 MB, then 60 MB from minute 70.
+  - Together they were 103 MB at minute 10 and 102 MB at minute 120. Wired model memory is not counted.
+  - In the same run, chunked WER was Me 1.51% and Them 1.52%, and CPU was 1.3% of one core.
 - **Not measured:** the app's own memory and CPU during a real meeting, the tap, echo with speakers, and real calls. These are on the W7a pull request's live checklist.
+
+**W7a fix (October 15, 2026, after the first live test).** A FaceTime meeting transcribed nothing on either stream. The record shows gaps at 20 s and 44 s, and no microphone restart succeeded. [Certain]
+- **Likely cause:** the call reconfigured the audio devices, which stopped the microphone engine and the tap's aggregate device without an error. Neither was rebuilt. [Likely]
+- **What happened:** a stall watch (`StreamWatch`) now notices 3 s without audio on a stream. It marks one gap, then rebuilds the stream every 3 s until audio flows: a new microphone engine, or a new tap and aggregate device. A change of default output device also rebuilds the tap. The old stream is stopped first, which transcribes its last partial chunk. [Certain]
+- **Logs:** every gap, rebuild, recovery, chunk and line is logged with no content. Chunks log their length and peak level; lines log their word count. The tap logs which processes it tapped and which were playing audio. [Certain]
+- **Reproduced on the M3:**
+  - A meeting microphone kept running while another process turned voice processing on and off.
+  - Stop flushed the last partial chunk.
+  - A rebuilt microphone continued at once, with a dictation capture running alongside.
+- **Not reproduced:** a real FaceTime call, and the tap side, which needs System Audio Recording for the test process. [Certain]
+
+**Second live test (October 15, 2026).** An "All apps" meeting with a YouTube video took no notes. The new logs showed the root cause. Once a minute, the expiry timer's audio purge deleted files in the live meeting's chunk folder, including the chunk being written, and removed the folder once it was empty. Both streams then failed to write ("chunk-write-failed"), and the earlier FaceTime gaps were likely the same cause. [Certain]
+
+The fixes:
+- **Purge:** the purge now skips the live meeting and any meeting still transcribing, and the chunker re-creates a missing folder.
+- **Matching:** call-app processes match ignoring case, and are matched again at every refresh. Arc's audio helper is `company.thebrowser.browser.helper`.
+- **Idle tap:** a tap delivers nothing while no tapped app plays, so that is now idle rather than a stall. The silent time is filled with zeros, which keeps Them line times true.
+- **Meters:** each meter is scaled to its own recent loudness, with a floor.
+- **Panel:** the live panel minimizes to a pill (red dot, timer, Stop), can be dragged, and remembers both. [Certain]
 
 W7c and W7d touch different files and can run in parallel after W7a. W7b can run alongside them, coordinating on the meeting record's schema, which W7a owns.
 
