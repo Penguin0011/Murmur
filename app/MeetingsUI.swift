@@ -226,8 +226,12 @@ struct MeetingsPage: View {
     /// Notes, with each item's cited lines as links into the transcript (PRD 11.6, 11.9).
     @ViewBuilder private func notesTab(_ meeting: Meeting) -> some View {
         let route = controller.meetingNotesRoute
+        let separating = meeting.speakers?.state == .pending
         if recorder.notesWriting.contains(meeting.id) {
             lede("Writing notes…", color: Palette.accentDeep)
+        } else if separating {
+            // Notes wait for speaker names (W7d): "Separating speakers…" first, then "Writing notes…".
+            lede(recorder.separating.contains(meeting.id) ? "Separating speakers… Notes are written after that, with their names." : "Notes are written once speakers are separated. Skip separation to write them now.", color: Palette.accentDeep)
         } else if let problem = recorder.notesProblem[meeting.id] {
             HStack(alignment: .firstTextBaseline) {
                 lede(problem, color: Palette.accentDeep)
@@ -238,7 +242,7 @@ struct MeetingsPage: View {
         if let notes = meeting.notes {
             if notes.outdated == true {
                 HStack(alignment: .firstTextBaseline) {
-                    lede("The transcript or your notes changed after these notes were written.", color: Palette.accentDeep)
+                    lede("The transcript, your notes or the speakers changed after these notes were written.", color: Palette.accentDeep)
                     Spacer()
                 }
             }
@@ -252,10 +256,10 @@ struct MeetingsPage: View {
                 Spacer()
                 if route != nil && route != MeetingNotesRoute.none {
                     Button("Update Notes") { recorder.writeNotes(meeting.id) }.buttonStyle(InkButtonStyle(kind: .outline))
-                        .disabled(recorder.notesWriting.contains(meeting.id) || recorder.finishing.contains(meeting.id))
+                        .disabled(recorder.notesWriting.contains(meeting.id) || recorder.finishing.contains(meeting.id) || separating)
                 }
             }
-        } else if !recorder.notesWriting.contains(meeting.id) {
+        } else if !recorder.notesWriting.contains(meeting.id) && !separating {
             if route == nil || route == MeetingNotesRoute.none {
                 HStack(alignment: .firstTextBaseline) {
                     lede(route == nil ? "Choose how notes are written: a title, summary, key points, decisions and action items." : "Notes are off. This meeting keeps its transcript.")

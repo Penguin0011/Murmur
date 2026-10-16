@@ -1,6 +1,6 @@
 // Speaker separation W7d through the real MeetingRecorder (PRD 11.8, 11.10): a stand-in helper
 // script answers like `ModelBench --diarize`. No capture, no models, no network.
-// swiftc -swift-version 5 spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Meetings.swift app/MeetingSpeakers.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/check_speaker_flow.swift -o /tmp/murmur-speaker-flow-check && /tmp/murmur-speaker-flow-check
+// swiftc -swift-version 5 spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/check_speaker_flow.swift -o /tmp/murmur-speaker-flow-check && /tmp/murmur-speaker-flow-check
 import AppKit
 import Foundation
 
@@ -45,11 +45,24 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
         let recorder = MeetingRecorder(defaults: UserDefaults(suiteName: "murmur-speaker-flow-\(UUID().uuidString)")!)
         recorder.transcribe = { _, done in done(nil) }
         recorder.verifySpeakerModel = { true }
+        // Notes are written by the real writer; the stand-in model records what it was sent.
+        var prompts: [String: String] = [:], states: [String: SpeakerSeparation.State?] = [:]
+        recorder.notesRoute = { .customAPI }
+        recorder.notesWriter = { meeting in
+            states[meeting.id] = meeting.speakers?.state
+            return try await MeetingNotesWriter.write(meeting, route: .customAPI, routeName: "Stand-in") { _, user in
+                prompts[meeting.id] = user; return "POINT | L1 | First voice"
+            }
+        }
+        func notes(_ m: Meeting) -> MeetingNotes? { recorder.meetings.first { $0.id == m.id }?.notes }
 
         // Without the model yet (still verifying at launch), a pending meeting waits with its audio.
         let waiting = try pending()
         recorder.configure(store: store, audioRoot: audioRoot, persists: true)
         check(recorder.meetings.first { $0.id == waiting.id }?.speakers?.state == .pending && kept(waiting), "without the model, separation waits and the audio stays")
+        recorder.writeNotes(waiting.id)
+        spin(until: { false }, seconds: 0.3)
+        check(states[waiting.id] == nil && !recorder.notesWriting.contains(waiting.id) && notes(waiting) == nil, "no notes while speakers wait to be separated, even on Write Notes")
 
         // With the model: separation runs, labels apply and saved, the audio is deleted.
         recorder.helper = helper; recorder.speakerModel = models
@@ -58,6 +71,8 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
         let done = recorder.meetings.first { $0.id == waiting.id }
         check(done?.speakers?.state == .done && done?.lines.map(\.speaker) == [1, 2], "the helper's segments label the lines")
         check(!kept(waiting), "the call audio is deleted once diarization finishes")
+        spin { notes(done!) != nil }
+        check(states[waiting.id] == .done && prompts[waiting.id]?.contains("[L1 Speaker 1 0:00] First voice.") == true && prompts[waiting.id]?.contains("[L2 Speaker 2 0:05]") == true && notes(waiting)?.keyPoints.count == 1, "notes are written after separation, with speaker labels")
         check((try store.meetings().first { $0.id == waiting.id })?.lines.map(\.speaker) == [1, 2], "the labels are saved with the meeting")
         recorder.renameSpeaker(2, to: "Priya", in: waiting.id)
         check((try store.meetings().first { $0.id == waiting.id })?.speakers?.names[2] == "Priya", "a rename is saved")
@@ -67,6 +82,8 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
         recorder.reload()
         spin { recorder.meetings.first { $0.id == missing.id }?.speakers?.state != .pending }
         check(recorder.meetings.first { $0.id == missing.id }?.speakers?.state == .failed, "no kept audio: separation fails, the transcript stays")
+        spin { notes(missing) != nil }
+        check(states[missing.id] == .failed && prompts[missing.id]?.contains("[L1 Them 0:00]") == true, "after a failed separation, notes are written with Me and Them")
 
         // Skip, delete and retention each remove the audio. Without a model nothing runs, so each acts on a waiting meeting.
         recorder.speakerModel = nil
@@ -74,6 +91,8 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
         recorder.reload()
         recorder.skipSeparation(skipped.id)
         check(recorder.meetings.first { $0.id == skipped.id }?.speakers?.state == .skipped && !kept(skipped), "Skip marks the meeting and deletes its audio")
+        spin { notes(skipped) != nil }
+        check(states[skipped.id] == .skipped && prompts[skipped.id]?.contains("[L2 Them 0:05]") == true && states[deleted.id] == nil, "Skip writes the notes then, with Them; meetings still waiting have none")
         recorder.delete(deleted.id)
         check(!kept(deleted) && recorder.meetings.allSatisfy { $0.id != deleted.id }, "deleting a meeting deletes its kept audio")
         recorder.purge(cutoff: Date().addingTimeInterval(-30 * 86400))

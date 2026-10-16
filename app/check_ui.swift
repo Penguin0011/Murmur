@@ -146,10 +146,21 @@ import SwiftUI
                 call.insert(stream: .them, start: 30, end: 44, text: "That works. Send it to the team channel when it's ready.")
                 call.myNotes = "Synthetic note: checklist due Thursday."
                 call.seconds = 1834; call.finished = true
+                // Speaker separation (W7d): --speakers shows separated, renamed speakers; --separating the progress line with Skip.
+                if args.contains("--speakers") || args.contains("--separating") {
+                    call.speakers = SpeakerSeparation(state: .pending, threshold: MeetingSpeakers.threshold)
+                    call.insert(stream: .them, start: 45, end: 58, text: "I can review it on Friday before the synthetic launch.")
+                    if args.contains("--speakers") {
+                        MeetingSpeakers.apply([SpeakerSegment(speaker: "a", start: 2, end: 16), SpeakerSegment(speaker: "b", start: 30, end: 44),
+                                               SpeakerSegment(speaker: "c", start: 45, end: 58)], to: &call)
+                    }
+                }
                 // --meeting-notes: synthetic notes, as the notes route would write them (W7b).
                 if args.contains("--meeting-notes") {
                     let ids = call.lines.map(\.id)
-                    var notes = MeetingNotes(title: "Synthetic launch checklist plan", summary: "The call went over the synthetic launch plan for next week. Me offered to draft the checklist by Thursday, and Them asked for it in the team channel.",
+                    // With --speakers the notes name the speaker ("Speaker 2"), and the rename below relabels them.
+                    let them = MeetingSpeakers.label(call.lines[3], in: call)
+                    var notes = MeetingNotes(title: "Synthetic launch checklist plan", summary: "The call went over the synthetic launch plan for next week. Me offered to draft the checklist by Thursday, and \(them) asked for it in the team channel.",
                                              route: "Apple Intelligence (on-device, less accurate)", writtenAt: Date())
                     notes.keyPoints = [NoteItem(text: "The synthetic launch plan is for next week", lines: [ids[0]])]
                     notes.decisions = [NoteItem(text: "Share the checklist in the team channel", lines: [ids[2], ids[3]])]
@@ -159,16 +170,7 @@ import SwiftUI
                     notes.outdated = args.contains("--outdated") ? true : nil
                     call.notes = notes
                 }
-                // Speaker separation (W7d): --speakers shows separated, renamed speakers; --separating the progress line with Skip.
-                if args.contains("--speakers") || args.contains("--separating") {
-                    call.speakers = SpeakerSeparation(state: .pending, threshold: MeetingSpeakers.threshold)
-                    call.insert(stream: .them, start: 45, end: 58, text: "I can review it on Friday before the synthetic launch.")
-                    if args.contains("--speakers") {
-                        MeetingSpeakers.apply([SpeakerSegment(speaker: "a", start: 2, end: 16), SpeakerSegment(speaker: "b", start: 30, end: 44),
-                                               SpeakerSegment(speaker: "c", start: 45, end: 58)], to: &call)
-                        call.renameSpeaker(2, to: "Priya")
-                    }
-                }
+                if args.contains("--speakers") { call.renameSpeaker(2, to: "Priya") }
                 var solo = Meeting(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-86400 * 2), source: .microphoneOnly)
                 solo.insert(stream: .me, start: 0, end: 12, text: "Synthetic voice memo recorded with only the microphone.")
                 solo.finished = true

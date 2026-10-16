@@ -390,6 +390,59 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(MeetingNotesRoute.disclosure(.customAPI, host: "127.0.0.1:8080", local: true, retention: nil).contains("nothing leaves this Mac"), "a loopback endpoint counts as local")
         }
 
+        // Notes with speaker names (W7d after W7b): labels in the prompt, grounding, renames afterwards.
+        do {
+            var meeting = Meeting(id: UUID().uuidString, recordedAt: Date(timeIntervalSince1970: 0), source: MeetingSource(name: "Zoom", bundleID: "us.zoom.xos"))
+            meeting.insert(stream: .them, start: 0, end: 10, text: "Can you send the budget deck to finance by Friday?")
+            meeting.insert(stream: .them, start: 11, end: 15, text: "Sure, I'll send it on Friday.")
+            meeting.insert(stream: .them, start: 16, end: 25, text: "We will ship the build next week.")
+            meeting.insert(stream: .me, start: 26, end: 30, text: "Okay, sounds good.")
+            let plain = MeetingNotesPrompt.extract(MeetingNotesPrompt.number(meeting), myNotes: "", nonce: "x")
+            check(plain.system.contains("\"Me\" is the user who recorded the call; \"Them\" is the other side.") && plain.system.contains("or \"Me\" for the user, or \"Them\" for the other side; leave it out") && plain.user.contains("[L2 Them 0:11]"), "without separation the prompt is unchanged")
+            meeting.speakers = SpeakerSeparation(state: .done, names: [2: "Priya"])
+            for (i, number) in [1, 2, 1].enumerated() { meeting.lines[i].speaker = number }
+            let numbered = MeetingNotesPrompt.number(meeting)
+            let prompt = MeetingNotesPrompt.extract(numbered, myNotes: "", nonce: "x")
+            check(prompt.user.contains("[L1 Speaker 1 0:00] Can you") && prompt.user.contains("[L2 Priya 0:11] Sure") && prompt.user.contains("[L4 Me 0:26]"), "numbered lines carry speaker labels and given names")
+            check(prompt.system.contains("The other side's speakers are Speaker 1, Priya.") && prompt.system.contains("speaker label as written in the lines (Speaker 1, Priya)") && !prompt.system.contains("\"Them\" is the other side"), "the prompt names the speakers")
+            check(MeetingNotesPrompt.merge([], nonce: "x", speakers: ["Speaker 1", "Priya"]).system.contains("(Speaker 1, Priya)"), "the merge step names them too")
+
+            let source = NotesGrounding.source(numbered, myNotes: "")
+            typealias Item = Draft.Item
+            func reason(_ item: Item, _ kind: NotesGrounding.Kind = .point) -> NotesGrounding.Reason? { NotesGrounding.check(item, kind: kind, in: source) }
+            check(reason(Item(text: "Send the budget deck to finance", lines: [1, 2], owner: "Priya", due: "Friday"), .action) == nil, "a renamed speaker owns an action item")
+            check(reason(Item(text: "Priya will send the budget deck", lines: [1, 2]), .point) == nil, "a renamed speaker's name is not invented")
+            check(reason(Item(text: "Send the budget deck", lines: [1, 2], owner: "Speaker 1"), .action) == nil, "a cited speaker label owns an action item")
+            check(reason(Item(text: "Send the budget deck to finance", lines: [1, 2], owner: "Marcus"), .action) != nil, "an invented owner is still dropped")
+            check(reason(Item(text: "Marcus will send the budget deck", lines: [1, 2])) == .invented, "an invented name is still dropped")
+            check(reason(Item(text: "Ship 1 build next week", lines: [3])) == .invented, "a speaker label's digit never vouches for a number")
+            check(reason(Item(text: "Send the budget deck", lines: [3], owner: "Priya"), .action) != nil, "a speaker who is not in the cited lines does not own it")
+
+            let reply = """
+            TITLE | Budget deck for Priya
+            SUMMARY | Priya will send the budget deck on Friday. Speaker 1 will ship the build next week.
+            POINT | L3 | Speaker 1 will ship the build next week
+            ACTION | L1 L2 | Priya | Friday | Send the budget deck to finance
+            """
+            var sent = ""
+            meeting.notes = try await MeetingNotesWriter.write(meeting, route: .gemini, routeName: "Gemini") { _, user in sent = user; return reply }.notes
+            check(sent.contains("[L2 Priya 0:11]") && meeting.notes?.title == "Budget deck for Priya" && meeting.notes?.summary != nil && meeting.notes?.actions.first?.owner == "Priya" && meeting.notes?.keyPoints.count == 1, "notes written with speaker names keep them")
+
+            check(MeetingSpeakers.replace("Speaker 1", with: "Sam", in: "Speaker 1, Speaker 10 and Speaker 1's deck") == "Sam, Speaker 10 and Sam's deck", "a label is replaced as a whole word")
+            var renamed = meeting
+            renamed.renameSpeaker(2, to: "Priya Shah"); renamed.renameSpeaker(1, to: "Sam")
+            check(renamed.notes?.actions.first?.owner == "Priya Shah" && renamed.notes?.title == "Budget deck for Priya Shah" && renamed.notes?.summary == "Priya Shah will send the budget deck on Friday. Sam will ship the build next week." && renamed.notes?.keyPoints.first?.text == "Sam will ship the build next week" && renamed.notes?.outdated == nil, "a rename after notes relabels them in place")
+            check(MeetingExport.notes(renamed).contains("(Priya Shah, due Friday)") && MeetingExport.markdown(renamed).contains("(Priya Shah, due Friday)") && MeetingExport.notes(renamed).contains("- Sam will ship"), "Copy Notes and Markdown show the names")
+            var reset = renamed; reset.renameSpeaker(1, to: "")
+            check(reset.notes?.keyPoints.first?.text == "Speaker 1 will ship the build next week", "clearing a name goes back to Speaker N in the notes")
+            var merged = renamed; merged.mergeSpeaker(1, into: 2)
+            check(merged.notes?.keyPoints.first?.text == "Priya Shah will ship the build next week" && merged.notes?.outdated == nil, "a merge relabels the notes")
+            var clash = renamed; clash.renameSpeaker(1, to: "Priya Shah")
+            check(clash.notes?.outdated == true && clash.notes?.keyPoints.first?.text == "Sam will ship the build next week", "a name another speaker has marks the notes out of date")
+            var moved = renamed; moved.reassignLine(moved.lines[2].id, to: 2)
+            check(moved.notes?.outdated == true, "reassigning a line marks the notes out of date")
+        }
+
         if failures > 0 { print("\(failures) meeting check(s) failed"); exit(1) }
         print("All meeting checks passed.")
     }
