@@ -52,7 +52,7 @@ python3 app/check_http.py
 swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check && /tmp/murmur-updates-check
 swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check && /tmp/murmur-insights-check
 swiftc app/Retention.swift app/Meetings.swift app/MeetingNotes.swift app/check_meetings.swift -o /tmp/murmur-meetings-check && /tmp/murmur-meetings-check
-swiftc app/Retention.swift app/Meetings.swift app/CallDetection.swift app/check_call_detection.swift -o /tmp/murmur-detection-check && /tmp/murmur-detection-check
+swiftc app/Retention.swift app/Meetings.swift app/MeetingNotes.swift app/CallDetection.swift app/check_call_detection.swift -o /tmp/murmur-detection-check && /tmp/murmur-detection-check
 swiftc app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/check_app_services.swift -o /tmp/murmur-app-services-check && /tmp/murmur-app-services-check
 swiftc module-one/models/Runner/Sources/ModelBench/BoostFilter.swift app/check_boost_filter.swift -o /tmp/murmur-boost-check && /tmp/murmur-boost-check
 python3 app/tools/build_cleanup_corpus.py
