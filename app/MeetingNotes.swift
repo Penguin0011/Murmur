@@ -347,20 +347,22 @@ enum NotesGrounding {
 
     // MARK: Polarity
 
-    /// Each content word with whether a negation governs it. A negation (`CleanupText.isNegation`:
-    /// "no", "not", "never", "none", "n't") reaches the words after it up to the end of its clause:
-    /// punctuation or a conjunction, so "No, Friday works" does not negate "Friday".
-    static func polarity(_ text: String) -> [(word: String, negated: Bool)] {
-        var out: [(word: String, negated: Bool)] = []
-        for clause in text.lowercased().components(separatedBy: CharacterSet(charactersIn: ".,;:!?()\n")) {
-            var negated = false
-            for token in tokens(clause) {
+    /// The text's clauses, each as its content words with whether a negation governs them. A
+    /// negation (`CleanupText.isNegation`: "no", "not", "never", "none", "n't") reaches the words
+    /// after it up to the end of its clause: punctuation or a conjunction, so "No, Friday works"
+    /// does not negate "Friday".
+    static func clauses(_ text: String) -> [[(word: String, negated: Bool)]] {
+        var out: [[(word: String, negated: Bool)]] = []
+        for piece in text.lowercased().components(separatedBy: CharacterSet(charactersIn: ".,;:!?()\n")) {
+            var clause: [(word: String, negated: Bool)] = [], negated = false
+            for token in tokens(piece) {
                 if CleanupText.isNegation(token) { negated = true; continue }
-                if clauseBreaks.contains(token) { negated = false; continue }
-                out += contentWords(token).map { ($0, negated) }
+                if clauseBreaks.contains(token) { out.append(clause); clause = []; negated = false; continue }
+                clause += contentWords(token).map { ($0, negated) }
             }
+            out.append(clause)
         }
-        return out
+        return out.filter { !$0.isEmpty }
     }
     static let clauseBreaks: Set<String> = ["and", "but", "or", "so", "because", "while", "though", "although", "whereas", "unless", "if", "then", "instead"]
 
@@ -376,26 +378,29 @@ enum NotesGrounding {
         (["faster", "fastest"], ["slower", "slowest"]),
     ]
 
-    /// True when the item reverses its cited lines (PRD 11.6): it uses one side of an opposite pair
-    /// that the lines only say the other way, or its shared words are negated where the lines' are
-    /// not, or the reverse. A word counts as flipped only when every cited use disagrees with every
-    /// use in the item; the item fails on two flipped words, or on one when it is half its shared words.
-    /// ponytail: clause-scoped word lists, not a parser. "We're not doing the launch" → "skip the
-    /// launch" passes (one shared word); a flip spread across clauses passes too. Tune on real calls.
+    /// True when the item reverses its cited lines (PRD 11.6). Either it uses one side of an
+    /// opposite pair that the lines say only the other way, or one side restates a whole negated
+    /// clause of the other (two or more content words, every one present there) without its
+    /// negation. Restating the whole clause is what separates "no states are expected to be cooler"
+    /// → "states expected to be cooler" from a reschedule: "we can't launch Thursday, let's do
+    /// Friday" → "launch moves to Friday" leaves Thursday out, so it stands.
+    /// ponytail: clause-scoped word lists, not a parser. A one-word clause ("Not approved.") and an
+    /// antonym standing in for a negation ("not doing the launch" → "cancel the launch") pass.
     static func polarityChanged(_ item: String, cited: String) -> Bool {
         let mine = Set(tokens(item.lowercased())), theirs = Set(tokens(cited.lowercased()))
         for (a, b) in opposites + opposites.map({ ($0.1, $0.0) })
         where !mine.isDisjoint(with: a) && mine.isDisjoint(with: b) && !theirs.isDisjoint(with: b) && theirs.isDisjoint(with: a) { return true }
-        let ours = polarity(item), said = polarity(cited)
-        var shared = 0, flipped = 0
-        for word in Set(contentWords(item)) {
-            let here = Set(ours.filter { $0.word == word }.map(\.negated))
-            let there = Set(said.filter { related(word, $0.word) }.map(\.negated))
-            guard !there.isEmpty else { continue }
-            shared += 1
-            if here.isDisjoint(with: there) { flipped += 1 }
+        func reverses(_ one: [[(word: String, negated: Bool)]], _ other: [[(word: String, negated: Bool)]]) -> Bool {
+            let words = other.joined()
+            return one.contains { clause in
+                clause.count >= 2 && clause.contains { $0.negated } && clause.allSatisfy { w in
+                    let uses = words.filter { related(w.word, $0.word) }
+                    return !uses.isEmpty && (!w.negated || uses.allSatisfy { !$0.negated })
+                }
+            }
         }
-        return flipped >= 2 || (shared >= 2 && flipped * 2 >= shared)
+        let ours = clauses(item), said = clauses(cited)
+        return reverses(ours, said) || reverses(said, ours)
     }
 
     // MARK: Names, numbers, dates

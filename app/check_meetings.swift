@@ -340,6 +340,11 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(!flipped("Dana owns the rollout plan", "Dana owns the rollout plan, not Sam."), "a trailing not names someone else")
             check(!flipped("Never miss the Friday deploy window again", "We should never miss the Friday deploy window again."), "a kept never")
             check(!flipped("Team isn't ready to launch", "We aren't ready to launch yet."), "n't on both sides")
+            check(!flipped("Launch moves to Friday", "We can't launch Thursday, let's do Friday."), "a reschedule away from a negated day")
+            check(!flipped("Launch the beta Friday", "We can't launch the beta Thursday, let's do Friday."), "a reschedule sharing two negated words")
+            check(!flipped("Friday works", "Thursday doesn't work for me, Friday does."), "the negated clause is about another day")
+            check(!flipped("Deck due Friday", "Send the deck no later than Friday."), "no later than is a deadline")
+            check(!flipped("Login problem is fixed", "No problem, the login fix is in."), "a one-word negated clause is not compared")
 
             // The writer: one request when it fits; grounding applied; citations stored as line ids.
             let reply = """
