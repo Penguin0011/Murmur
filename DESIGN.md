@@ -1,49 +1,128 @@
 ---
-name: Dictation
-description: Paper-and-ink settings window; native Liquid Glass floating indicator
+name: Murmur
+description: Balanced serif-and-sans macOS window with native floating indicators
+colors:
+  paper: "#FAFAFA"
+  ink: "#141414"
+  accent: "#5995C9"
+  accent-ink: "#2F6EA6"
+  accent-deep: "#285F90"
+  dark-paper: "#181818"
+  dark-ink: "#FAFAFA"
+  dark-accent-ink: "#8DB6DC"
+  dark-accent-deep: "#A9C8E6"
+typography:
+  display:
+    fontFamily: "Instrument Serif"
+    fontSize: "64pt"
+    fontWeight: 400
+    letterSpacing: "-1.28pt"
+  wordmark:
+    fontFamily: "Instrument Serif"
+    fontSize: "28pt"
+    fontWeight: 400
+  body:
+    fontFamily: "DM Sans"
+    fontSize: "15pt"
+  supporting:
+    fontFamily: "DM Sans"
+    fontSize: "13pt"
+  navigation:
+    fontFamily: "system monospace"
+    fontSize: "11pt"
+    letterSpacing: "0.88pt"
 rounded:
-  utility: "18pt"
-  bubble: "no live container / 18pt error"
+  field: "4pt"
 spacing:
-  compact: "4pt"
   related: "8pt"
   controls: "12pt"
-  section: "14pt"
-  inset: "18pt"
-  content: "20pt"
+  row: "18pt"
+  section: "28pt"
+  content: "40pt"
+  outer: "56pt"
+components:
+  button-primary:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    height: "36pt minimum"
+    padding: "0 18pt"
+  input:
+    rounded: "{rounded.field}"
+    height: "44pt"
+    padding: "0 12pt"
 ---
 
-# Design System: Dictation
+# Design System: Murmur
 
 ## Overview
 
-**Two surfaces.** The Murmur window (Settings, History, first run) uses the clouddev paper-and-ink system: flat paper, ink rules, square controls, monospaced uppercase labels and one blue accent. The floating recording indicator and error bubble stay native Liquid Glass (see the last section).
+The user-supplied **Murmur Settings Final standalone.html**, with its active `balanced` variant, replaces the previous square paper-and-ink window direction. The native SwiftUI implementation pairs expressive serif headings with quiet sans-serif content, text navigation, blue selection underlines, and pill actions. [Certain]
+
+This document describes the inspected source in `app/UI.swift` and `app/MeetingsUI.swift`; it does not establish pixel parity, runtime font loading, or completed accessibility validation. [Certain]
 
 ## Colors
 
-**Logo.** Five bars rise and fall like a voice, loud and soft in turn: ink on accent, with the accent square as the full stop. `Logo` (app/UI.swift) holds the bars on a 96-unit grid and draws the one-colour menu bar mark (a template image, so it follows the menu bar tint) and the full-colour mark (literal #141414 bars on accent) for the window header and, outlined in ink and tilted 1.5°, the first-run panel. The app icon is `app/AppIcon.icns`, the rounded-square variant on the macOS 824-in-1024 grid; regenerate it with `swift app/tools/make_icon.swift`.
+### Primary
 
-Window tokens live in `Palette` (app/UI.swift), copied from the clouddev design system: paper #F4F2ED, ink #141414 with 80/70/64/45/20% alphas, accent #5995C9 (fills, toggles, underlines, logo), accent-ink #2F6EA6 (accent text, 4.8:1 on paper), accent-deep #285F90 (pressed fills, tags) and accent at 16% (notes, tags, setup panel). Settings → General → Appearance switches the window between Light (default) and Dark, stored in UserDefaults as `appearance`. Dark swaps paper and ink and lifts accent-ink to #8DB6DC and accent-deep to #A9C8E6. Only the Murmur window changes: the floating indicator keeps following the system appearance.
+Blue accent supplies selection, progress, and restrained emphasis; the darker accent-ink role supplies readable accent text and active underlines. Accent-deep supplies status surfaces, and accent at 16% supplies supporting tint. [Certain]
+
+### Neutral
+
+Near-white paper and near-black ink define the light window. Dark appearance swaps these roles to dark paper and near-white ink, with lighter accent text roles. Supporting ink uses opacity levels of 80%, 70%, 64%, 45%, and 20%; the last is used for quiet dividers and field borders. [Certain]
+
+Appearance is scoped to the main window with System, Light, and Dark choices; floating indicators follow the system. [Certain]
 
 ## Typography
 
-System font in place of Archivo (not bundled): 36–56 pt bold with tight tracking for titles, 16–18 pt semibold row titles, 14 pt secondary text at ink 70%. Eyebrows, the sidebar, tabs, status words and tags use the system monospaced font, uppercase, tracked 0.08 em.
+Instrument Serif supplies the wordmark and display headings. DM Sans supplies the main window's authored body, setting titles, help, and buttons. Both fonts are registered from bundled font resources by `WindowType`; no runtime font download is requested by this code. [Certain]
+
+Display titles use regular serif type with tight tracking; page ledes use DM Sans at 16pt, setting titles use 15pt semibold, and supporting copy uses 13pt with added line spacing. Navigation and eyebrows use uppercase system monospace, with tracking equal to 0.08 times the font size. [Certain]
+
+Meetings page content and consent/notes sheets use the shared DM Sans typography; its start menu uses a 36pt ink capsule with a 14pt semibold label. The floating meeting recording panel retains system typography. The speaker settings subsection also retains some system-font labels. [Certain]
 
 ## Layout
 
-A 64 pt header holds the full-colour mark and wordmark (name plus accent square), Settings/History tabs with an accent underline, the transcription route and the current phase. Ink banners below it carry the status message (with Dismiss) and an unfinished-setup prompt. Settings is a 216 pt numbered sidebar (General, Transcription, Cleanup, Dictionary, History & Privacy, API Keys, Updates) beside a 640 pt content column. History groups transcripts by day; a row expands to its note, final and raw text, and Copy/Delete. First run is a 5:7 split: accent panel with the full-colour mark, then four numbered steps. The default window is 1000 × 680 pt, minimum 760 × 560.
+The main window has a sparse wordmark header with a small monochrome voice mark and a trailing setup action. A 200pt text sidebar contains Home, Insights, Meetings, settings sections, and History; current phase sits at its foot. Navigation uses text rather than numbered boxes or header tabs; rows have a 36pt minimum height and 2pt gaps. [Certain]
 
-## Shapes and controls
+Settings uses a scrollable content column up to 640pt wide, with 40pt leading and 56pt trailing padding. Page titles lead each section, followed by a lede and flat setting groups. The window's declared minimum is 760×560pt. Home and Insights share the serif page hierarchy. Populated Meetings uses a 200pt inner list beside detail when its content is at least 680pt wide; below that threshold, a search field and native meeting picker sit above detail. Search constrains the selected meeting to matching results. [Certain]
 
-Everything is square. Borders are 1.5 pt ink (strong) or 1 pt ink 20% (row dividers). Buttons and segments are 44 pt tall: filled ink, outlined ink, or accent-ink for Save Key. Toggles are a 48 × 24 pt bordered box with a 17 pt ink knob and accent fill when on, exposed to VoiceOver as native toggles. No glass, blur or shadow inside the window.
+Setup remains a distinct 5:7 split with five numbered steps on paper, a blue underline for the selected step, and a plain monochrome voice mark. It is not evidence that every screen follows the settings composition. [Certain]
+
+## Elevation & Depth
+
+The main settings/history window uses flat color, spacing, rules, and occasional tint rather than authored shadows or stacked glass cards. Floating dictation status and meeting panels remain native macOS exceptions, using `UtilityGlass` or native glass capsule treatments. `UtilityGlass` falls back to an opaque system window background under Reduce Transparency or Increase Contrast. [Certain]
+
+## Shapes
+
+Shared action buttons are capsules with a 36pt minimum height. Text fields use a fine outline and modest 4pt corners, while switches use a rounded 44×26pt track and 22pt circular thumb. Flat dividers and underline selections retain crisp rectangular geometry. [Certain]
+
+## Components
+
+### Buttons
+
+Shared actions use ink fill, ink outline, accent-ink fill, or plain text. Labels use 14pt semibold DM Sans; pressed opacity is 0.7 and disabled opacity is 0.45. Do not import web hover animations or iOS control assumptions into these native macOS controls. [Certain]
+
+### Inputs / Fields
+
+Shared text and secure fields use plain text styling, an explicit accessible label, an ink-64 placeholder overlay, horizontal padding, and a quiet border. Native pickers, checkboxes, menus, sheets, and alerts remain where the implementation uses them. [Certain]
+
+### Navigation and choices
+
+Active sidebar entries, segmented choices, setup steps, and Meetings detail tabs use a 2pt accent-ink underline. Sidebar entries retain uppercase monospace labels; choice labels use medium DM Sans. Selection is exposed through accessibility traits. [Certain]
+
+### Switches
+
+Rounded switches use ink when on, reduced-opacity ink when off, and a paper thumb. The custom button-backed drawing exposes a native Toggle accessibility representation. [Certain]
+
+### Floating indicators
+
+The recording indicator remains a nonactivating native glass surface with voice-reactive capsules and system accessibility behavior. Recovery, cancellation, learned-word notices, and the meeting recording panel retain their own existing floating layouts and system typography. Their behavior is outside this window rebuild. [Certain]
 
 ## Do's and Don'ts
 
-- Do keep every setting applying as soon as it changes, and disable editing while dictating.
-- Do keep disclosures (what leaves this Mac) next to the route that sends it.
-- Don't add colors beyond the palette; errors use ink banners, not orange.
-- Don't put glass controls inside the floating glass bubble.
-
-## Compact floating indicators
-
-Recording and processing always use a 80×24-point transparent panel containing five standalone voice-reactive native glass circles. Processing becomes static with Reduce Motion. The phase remains an accessibility label; the shortcut controls finish/cancel. Saved output and successful insertion hide the panel. Error messages use a 240-point maximum panel, a clickable short summary with no buttons: every status leaves on its own (no speech 2 s, other errors 8 s, everything else 5 s), as does the matching Settings banner. Learned-word notices also have no buttons. Settings retain full error details, retained-audio access, and dictionary removal controls; History retains copy controls and actionable recovery states; posted pastes have no success or uncertainty badges. [Certain]
+- Do use the supplied balanced reference as the main window's visual authority.
+- Do preserve native macOS window chrome, keyboard interaction, VoiceOver labels, and recovery paths.
+- Do use serif headings, sans-serif reading text, sparse text navigation, and underlines for the rebuilt window.
+- Don't restore the former square-button, numbered-sidebar system as the window default.
+- Don't extend the window's custom font and paper treatment into the native floating indicators without a separate decision.
+- Don't treat source inspection as rendered or functional validation.

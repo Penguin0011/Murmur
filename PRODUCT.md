@@ -24,7 +24,7 @@ The selected local model is Parakeet Unified. M1 performance validation is defer
 
 ## Visual commitment
 
-The approved visual direction extends native macOS Liquid Glass from the bottom-screen recording bubble to floating status, navigation, search, and action surfaces over calm settings/history content. Keep system typography, semantic colors, familiar controls, and clear recovery; avoid stacked glass cards. [Certain]
+The user-supplied Murmur Settings Final standalone.html, active balanced variant, defines the main window: near-white paper, dark ink, Instrument Serif headings, DM Sans content, text sidebar navigation, blue underlines, pill actions, and rounded switches. Preserve native macOS interaction and recovery; floating dictation indicators and meeting panels retain their native glass treatment. Meetings content and sheets share the window typography, while its floating recording panel retains system typography. [Certain]
 
 ## Evidence on hand
 
