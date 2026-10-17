@@ -1609,7 +1609,7 @@ extension SettingsView {
                 insightMetric("Words changed", s.wordsChanged.formatted(), "Differences between raw and final text, including cleanup, dictionary spellings and History edits. Not an accuracy score.")
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), alignment: .top)], alignment: .leading, spacing: 28) {
-                dailyActivity(s)
+                dailyActivity(s).frame(height: 300, alignment: .top)
                 VStack(alignment: .leading, spacing: 12) {
                     insightHeading("Streak", "Calendar shows the last five weeks. A day counts after one dictation in this Mac’s time zone. Streak totals use all retained History.")
                     HStack(spacing: 24) {
@@ -1624,8 +1624,8 @@ extension SettingsView {
                     }
                     StreakCalendar(days: s.days, weeks: 5,
                                    cutoff: HistoryExpiry.cutoff(HistoryRetention(rawValue: controller.retention) ?? .thirtyDays))
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                hourlyActivity(s)
+                }.frame(maxWidth: .infinity, alignment: .leading).frame(height: 300, alignment: .top)
+                hourlyActivity(s).frame(height: 300, alignment: .top)
                 VStack(alignment: .leading, spacing: 12) {
                     insightHeading("Top apps", "Ranked by words in retained History. \(s.withoutApp) dictations have no destination app recorded.")
                     if s.apps.isEmpty { help("App usage appears after a destination app is recorded.") }
@@ -1643,7 +1643,7 @@ extension SettingsView {
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("\(appName(item.app)), \(item.words) words, \(item.count) dictations")
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxWidth: .infinity, alignment: .leading).frame(height: 300, alignment: .top)
             }
             help("Based on retained History · kept for \(keptFor). Older entries may lack duration or app data.", color: Palette.ink64)
         }.padding(.top, 20)
@@ -1678,7 +1678,7 @@ extension SettingsView {
                     .accessibilityValue("\(s.dailyWords[day, default: 0]) words")
             }
             .chartXAxis { AxisMarks(values: .stride(by: .day, count: 10)) { _ in AxisValueLabel(format: .dateTime.month(.abbreviated).day()) } }
-            .frame(height: 160)
+            .frame(height: 264)
         }
     }
 
@@ -1695,7 +1695,7 @@ extension SettingsView {
             .chartXAxis { AxisMarks(values: [0, 6, 12, 18]) { value in
                 AxisValueLabel { if let hour = value.as(Int.self) { Text(hour == 0 ? "12am" : hour < 12 ? "\(hour)am" : hour == 12 ? "12pm" : "\(hour - 12)pm") } }
             } }
-            .frame(height: 160)
+            .frame(height: 264)
         }
     }
 
@@ -1721,10 +1721,13 @@ private struct StreakCalendar: View {
             ForEach(0..<(weeks * 7), id: \.self) { offset in
                 let day = calendar.date(byAdding: .day, value: offset, to: first) ?? first
                 let on = days.contains(day)
-                Rectangle()
-                    .fill(on ? Palette.accent : day > today ? Color.clear : Palette.ink.opacity(cutoff.map { day < calendar.startOfDay(for: $0) } == true ? 0.03 : 0.1))
-                    .aspectRatio(1, contentMode: .fit)
-                    .overlay(Rectangle().strokeBorder(day == today ? Palette.ink : Color.clear, lineWidth: 1.5))
+                Text("\(calendar.component(.day, from: day))")
+                    .font(WindowType.body(11, weight: on ? .semibold : .regular))
+                    .foregroundStyle(on ? Color(nsColor: .black) : Palette.ink70)
+                    .frame(maxWidth: .infinity).frame(height: 26)
+                    .background(on ? Palette.accent : Palette.ink.opacity(0.06), in: Capsule())
+                    .overlay(Capsule().strokeBorder(day == today ? Palette.ink : Color.clear, lineWidth: 1.5))
+                    .opacity(day > today || cutoff.map { day < calendar.startOfDay(for: $0) } == true ? 0.3 : 1)
                     .help(day.formatted(date: .abbreviated, time: .omitted) + (on ? ": dictated" : ": no retained dictation"))
             }
         }
