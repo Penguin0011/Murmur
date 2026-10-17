@@ -69,6 +69,25 @@ struct Meeting: Codable, Identifiable, Equatable {
         return source.allApps ? "Meeting, \(date)" : "Meeting with \(source.name), \(date)"
     }
 
+    /// Search the content people remember, including notes that do not appear in the transcript.
+    var searchDetails: [String] {
+        var text = [notes?.summary ?? "", myNotes]
+        if let notes {
+            text += (notes.keyPoints + notes.decisions + notes.actions).map {
+                [$0.text, $0.owner ?? "", $0.due ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+            }
+        }
+        text += lines.map(\.visibleText)
+        return text.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    func matches(query: String, from: Date?, through: Date?, calendar: Calendar = .current) -> Bool {
+        if let from, recordedAt < calendar.startOfDay(for: from) { return false }
+        if let through, let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: through)), recordedAt >= end { return false }
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty || ([title, source.name] + searchDetails).contains { $0.localizedStandardContains(query) }
+    }
+
     /// Inserts a transcribed line in capture-time order and re-runs echo suppression near it.
     mutating func insert(stream: MeetingStream, start: Double, end: Double, text: String, localFallback: Bool = false, words: [[Double]]? = nil) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

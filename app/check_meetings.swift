@@ -472,6 +472,30 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(moved.notes?.outdated == true, "reassigning a line marks the notes out of date")
         }
 
+        // Topic search includes generated and personal notes; dates include whole local days.
+        do {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "America/New_York")!
+            let day = calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 12))!
+            let late = calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 23, minute: 30))!
+            var meeting = Meeting(id: UUID().uuidString, recordedAt: late, source: .microphoneOnly)
+            meeting.myNotes = "Café budget"
+            meeting.insert(stream: .me, start: 0, end: 2, text: "Transcript marker")
+            meeting.notes = MeetingNotes(title: "Quarterly launch", summary: "Discussed vendor renewal", route: "Synthetic", writtenAt: late)
+            meeting.notes?.keyPoints = [NoteItem(text: "Migration timeline", lines: [1])]
+            meeting.notes?.decisions = [NoteItem(text: "Extend support", lines: [1])]
+            meeting.notes?.actions = [NoteItem(text: "Send invoice", lines: [1], owner: "Priya", due: "Friday")]
+            for query in ["QUARTERLY", "renewal", "cafe", "migration", "support", "invoice", "Priya", "Friday", "Transcript marker", "  "] {
+                check(meeting.matches(query: query, from: nil, through: nil, calendar: calendar), "search finds \(query) across meeting content")
+            }
+            check(!meeting.matches(query: "unrelated topic", from: nil, through: nil, calendar: calendar), "unmatched topics excluded")
+            check(meeting.matches(query: "renewal", from: day, through: day, calendar: calendar), "date range includes end of a 25-hour DST day")
+            check(!meeting.matches(query: "renewal", from: calendar.date(byAdding: .day, value: 1, to: day), through: nil, calendar: calendar), "date and topic filters intersect")
+            check(!meeting.matches(query: "", from: nil, through: calendar.date(byAdding: .day, value: -1, to: day), calendar: calendar), "meeting after end date excluded")
+            let nextDay = Meeting(id: UUID().uuidString, recordedAt: calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day))!, source: .microphoneOnly)
+            check(!nextDay.matches(query: "", from: day, through: day, calendar: calendar), "next midnight excluded from inclusive end date")
+        }
+
         if failures > 0 { print("\(failures) meeting check(s) failed"); exit(1) }
         print("All meeting checks passed.")
     }
