@@ -309,6 +309,13 @@ func checkKeychainStore() {
         check(ProviderError.payloadTooLarge(.gemini, limitBytes: 1).disposition == .preserveNeedsChange, "payload keeps session, needs change")
         check(ProviderError.cancelled.disposition == .discard, "cancel discards")
         check(ProviderError.rateLimited(.customAPI, retryAfter: 1.2).userMessage.contains("2 seconds"), "retry hint rounds up")
+        for value in [Double.infinity, -Double.infinity, Double.nan, Double.greatestFiniteMagnitude, Double(Int.max)] {
+            check(!ProviderError.rateLimited(.customAPI, retryAfter: value).userMessage.contains("seconds"), "unsafe retry delay uses generic message")
+        }
+        for value in ["inf", "nan", "1e100", String(Int.max), "-1"] {
+            check(ProviderErrorClassifier.parseRetryAfter(value, now: Date()) == nil, "unsafe Retry-After rejected")
+            check(ProviderErrorClassifier.parseGoogleDuration(value + "s") == nil, "unsafe Google retry duration rejected")
+        }
         check(ProviderError.payloadTooLarge(.customAPI, limitBytes: 25_000_000).userMessage.contains("25 MB"), "payload message states limit")
     }
 
