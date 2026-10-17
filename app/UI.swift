@@ -1496,7 +1496,14 @@ extension SettingsView {
     }
 
     var home: some View {
-        page("Home", "Dictate anywhere the cursor is. Everything below is on this Mac.") {
+        page("Home", "Dictate anywhere the cursor is.") {
+            help("Transcription: \(controller.transcriptionRoute == .local ? "On this Mac" : controller.cloudTranscriber.displayName) · Cleanup: \(controller.cleanupChoice.displayName)").padding(.top, 12)
+            DisclosureGroup("Where dictation data goes") {
+                disclosure(controller.routeDisclosure(.transcription))
+                disclosure(controller.routeDisclosure(.cleanup))
+                help("On-device routes process data on this Mac. Custom providers use the server configured in Settings.")
+            }
+            .font(WindowType.body(13)).padding(.top, 8)
             eyebrow("Shortcut").padding(.top, 28)
             HStack(alignment: .center, spacing: 20) {
                 VStack(alignment: .leading, spacing: 6) {
