@@ -23,6 +23,7 @@ import SwiftUI
         item.submenu = appMenu; menu.addItem(item); menu.addItem(standardEditMenuItem()); application.mainMenu = menu
         let light = CommandLine.arguments.contains("--light")
         let args = CommandLine.arguments
+        UserDefaults.standard.set(args.contains("--sidebar-collapsed"), forKey: "sidebarCollapsed")
         // --system-appearance leaves the app's appearance alone, so the bubble shows it follows macOS
         // while the window uses the stored choice.
         if args.contains("--system-appearance") {

@@ -174,6 +174,7 @@ struct SettingsView: View {
     @State private var checkedSetup = false
     /// The writing mode whose editor is open.
     @State private var editingModeID: UUID?
+    @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
     @AppStorage("showDetailedSettingsInfo") private var showDetailedSettingsInfo = true
     /// System, light or dark (gap #20). A window preference only; the floating indicator keeps following
     /// the system appearance.
@@ -182,6 +183,7 @@ struct SettingsView: View {
     @FocusState private var apiFieldFocused: Bool
 
     private static let sections = ["General", "Transcription", "Cleanup", "Modes", "Dictionary", "History & Privacy", "API Keys", "Updates", "Meetings"]
+    private static let sectionIcons = ["slider.horizontal.3", "waveform", "wand.and.stars", "switch.2", "character.book.closed", "hand.raised", "key", "arrow.triangle.2.circlepath", "gearshape.2"]
     private static let ledes = [
         "The shortcut, how text is inserted, and what Murmur is allowed to do.",
         "Where your voice is turned into text. On this Mac by default.",
@@ -376,40 +378,55 @@ struct SettingsView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Button { sidebarCollapsed.toggle() } label: {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 16)).frame(width: 36, height: 36)
+                    .foregroundStyle(Palette.ink70).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
+            .accessibilityLabel(sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar")
+            .padding(.bottom, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    navigationRow("Home", selected: screen == .home) { screen = .home }
-                    navigationRow("Insights", selected: screen == .insights) { screen = .insights }
-                    navigationRow("Meetings", selected: screen == .meetings) { screen = .meetings }
-                    navigationRow("History", selected: screen == .history) { screen = .history }
+                    navigationRow("Home", icon: "house", selected: screen == .home) { screen = .home }
+                    navigationRow("Insights", icon: "chart.bar.xaxis", selected: screen == .insights) { screen = .insights }
+                    navigationRow("Meetings", icon: "person.2", selected: screen == .meetings) { screen = .meetings }
+                    navigationRow("History", icon: "clock.arrow.circlepath", selected: screen == .history) { screen = .history }
                     Color.clear.frame(height: 12)
                     ForEach(Self.sections.indices, id: \.self) { index in
                         navigationRow(index == 8 ? "Meeting Settings" : index == 5 ? "Privacy" : Self.sections[index],
-                                      selected: screen == .settings && section == index) { section = index; screen = .settings }
+                                      icon: Self.sectionIcons[index], selected: screen == .settings && section == index) { section = index; screen = .settings }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(spacing: 7) {
                 Circle().fill(controller.phase == "Error" ? Palette.ink : Palette.accentInk).frame(width: 6, height: 6)
-                mono(controller.phase, size: 10, color: Palette.ink70)
+                if !sidebarCollapsed { mono(controller.phase, size: 10, color: Palette.ink70) }
             }
-            .accessibilityElement(children: .combine)
-            .help(controller.appliedTranscriptionIsLocal ? "Local transcription" : "Cloud transcription")
+            .accessibilityElement(children: .ignore).accessibilityLabel(controller.phase)
+            .help(controller.phase + " · " + (controller.appliedTranscriptionIsLocal ? "Local transcription" : "Cloud transcription"))
+            .padding(.leading, sidebarCollapsed ? 15 : 0)
             .padding(.top, 12).padding(.bottom, 16)
         }
-        .padding(.leading, 24).padding(.trailing, 16).padding(.top, 16)
-        .frame(width: 184).frame(maxHeight: .infinity)
+        .padding(.horizontal, sidebarCollapsed ? 14 : 20).padding(.top, 16)
+        .frame(width: sidebarCollapsed ? 64 : 216).frame(maxHeight: .infinity)
     }
 
-    private func navigationRow(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+    private func navigationRow(_ title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            mono(title, size: 11, color: selected ? Palette.ink : Palette.ink70)
-                .lineLimit(1).fixedSize().frame(minHeight: 36)
-                .overlay(alignment: .bottom) { Rectangle().fill(selected ? Palette.accentInk : Color.clear).frame(height: 2) }
-                .contentShape(Rectangle())
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 15)).frame(width: 20)
+                if !sidebarCollapsed { mono(title, size: 11, color: selected ? Palette.ink : Palette.ink70).lineLimit(1) }
+            }
+            .foregroundStyle(selected ? Palette.ink : Palette.ink70)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: sidebarCollapsed ? .center : .leading)
+            .background(selected ? Palette.accent16 : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+        .buttonStyle(.plain).help(title).accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     @ViewBuilder private var banners: some View {
