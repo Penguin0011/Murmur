@@ -395,12 +395,12 @@ struct SettingsView: View {
                     navigationRow("Home", selected: screen == .home) { screen = .home }
                     navigationRow("Insights", selected: screen == .insights) { screen = .insights }
                     navigationRow("Meetings", selected: screen == .meetings) { screen = .meetings }
+                    navigationRow("History", selected: screen == .history) { screen = .history }
                     Color.clear.frame(height: 12)
                     ForEach(Self.sections.indices, id: \.self) { index in
                         navigationRow(index == 8 ? "Meeting Settings" : index == 5 ? "Privacy" : Self.sections[index],
                                       selected: screen == .settings && section == index) { section = index; screen = .settings }
                     }
-                    navigationRow("History", selected: screen == .history) { screen = .history }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1245,6 +1245,9 @@ struct SettingsView: View {
         return VStack(alignment: .leading, spacing: 0) {
             Button { selectedID = open ? nil : entry.id } label: {
                 HStack(alignment: .top, spacing: 16) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(Palette.ink70)
+                        .frame(width: 12).padding(.top, 5).accessibilityHidden(true)
                     Text(entry.recordedAt, format: .dateTime.hour().minute())
                         .font(.system(size: 13, design: .monospaced)).foregroundStyle(Palette.ink70).lineLimit(1).fixedSize().frame(width: 72, alignment: .leading).padding(.top, 2)
                     Text((entry.finalText.isEmpty ? entry.rawText : entry.finalText).replacingOccurrences(of: "\n", with: " "))
@@ -1258,6 +1261,8 @@ struct SettingsView: View {
                 .padding(.vertical, 12).frame(minHeight: 56).contentShape(Rectangle())
             }
             .buttonStyle(.plain).accessibilityAddTraits(open ? .isSelected : [])
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .accessibilityHint("Show or hide transcript and recovery actions")
             if open {
                 VStack(alignment: .leading, spacing: 0) {
                     if let note {
