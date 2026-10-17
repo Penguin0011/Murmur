@@ -577,11 +577,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 4) {
                             Text(ModelFacts.displayName).font(WindowType.body(18, weight: .semibold))
-                            if let license = controller.modelLicense { SettingInfoButton(text: ModelFacts.licenseText(license)) }
-                            if !controller.modelSummary.isEmpty {
-                                SettingInfoButton(text: controller.modelSummary, systemImage: "internaldrive")
-                                    .accessibilityLabel("Model size and details")
-                            }
+                            ModelInfoIcons(license: controller.modelLicense.map(ModelFacts.licenseText), details: controller.modelSummary)
                         }
                         Group {
                             if controller.modelRow.isReady { mono("Model ready ✓", color: Palette.accentInk) }
@@ -888,8 +884,8 @@ struct SettingsView: View {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 4) {
-                        Text(controller.liveWordsSummary).font(WindowType.body(14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                        if let license = controller.liveWordsLicense { SettingInfoButton(text: ModelFacts.licenseText(license)) }
+                        Text("Parakeet Unified streaming").font(WindowType.body(14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                        ModelInfoIcons(license: controller.liveWordsLicense.map(ModelFacts.licenseText), details: controller.liveWordsSummary)
                     }
                     if controller.liveWordsRow.isReady { mono("Ready ✓", color: Palette.accentInk) }
                     else { Text(controller.liveWordsRow.statusText).font(WindowType.body(13)).foregroundStyle(Palette.ink70).fixedSize(horizontal: false, vertical: true) }
@@ -913,11 +909,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 4) {
                         Text(DictionaryModelFacts.displayName).font(WindowType.body(18, weight: .semibold))
-                        if let license = controller.dictionaryModelLicense { SettingInfoButton(text: ModelFacts.licenseText(license)) }
-                        if !controller.dictionaryModelSummary.isEmpty {
-                            SettingInfoButton(text: controller.dictionaryModelSummary, systemImage: "internaldrive")
-                                .accessibilityLabel("Model size and details")
-                        }
+                        ModelInfoIcons(license: controller.dictionaryModelLicense.map(ModelFacts.licenseText), details: controller.dictionaryModelSummary)
                     }
                     Group {
                         if controller.dictionaryModelRow.isReady && !controller.dictionarySupportFailed { mono("Ready ✓", color: Palette.accentInk) }
@@ -1366,7 +1358,7 @@ struct SettingsView: View {
             ("Microphone", "So Murmur can hear you while the shortcut is held. Audio stays on this Mac unless you choose a cloud route.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
             ("Accessibility", "So Murmur can paste into the field you are using. It never presses Return or sends a message.", controller.accessibilityAuthorized, "Open Settings…", { controller.openPermissionSettings("accessibility") }),
             ("Input Monitoring", "So the shortcut works in every app. Murmur listens only for the shortcut, Escape and its two ⌃⌘ chords.", controller.inputMonitoringAuthorized, "Open Settings…", { controller.openPermissionSettings("input-monitoring") }),
-            ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed while transcription runs in the cloud." : ModelFacts.displayName + (controller.modelSummary.isEmpty ? "" : " · " + controller.modelSummary), modelSatisfied,
+            ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed while transcription runs in the cloud." : ModelFacts.displayName, modelSatisfied,
              controller.modelRow.actions.contains(.retry) ? "Retry…" : "Download…", controller.downloadModel),
             ("Try it", "Press \(controller.shortcutName) and say a sentence. With this window in front, your words land in the field below instead of another app.", !controller.setupTestTranscript.isEmpty, "", {})
         ]
@@ -1443,7 +1435,12 @@ struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 0) {
                             mono(String(format: "%02d", index + 1), size: 13, color: Palette.accentInk)
                             Text(step.title).font(WindowType.display(64)).tracking(-1.28).padding(.top, 8)
-                            help(step.detail).padding(.top, 10)
+                            HStack(alignment: .top, spacing: 4) {
+                                help(step.detail)
+                                if guideStep == .model {
+                                    ModelInfoIcons(license: controller.modelLicense.map(ModelFacts.licenseText), details: controller.modelSummary)
+                                }
+                            }.padding(.top, 10)
                             Group {
                                 if last { tryIt }
                                 else {
@@ -1767,6 +1764,24 @@ func standardEditMenuItem() -> NSMenuItem {
     let item = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
     item.submenu = edit
     return item
+}
+
+/// Shared license and storage affordances for every downloadable model.
+struct ModelInfoIcons: View {
+    let license: String?
+    let details: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let license {
+                SettingInfoButton(text: license).accessibilityLabel("Model license")
+            }
+            if !details.isEmpty {
+                SettingInfoButton(text: details, systemImage: "internaldrive")
+                    .accessibilityLabel("Model size and details")
+            }
+        }
+    }
 }
 
 /// Split in two so the compiler can type-check the chains.

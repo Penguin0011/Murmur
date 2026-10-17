@@ -666,8 +666,8 @@ struct SpeakerSettingsSection: View {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 4) {
-                            Text(settings.summary).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                            SettingInfoButton(text: SpeakerFacts.credits)
+                            Text("pyannote community-1").font(WindowType.body(14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                            ModelInfoIcons(license: SpeakerFacts.credits, details: settings.summary)
                         }
                         if settings.row.isReady { mono("Ready ✓", color: Palette.accentInk) }
                         else { lede(settings.row.statusText) }
