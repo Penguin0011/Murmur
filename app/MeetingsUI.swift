@@ -629,21 +629,17 @@ struct MeetingLiveView: View {
 
     private var dot: some View { Circle().fill(Color.red).frame(width: 10, height: 10).accessibilityHidden(true) }
 
-    /// The minimized panel: red dot, timer and Stop. Clicking the dot or timer expands it; drag it anywhere.
+    /// Click the compact indicator to expand; drag it to move. Stop stays in the full panel.
     private var pill: some View {
-        HStack(spacing: 10) {
-            Button { collapsed = false } label: {
-                HStack(spacing: 8) { dot; mono(MeetingExport.clock(recorder.elapsed), size: 12) }.contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .overlay { MeetingDragHandle { collapsed = false }.accessibilityHidden(true) }
-            .help("Drag to move; click to show the meeting panel").accessibilityLabel("Recording meeting notes, \(MeetingExport.clock(recorder.elapsed)). Show the panel")
-            Button("Stop", action: recorder.stop).buttonStyle(.plain).font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 8).frame(height: 24).background(Palette.ink).foregroundStyle(Palette.paper)
-                .accessibilityLabel("Stop meeting notes")
+        Button { collapsed = false } label: {
+            HStack(spacing: 8) { dot; mono(MeetingExport.clock(recorder.elapsed), size: 12) }
+                .frame(width: 120, height: 40).contentShape(Capsule())
         }
-        .padding(.horizontal, 12).frame(height: 40).modifier(UtilityGlass(radius: 20))
-        .accessibilityElement(children: .contain)
+        .buttonStyle(.plain)
+        .overlay { MeetingDragHandle { collapsed = false }.accessibilityHidden(true) }
+        .help("Drag to move; click to show the meeting panel")
+        .accessibilityLabel("Recording meeting notes, \(MeetingExport.clock(recorder.elapsed)). Show the panel")
+        .modifier(UtilityGlass(radius: 20))
     }
 
     private var full: some View {
@@ -654,7 +650,7 @@ struct MeetingLiveView: View {
                 Spacer()
                 if let live = recorder.live { mono((live.source.micOnly ? "Mic only" : live.source.name) + (live.transcribedBy.map { " · " + $0 } ?? ""), size: 11, color: Palette.ink70).lineLimit(1) }
                 Button { collapsed = true } label: { Label("Minimize", systemImage: "arrow.down.right.and.arrow.up.left").labelStyle(.iconOnly).font(.system(size: 13, weight: .semibold)).frame(width: 28, height: 24).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).help("Minimize to a small pill with the timer and Stop").accessibilityLabel("Minimize to a small indicator")
+                    .buttonStyle(.plain).help("Minimize to a small indicator with the recording timer").accessibilityLabel("Minimize to a small indicator")
             }
             HStack(spacing: 8) {
                 Text(MeetingConsent.reminder).font(.system(size: 13, weight: .semibold))
@@ -794,7 +790,7 @@ private final class MeetingPanel: NSPanel {
     /// Keeps the panel's top-right corner where it was (or where it was last left) and resizes around it.
     private func place(initial: Bool = false) {
         guard let panel, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let size = collapsed ? NSSize(width: 180, height: 40) : NSSize(width: 340, height: 520)
+        let size = collapsed ? NSSize(width: 120, height: 40) : NSSize(width: 340, height: 520)
         let visible = screen.visibleFrame
         var corner = NSPoint(x: visible.maxX - 16, y: visible.maxY - 16)
         if !initial { corner = NSPoint(x: panel.frame.maxX, y: panel.frame.maxY) }
