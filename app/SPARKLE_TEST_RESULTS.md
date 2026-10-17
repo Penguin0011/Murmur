@@ -12,6 +12,7 @@ All installation experiments used a disposable `cc.clouddev.murmur.sparkle-test`
 - Packaged with a different private key: generation omitted the signature and packaging exited unsuccessfully; it did not claim that the assets were ready to publish. [Certain]
 - Automated checks cover missing configuration, malformed/unsafe feed URLs, public key size, version fields and missing release configuration; runtime checks cover manual/background recording guards and postponing/resuming installation. [Certain]
 - Round-tripped automatic-check/download preferences through the production adapter and verified its observer callback reflected both changes. [Certain]
+- Synthetic Settings fixture compiled and rendered; both update controls fit, with automatic installation off. Corrected the stale manual-install subtitle found during visual review. [Certain]
 - Full Murmur development build and strict nested code-signature verification passed with the existing Swift warnings. [Certain]
 - Existing Foundation update checks and app-services checks passed after updating the changed explanatory copy. [Certain]
 

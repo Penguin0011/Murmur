@@ -197,7 +197,7 @@ struct SettingsView: View {
         "Words Murmur should spell your way, in every mode.",
         "What Murmur saves, and for how long. Nothing leaves this Mac.",
         "Needed only for cloud routes. Stored in your Keychain.",
-        "Murmur checks for new versions. You install them yourself.",
+        "Verified updates from GitHub. Choose when they install.",
         "Where meeting audio is transcribed, apart from dictation, and how notes are written."
     ]
 
