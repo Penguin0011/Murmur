@@ -162,7 +162,6 @@ struct SettingsView: View {
     @State private var editingTextID: String?
     @State private var textDraft = ""
     @State private var searchText = ""
-    @State private var attentionOnly = false
     @State private var newPreferred = ""
     @State private var newVariants = ""
     /// The dictionary row being edited, and its draft fields.
@@ -240,7 +239,7 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in controller.refreshPermissions() }
         .onReceive(NotificationCenter.default.publisher(for: .dictationShowError)) { _ in screen = .settings }
         .onReceive(NotificationCenter.default.publisher(for: .dictationShowHistory)) { _ in
-            searchText = ""; attentionOnly = false; screen = .history
+            searchText = ""; screen = .history
             selectedID = controller.history.first(where: { $0.id == controller.recoveryEntryID })?.id ?? controller.history.first?.id
         }
     }
@@ -1140,8 +1139,7 @@ struct SettingsView: View {
 
     private var visibleHistory: [HistoryEntry] {
         controller.history.filter { entry in
-            (!attentionOnly || Self.needsAttention(entry.insertionStatus))
-                && (searchText.isEmpty || entry.finalText.localizedCaseInsensitiveContains(searchText) || entry.rawText.localizedCaseInsensitiveContains(searchText))
+            searchText.isEmpty || entry.finalText.localizedCaseInsensitiveContains(searchText) || entry.rawText.localizedCaseInsensitiveContains(searchText)
         }
     }
 
@@ -1165,14 +1163,11 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("History").font(WindowType.display(64)).tracking(-1.28)
                 help(controller.historySummary)
-                HStack(spacing: 20) {
-                    segmented([(false, "All"), (true, "Needs attention")], $attentionOnly, size: 14)
-                    HStack(spacing: 8) {
-                        field("Search transcripts", text: $searchText)
-                        if !searchText.isEmpty {
-                            Button { searchText = "" } label: { Image(systemName: "xmark") }
-                                .buttonStyle(.plain).foregroundStyle(Palette.ink70).accessibilityLabel("Clear search")
-                        }
+                HStack(spacing: 8) {
+                    field("Search transcripts", text: $searchText)
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: { Image(systemName: "xmark") }
+                            .buttonStyle(.plain).foregroundStyle(Palette.ink70).accessibilityLabel("Clear search")
                     }
                 }
             }
@@ -1185,7 +1180,7 @@ struct SettingsView: View {
                     if groups.isEmpty {
                         VStack(spacing: 8) {
                             Text(controller.history.isEmpty ? "Your dictation appears here" : "No matching transcripts").font(WindowType.body(26, weight: .semibold))
-                            help(controller.history.isEmpty ? "Completed transcripts are saved here before they are inserted." : "Try a different search or filter.")
+                            help(controller.history.isEmpty ? "Completed transcripts are saved here before they are inserted." : "Try a different search.")
                             if controller.history.isEmpty && !setupComplete {
                                 Button("Set Up Murmur") { screen = .setup }.buttonStyle(InkButtonStyle()).padding(.top, 8)
                             }
@@ -1552,7 +1547,7 @@ extension SettingsView {
                         .padding(.vertical, 16).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 ForEach(controller.history.prefix(5)) { entry in
-                    Button { selectedID = entry.id; searchText = ""; attentionOnly = false; screen = .history } label: {
+                    Button { selectedID = entry.id; searchText = ""; screen = .history } label: {
                         HStack(alignment: .top, spacing: 16) {
                             Text(entry.recordedAt, format: .relative(presentation: .named))
                                 .font(.system(size: 13, design: .monospaced)).foregroundStyle(Palette.ink70).lineLimit(1).frame(width: 120, alignment: .leading)
