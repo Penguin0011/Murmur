@@ -90,7 +90,7 @@ Meetings page content and consent/notes sheets use the shared DM Sans typography
 
 ## Layout
 
-The main window has a sparse wordmark header with a small monochrome voice mark and a trailing setup action. A 184pt text sidebar contains Home, Insights, Meetings, settings sections, and History; current phase sits at its foot. Navigation uses text rather than numbered boxes or header tabs; rows have a 36pt minimum height and 2pt gaps. [Certain]
+The main window has a sparse wordmark header with a small monochrome voice mark and a trailing setup action. A 184pt text sidebar contains Home, Insights, Meetings, History, and settings sections; current phase sits at its foot. Navigation uses text rather than numbered boxes or header tabs; rows have a 36pt minimum height and 2pt gaps. [Certain]
 
 Settings, Home, and Insights use the available content width with 24pt horizontal gutters and a 16pt top inset. The wordmark header uses the same horizontal gutter and a 12pt top inset. History uses matching outer gutters, an 80pt day column with a 16pt gap, and expanded entry content without an extra nested indent. Page titles lead each section, followed by a lede and flat setting groups. The window's declared minimum is 760×560pt. Home and Insights share the serif page hierarchy. Populated Meetings uses a 200pt inner list beside detail when its content is at least 680pt wide; below that threshold, a search field and native meeting picker sit above detail. Search constrains the selected meeting to matching results. [Certain]
 
@@ -136,3 +136,10 @@ The recording indicator remains a nonactivating native glass surface with voice-
 - Don't restore the former square-button, numbered-sidebar system as the window default.
 - Don't extend the window's custom font and paper treatment into the native floating indicators without a separate decision.
 - Don't treat source inspection as rendered or functional validation.
+
+
+## Task-first usability refinements
+
+History sits above the settings group and transcript rows show disclosure chevrons with expanded/collapsed accessibility values. Dictionary opens with its add form and entries; learning controls follow, and on-device support details are collapsed. Cleanup route selection precedes its dependent style controls, with an explicit explanation when local rules lock the styles. [Certain]
+
+Home names its selected transcription and cleanup routes and offers the existing privacy disclosures under “Where dictation data goes.” Meetings uses a 40pt heading and a collapsed audio/privacy explanation to leave more room for content in compact windows. [Certain]

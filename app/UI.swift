@@ -939,7 +939,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(minWidth: 100, idealWidth: 180, maxWidth: 220).onSubmit(addEntry)
-                field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
+                field("Heard as (optional)", text: $newVariants).help("Separate alternate spellings with commas.").onSubmit(addEntry)
                 Button("Add", action: addEntry)
                     .buttonStyle(InkButtonStyle(kind: newPreferred.trimmingCharacters(in: .whitespaces).isEmpty ? .outline : .filled)).fixedSize()
                     .disabled(newPreferred.trimmingCharacters(in: .whitespaces).isEmpty)
