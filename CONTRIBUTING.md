@@ -107,3 +107,5 @@ These are the patterns in the existing code and docs. [Likely]
 ## Licensing
 
 Murmur's source is MIT licensed ([LICENSE](LICENSE)); contributions are accepted under the same license. Add any new dependency or model to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) after checking its license at the pinned version. [Certain]
+
+Sparkle builds and release asset preparation are documented in [app/UPDATES.md](app/UPDATES.md). Development builds require no Apple enrollment; public update delivery still needs an accessible GitHub feed and a production Sparkle key. [Certain]

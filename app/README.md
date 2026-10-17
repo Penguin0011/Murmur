@@ -408,3 +408,5 @@ swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.s
 ### Insertion review — October 5, 2026
 
 See [INSERTION_REVIEW.md](INSERTION_REVIEW.md) for the complete delivery/recovery paths, Wispr Flow comparison, and remaining compatibility limits. The paste-last buffer now includes verified deliveries, survives canceled/empty/failed recordings, and is cleared when its transcript is deleted or all data is removed. Manual pastes check Accessibility permission, Secure Input, and accessible secure-field metadata, then recheck the focused field/window before posting. [Certain]
+
+**Sparkle updates:** see [UPDATES.md](UPDATES.md) for GitHub-only hosting, build configuration, signing, packaging and validation. Unconfigured development builds do not check for updates. [Certain]
