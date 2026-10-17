@@ -21,9 +21,13 @@ enum Insights: Equatable {
     case empty
     case stats(Stats)
 
-    struct AppCount: Equatable { let app: String; let count: Int }
+    struct AppCount: Equatable { let app: String; let count: Int; var words: Int = 0 }
 
     struct Stats: Equatable {
+        var recordingSeconds: Double?
+        var dailyWords: [Date: Int] = [:]
+        var hourlyDictations = Array(repeating: 0, count: 24)
+        var averageWords: Double { dictations > 0 ? Double(words) / Double(dictations) : 0 }
         var dictations = 0
         /// Words in the text Murmur produced.
         var words = 0
@@ -35,7 +39,7 @@ enum Insights: Equatable {
         var timedDictations = 0
         /// Words that differ between the raw transcript and the final text.
         var wordsChanged = 0
-        /// Most-used first; ties by bundle ID so the order is stable.
+        /// Most words first; ties by bundle ID so the order is stable.
         var apps: [AppCount] = []
         /// Dictations with no app recorded.
         var withoutApp = 0
@@ -59,22 +63,26 @@ enum Insights: Equatable {
         guard !used.isEmpty else { return .empty }
         var stats = Stats()
         var spoken = 0.0, seconds = 0.0, saved = 0.0
-        var apps: [String: Int] = [:]
+        var apps: [String: Int] = [:], appWords: [String: Int] = [:]
         for item in used {
             let final = item.finalText.trimmingCharacters(in: .whitespacesAndNewlines)
             stats.dictations += 1
-            stats.words += words(final).count
+            let count = words(final).count
+            stats.words += count
+            stats.dailyWords[calendar.startOfDay(for: item.recordedAt), default: 0] += count
+            stats.hourlyDictations[calendar.component(.hour, from: item.recordedAt)] += 1
             stats.wordsChanged += wordsChanged(raw: item.rawText, final: final)
-            if let length = item.seconds, length > 0 {
+            if let length = item.seconds, length.isFinite, length > 0 {
                 stats.timedDictations += 1
                 spoken += standardWords(item.rawText); seconds += length
                 saved += standardWords(final) / typingWPM * 60 - length
             }
-            if let app = item.app, !app.isEmpty { apps[app, default: 0] += 1 } else { stats.withoutApp += 1 }
+            if let app = item.app, !app.isEmpty { apps[app, default: 0] += 1; appWords[app, default: 0] += count } else { stats.withoutApp += 1 }
             stats.days.insert(calendar.startOfDay(for: item.recordedAt))
         }
-        if seconds > 0 { stats.wordsPerMinute = spoken / (seconds / 60); stats.secondsSaved = max(0, saved) }
-        stats.apps = apps.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }.map { AppCount(app: $0.key, count: $0.value) }
+        if seconds > 0 { stats.recordingSeconds = seconds; stats.wordsPerMinute = spoken / (seconds / 60); stats.secondsSaved = max(0, saved) }
+        stats.apps = apps.map { AppCount(app: $0.key, count: $0.value, words: appWords[$0.key, default: 0]) }
+            .sorted { $0.words != $1.words ? $0.words > $1.words : $0.app < $1.app }
         (stats.currentStreak, stats.longestStreak) = streaks(stats.days, now: now, calendar: calendar)
         return .stats(stats)
     }
