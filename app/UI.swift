@@ -559,7 +559,10 @@ struct SettingsView: View {
                         HStack(spacing: 4) {
                             Text(ModelFacts.displayName).font(WindowType.body(18, weight: .semibold))
                             if let license = controller.modelLicense { SettingInfoButton(text: ModelFacts.licenseText(license)) }
-                            if !controller.modelSummary.isEmpty { settingInfo(controller.modelSummary) }
+                            if !controller.modelSummary.isEmpty {
+                                SettingInfoButton(text: controller.modelSummary, systemImage: "internaldrive")
+                                    .accessibilityLabel("Model size and details")
+                            }
                         }
                         Group {
                             if controller.modelRow.isReady { mono("Model ready ✓", color: Palette.accentInk) }
@@ -892,7 +895,10 @@ struct SettingsView: View {
                     HStack(spacing: 4) {
                         Text(DictionaryModelFacts.displayName).font(WindowType.body(18, weight: .semibold))
                         if let license = controller.dictionaryModelLicense { SettingInfoButton(text: ModelFacts.licenseText(license)) }
-                        if !controller.dictionaryModelSummary.isEmpty { settingInfo(controller.dictionaryModelSummary) }
+                        if !controller.dictionaryModelSummary.isEmpty {
+                            SettingInfoButton(text: controller.dictionaryModelSummary, systemImage: "internaldrive")
+                                .accessibilityLabel("Model size and details")
+                        }
                     }
                     Group {
                         if controller.dictionaryModelRow.isReady && !controller.dictionarySupportFailed { mono("Ready ✓", color: Palette.accentInk) }
@@ -1704,11 +1710,12 @@ func standardEditMenuItem() -> NSMenuItem {
 /// Split in two so the compiler can type-check the chains.
 struct SettingInfoButton: View {
     let text: String
+    var systemImage = "questionmark.circle"
     @State private var isPresented = false
 
     var body: some View {
         Button { isPresented = true } label: {
-            Image(systemName: "questionmark.circle")
+            Image(systemName: systemImage)
                 .font(WindowType.body(14))
                 .foregroundStyle(Palette.ink70)
                 .frame(width: 24, height: 24)
