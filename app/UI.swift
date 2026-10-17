@@ -676,11 +676,14 @@ struct SettingsView: View {
 
     private var cleanup: some View {
         VStack(alignment: .leading, spacing: 0) {
+            eyebrow("Cleanup runs with").padding(.top, 28)
+            segmented(CleanupChoice.allCases.map { ($0, short($0.displayName)) }, $controller.cleanupChoice, size: 14)
+                .padding(.top, 8).help(controller.cleanupChoice.displayName)
             eyebrow("Cleanup style").padding(.top, 20)
             segmented([(0, "Strict"), (1, "Polish"), (2, "Professional")], controller.cleanupChoice == .localRules ? .constant(0) : cleanupStyle, size: 14).padding(.top, 8)
                 .disabled(controller.cleanupChoice == .localRules)
             help(controller.cleanupChoice == .localRules
-                 ? "On this Mac always uses Strict. Pick a model route for Polish or Professional."
+                 ? "Local rules use Strict. Choose an AI cleanup route above to enable Polish or Professional."
                  : controller.cleanupProfessional
                  ? "Rewrites into clear, professional writing. May reword and change tone; names, numbers and “not” stay."
                  : controller.cleanupPolish
@@ -702,9 +705,6 @@ struct SettingsView: View {
             }
             .padding(.top, 16)
 
-            eyebrow("Cleanup runs with").padding(.top, 28)
-            segmented(CleanupChoice.allCases.map { ($0, short($0.displayName)) }, $controller.cleanupChoice, size: 14)
-                .padding(.top, 8).help(controller.cleanupChoice.displayName)
             help("Local rules are simple built-in rules. For AI cleanup, choose Apple Intelligence (on this Mac), Gemini or a Custom Provider (a local model server of 8B or larger works too). If AI cleanup fails, local rules clean that dictation; Murmur never switches routes on its own.")
                 .padding(.top, 12)
             if controller.cleanupChoice == .localRules {
@@ -937,10 +937,6 @@ struct SettingsView: View {
 
     private var dictionary: some View {
         VStack(alignment: .leading, spacing: 0) {
-            dictionaryModel
-            rule.padding(.top, 20)
-            toggleRow("Learn from my corrections", "Fix a misheard word once, within a minute, and Murmur adds it to your dictionary and fixes it from your next dictation. Where an app hides its text, it follows your keys for that minute; raw keys stay in memory.", isOn: $controller.learningEnabled)
-            toggleRow("Limit learning to readable fields", "No keystroke learning in editors Murmur can't read. Add those words by hand.", isOn: $controller.learningRequiresReadableField)
             HStack(spacing: 8) {
                 field("Preferred spelling", text: $newPreferred).frame(minWidth: 100, idealWidth: 180, maxWidth: 220).onSubmit(addEntry)
                 field("Heard as, comma-separated (optional)", text: $newVariants).onSubmit(addEntry)
@@ -977,6 +973,13 @@ struct SettingsView: View {
                     .disabled(!controller.dictionaryEntries.contains { $0.source == .learned } && controller.blockedWords.isEmpty)
             }
             .padding(.top, 16)
+            rule.padding(.top, 24)
+            toggleRow("Learn from my corrections", "Fix a misheard word once, within a minute, and Murmur adds it to your dictionary and fixes it from your next dictation. Where an app hides its text, it follows your keys for that minute; raw keys stay in memory.", isOn: $controller.learningEnabled)
+            toggleRow("Limit learning to readable fields", "No keystroke learning in editors Murmur can't read. Add those words by hand.", isOn: $controller.learningRequiresReadableField)
+            DisclosureGroup("On-device dictionary support") {
+                dictionaryModel
+            }
+            .font(WindowType.body(14)).padding(.top, 16)
         }
     }
 
