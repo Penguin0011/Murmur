@@ -1,6 +1,11 @@
 import AppKit
 import SwiftUI
 
+private final class DragCheckWindow: NSWindow {
+    var dragged = false
+    override func performDrag(with event: NSEvent) { dragged = true }
+}
+
 @main struct MeetingStartChecks {
     @MainActor static func main() {
         let app = NSApplication.shared
@@ -24,6 +29,20 @@ import SwiftUI
         precondition(app.windows.filter(\.isVisible).count == 1)
         accept.done(true)
         precondition(answers == [false, true] && !second.isVisible)
-        print("Meeting start checks passed (standalone consent, cancel, accept, source replacement).")
+        let dragWindow = DragCheckWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 40), styleMask: [.borderless], backing: .buffered, defer: false)
+        var clicks = 0
+        let handle = MeetingDragView { clicks += 1 }
+        dragWindow.contentView = handle
+        func mouse(_ type: NSEvent.EventType, _ x: CGFloat) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: NSPoint(x: x, y: 20), modifierFlags: [], timestamp: 0,
+                               windowNumber: dragWindow.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        app.postEvent(mouse(.leftMouseUp, 20), atStart: true)
+        handle.mouseDown(with: mouse(.leftMouseDown, 20))
+        precondition(clicks == 1 && !dragWindow.dragged, "Click still expands the indicator")
+        app.postEvent(mouse(.leftMouseDragged, 30), atStart: true)
+        handle.mouseDown(with: mouse(.leftMouseDown, 20))
+        precondition(clicks == 1 && dragWindow.dragged, "Dragging moves the panel without expanding it")
+        print("Meeting start checks passed (standalone consent, cancel, accept, source replacement, indicator click and drag).")
     }
 }

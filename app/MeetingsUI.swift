@@ -635,7 +635,9 @@ struct MeetingLiveView: View {
             Button { collapsed = false } label: {
                 HStack(spacing: 8) { dot; mono(MeetingExport.clock(recorder.elapsed), size: 12) }.contentShape(Rectangle())
             }
-            .buttonStyle(.plain).help("Show the meeting panel").accessibilityLabel("Recording meeting notes, \(MeetingExport.clock(recorder.elapsed)). Show the panel")
+            .buttonStyle(.plain)
+            .overlay { MeetingDragHandle { collapsed = false }.accessibilityHidden(true) }
+            .help("Drag to move; click to show the meeting panel").accessibilityLabel("Recording meeting notes, \(MeetingExport.clock(recorder.elapsed)). Show the panel")
             Button("Stop", action: recorder.stop).buttonStyle(.plain).font(.system(size: 12, weight: .semibold))
                 .padding(.horizontal, 8).frame(height: 24).background(Palette.ink).foregroundStyle(Palette.paper)
                 .accessibilityLabel("Stop meeting notes")
@@ -716,6 +718,31 @@ struct MeetingLiveView: View {
                 .frame(height: 6).background(Palette.ink20)
         }
         .accessibilityElement().accessibilityLabel("\(label) level").accessibilityValue("\(Int(min(1, level) * 100)) percent")
+    }
+}
+
+/// Keep the compact indicator's click action while handing drags to AppKit.
+private struct MeetingDragHandle: NSViewRepresentable {
+    let clicked: () -> Void
+    func makeNSView(context: Context) -> MeetingDragView { MeetingDragView(clicked: clicked) }
+    func updateNSView(_ view: MeetingDragView, context: Context) { view.clicked = clicked }
+}
+
+final class MeetingDragView: NSView {
+    var clicked: () -> Void
+    init(clicked: @escaping () -> Void) { self.clicked = clicked; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var acceptsFirstResponder: Bool { true }
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if next.type == .leftMouseUp { clicked(); return }
+            if hypot(next.locationInWindow.x - event.locationInWindow.x,
+                     next.locationInWindow.y - event.locationInWindow.y) >= 4 {
+                window.performDrag(with: event)
+                return
+            }
+        }
     }
 }
 
