@@ -144,6 +144,14 @@ func ok(_ items: [[String: Any]]) -> UpdateHTTPResponse { UpdateHTTPResponse(sta
         check(r(429, ["Retry-After": "120"]) == .rateLimited(until: now.addingTimeInterval(120)), "429 secondary limit uses Retry-After")
         check(r(403, ["retry-after": "30", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1791003600"]) == .rateLimited(until: now.addingTimeInterval(30)), "Retry-After wins, headers case-insensitive")
         check(r(429) == .rateLimited(until: nil), "429 without headers still rate limited")
+        for value in ["inf", "-inf", "nan", "1e100", "-1"] {
+            check(r(429, ["Retry-After": value]) == .rateLimited(until: nil), "invalid Retry-After uses bounded fallback")
+            check(r(403, ["x-ratelimit-remaining": "0", "x-ratelimit-reset": value]) == .failed(.httpStatus(403)), "invalid reset timestamp rejected")
+        }
+        check(r(429, ["Retry-After": "86400"]) == .rateLimited(until: now.addingTimeInterval(86400)), "one-day retry remains valid")
+        check(r(429, ["Retry-After": "86401"]) == .rateLimited(until: nil), "retry beyond a day uses fallback")
+        check(r(403, ["x-ratelimit-remaining": "0", "x-ratelimit-reset": String(now.timeIntervalSince1970 + 86400)]) == .rateLimited(until: now.addingTimeInterval(86400)), "one-day reset remains valid")
+        check(r(403, ["x-ratelimit-remaining": "0", "x-ratelimit-reset": String(now.timeIntervalSince1970 + 86401)]) == .failed(.httpStatus(403)), "reset beyond a day rejected")
         check(r(403, ["x-ratelimit-remaining": "12"]) == .failed(.httpStatus(403)), "plain 403 is a failure, not rate limit")
         check(r(500) == .failed(.httpStatus(500)), "500 non-fatal failure")
 
@@ -196,6 +204,14 @@ func ok(_ items: [[String: Any]]) -> UpdateHTTPResponse { UpdateHTTPResponse(sta
         r = await checker.check(manual: true); check(r == .upToDate(latest: v("1.0.0")), "after reset, check resumes; up to date")
         check(store.load().rateLimitedUntil == nil, "rate-limit window cleared")
 
+        client.next = .success(UpdateHTTPResponse(status: 429, headers: ["Retry-After": "1e300"], body: Data()))
+        r = await checker.check(manual: true)
+        check(r == .rateLimited(until: nil) && store.load().rateLimitedUntil == clock.date.addingTimeInterval(3600), "oversized backoff stores only the fallback hour")
+        clock.advance(3601)
+        client.next = .success(ok([]))
+        r = await checker.check(manual: true)
+        check(r == .noReleases, "update requests resume after malformed backoff expires")
+
         // 404 and empty list are non-fatal.
         client.next = .success(UpdateHTTPResponse(status: 404, headers: [:], body: Data("{\"message\":\"Not Found\"}".utf8)))
         r = await checker.check(manual: true); check(r == .repositoryNotFound, "404 state")
@@ -206,6 +222,11 @@ func ok(_ items: [[String: Any]]) -> UpdateHTTPResponse { UpdateHTTPResponse(sta
         let skewStore = InMemoryUpdateCheckStore(UpdateCheckState(lastCheck: clock.date.addingTimeInterval(10 * 86_400), rateLimitedUntil: nil))
         let skewed = UpdateChecker(configuration: config, client: client, store: skewStore, now: { clock.date })
         r = await skewed.check(manual: false); check(r == .noReleases, "future lastCheck (clock skew) does not block")
+
+        let invalidBackoffStore = InMemoryUpdateCheckStore(UpdateCheckState(lastCheck: nil, rateLimitedUntil: Date(timeIntervalSince1970: 1e300)))
+        let recovered = UpdateChecker(configuration: config, client: client, store: invalidBackoffStore, now: { clock.date })
+        r = await recovered.check(manual: true)
+        check(r == .noReleases && invalidBackoffStore.load().rateLimitedUntil == nil, "invalid backoff saved by an older version does not block updates")
 
         // Persisted state round-trips through UserDefaults.
         if let defaults = UserDefaults(suiteName: "murmur-update-check-\(UUID().uuidString)") {

@@ -240,6 +240,7 @@ final class URLSessionUpdateClient: UpdateHTTPClient, @unchecked Sendable {
 // MARK: - Checker
 
 final class UpdateChecker: @unchecked Sendable {
+    private static let maximumRateLimitDelay: TimeInterval = 24 * 60 * 60
     let configuration: UpdateConfiguration
     private let client: UpdateHTTPClient
     private let store: UpdateCheckStore
@@ -266,7 +267,8 @@ final class UpdateChecker: @unchecked Sendable {
     func check(manual: Bool) async -> UpdateCheckResult {
         let current = now()
         var state = store.load()
-        if let until = state.rateLimitedUntil, until > current { return .rateLimited(until: until) }
+        if let until = state.rateLimitedUntil, until > current,
+           until.timeIntervalSince(current) <= Self.maximumRateLimitDelay { return .rateLimited(until: until) }
         if !manual, let last = state.lastCheck, last <= current {
             let next = last.addingTimeInterval(configuration.minimumInterval)
             if current < next { return .throttled(nextCheck: next) }
@@ -303,11 +305,14 @@ final class UpdateChecker: @unchecked Sendable {
     /// `Retry-After` (seconds) wins; otherwise `x-ratelimit-reset` (UTC epoch seconds) when
     /// `x-ratelimit-remaining` is 0.
     static func rateLimitReset(_ response: UpdateHTTPResponse, now: Date) -> Date? {
-        if let retry = response.header("Retry-After").flatMap({ Double($0.trimmingCharacters(in: .whitespaces)) }), retry >= 0 {
+        // A malformed response must not disable update checks beyond the normal daily interval.
+        if let retry = response.header("Retry-After").flatMap({ Double($0.trimmingCharacters(in: .whitespaces)) }),
+           retry.isFinite, (0...maximumRateLimitDelay).contains(retry) {
             return now.addingTimeInterval(retry)
         }
         if response.header("x-ratelimit-remaining")?.trimmingCharacters(in: .whitespaces) == "0",
-           let reset = response.header("x-ratelimit-reset").flatMap({ Double($0.trimmingCharacters(in: .whitespaces)) }) {
+           let reset = response.header("x-ratelimit-reset").flatMap({ Double($0.trimmingCharacters(in: .whitespaces)) }),
+           reset.isFinite, reset >= 0, reset - now.timeIntervalSince1970 <= maximumRateLimitDelay {
             return Date(timeIntervalSince1970: reset)
         }
         return nil
