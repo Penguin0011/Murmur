@@ -1,6 +1,6 @@
 # Third-party notices
 
-Murmur's own source is intended to be MIT-licensed. The LICENSE file is not added yet, because the copyright holder's legal name has not been supplied (PRD section 10, item 4). [Certain]
+Murmur's own source is covered by the existing [MIT License](LICENSE). Bundled dependency license texts and notices are retained in `app/Licenses/` and copied into `Murmur.app/Contents/Resources/Licenses/` by the build. [Certain]
 
 Licenses below were checked on October 3, 2026 by fetching the listed pages. This file is a record for release, not legal advice. [Certain]
 
@@ -35,7 +35,7 @@ FluidAudio's package includes these targets, which are linked into the FluidAudi
 
 ### Parakeet Unified English 0.6B
 
-The model weights are not in the repository or the app bundle. They are downloaded to `~/Library/Caches/Dictation/` from the pinned Hugging Face revision, and file checksums are verified. Today the model folder is chosen manually; the in-app downloader is in progress. [Certain]
+The model weights are not in the repository or the app bundle. They are downloaded to `~/Library/Caches/Dictation/` from the pinned Hugging Face revision, and file checksums are verified. Settings can download pinned models or use an existing verified model folder. [Certain]
 
 - Upstream model: `nvidia/parakeet-unified-en-0.6b`, https://huggingface.co/nvidia/parakeet-unified-en-0.6b [Certain]
   - License: NVIDIA Open Model License Agreement (Hugging Face tag `nvidia-open-model-license`). The card says the model "is ready for commercial/non-commercial use". [Certain]
@@ -75,3 +75,11 @@ Optional download from Settings → Meetings → "Separate speakers after a meet
 ## Cloud services
 
 Gemini API and any custom OpenAI-compatible endpoint the user configures are optional services reached with the user's own API keys. No provider code or SDK is bundled; Murmur sends plain HTTPS requests. Their terms apply to the user's account, not to redistribution. [Certain] See `app/PROVIDERS.md` for data-use terms.
+
+## Bundled fonts and retained dependency notices
+
+DM Sans and Instrument Serif are bundled under the SIL Open Font License; their license texts are in `app/Fonts/` and ship beside the fonts. [Certain]
+
+`app/Licenses/` retains FluidAudio's Apache-2.0 text and all five notices from `ThirdPartyLicenses/` at the pinned revision, plus the text-processing-rs v0.3.1 license, NOTICE and dependency list. Including a notice does not imply every optional subsystem is used by Murmur. [Certain]
+
+Before distributing a binary, review the exact linked Rust dependency license texts and the upstream/conversion model-license mismatch described above. These notices do not resolve ownership questions or grant permissions beyond the upstream licenses. [Certain]
