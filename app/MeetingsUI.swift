@@ -165,12 +165,6 @@ struct MeetingsPage: View {
                 }
             }
         }
-        .sheet(item: Binding(get: { recorder.consentPending.map(ConsentItem.init) }, set: { if $0 == nil { recorder.consentPending = nil } })) { item in
-            MeetingConsentSheet(source: item.source) { acknowledged in
-                recorder.consentPending = nil
-                if acknowledged { MeetingConsent.acknowledge(.standard); controller.startMeeting(item.source) }
-            }
-        }
         .sheet(isPresented: Binding(get: { !confirmDelete.isEmpty }, set: { if !$0 { confirmDelete = [] } })) {
             deletionConfirmation
         }
@@ -540,7 +534,27 @@ struct MeetingNotesChoiceSheet: View {
     }
 }
 
-private struct ConsentItem: Identifiable { let source: MeetingSource; var id: String { source.name + (source.bundleID ?? "") } }
+/// Consent is independent of Settings, including when a detected call starts from its offer.
+@MainActor final class MeetingConsentPresenter {
+    private var panel: NSPanel?
+
+    func show(source: MeetingSource, done: @escaping (Bool) -> Void) {
+        panel?.orderOut(nil)
+        let next = NSPanel(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        next.title = "Start Meeting Notes"
+        next.isReleasedWhenClosed = false; next.hidesOnDeactivate = false
+        next.level = .floating
+        next.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let host = NSHostingView(rootView: MeetingConsentSheet(source: source) { [weak self] acknowledged in
+            self?.panel?.orderOut(nil); self?.panel = nil
+            done(acknowledged)
+        })
+        next.contentView = host
+        next.setContentSize(host.fittingSize); next.center()
+        panel = next
+        NSApp.activate(ignoringOtherApps: true); next.makeKeyAndOrderFront(nil)
+    }
+}
 
 struct MeetingLineRow: View {
     let line: MeetingLine

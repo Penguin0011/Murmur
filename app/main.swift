@@ -65,7 +65,19 @@ import SwiftUI
         let state = NSMenuItem(title: controller.phase, action: nil, keyEquivalent: ""); state.isEnabled = false; menu.addItem(state)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings and History…", action: #selector(openSettings), keyEquivalent: "").target = self
-        menu.addItem(withTitle: recording ? "Stop Meeting Notes" : "Start Meeting Notes…", action: recording ? #selector(stopMeeting) : #selector(openMeetings), keyEquivalent: "").target = self
+        if recording {
+            menu.addItem(withTitle: "Stop Meeting Notes", action: #selector(stopMeeting), keyEquivalent: "").target = self
+        } else {
+            let start = NSMenuItem(title: "Start Meeting Notes", action: nil, keyEquivalent: "")
+            let sources = NSMenu()
+            for app in MeetingRecorder.runningCallApps() {
+                addMeetingSource(MeetingSource(name: app.name, bundleID: app.bundleID), title: app.name, to: sources)
+            }
+            sources.addItem(.separator())
+            addMeetingSource(.everything, title: "All apps (includes music and notifications)", to: sources)
+            addMeetingSource(.microphoneOnly, title: "Only my microphone", to: sources)
+            start.submenu = sources; menu.addItem(start)
+        }
         menu.addItem(withTitle: UpdateText.menuTitle(controller.availableRelease), action: #selector(checkForUpdates), keyEquivalent: "").target = self
         if controller.phase == "Listening" {
             menu.addItem(withTitle: "Finish Dictation", action: #selector(finish), keyEquivalent: "").target = self
@@ -83,7 +95,14 @@ import SwiftUI
     /// Results appear quietly in Settings; a known release is shown there with its page link.
     @objc func checkForUpdates() { if controller.availableRelease == nil { controller.checkForUpdates() }; showWindow() }
     @objc func finish() { controller.stopRecording() }
-    @objc func openMeetings() { controller.screenRequest = "meetings"; showWindow() }
+    private func addMeetingSource(_ source: MeetingSource, title: String, to menu: NSMenu) {
+        let item = menu.addItem(withTitle: title, action: #selector(startMeeting(_:)), keyEquivalent: "")
+        item.target = self; item.representedObject = source
+    }
+    @objc func startMeeting(_ sender: NSMenuItem) {
+        guard let source = sender.representedObject as? MeetingSource else { return }
+        controller.startMeeting(source)
+    }
     @objc func stopMeeting() { controller.meetingRecorder.stop() }
     @objc func cancel() { controller.cancelRecording() }
     @objc func quit() { NSApp.terminate(nil) }

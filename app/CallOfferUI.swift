@@ -74,7 +74,7 @@ private final class OfferPanel: NSPanel {
 
     func hide() { offer = nil; panel.orderOut(nil) }
 
-    /// Starts the normal meeting flow (consent sheet the first time) with this app as the source.
+    /// Starts the normal meeting flow (standalone consent the first time) with this app as the source.
     func takeNotes() {
         guard let offer else { return }
         hide(); controller?.startMeeting(offer.source)
