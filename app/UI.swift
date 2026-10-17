@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Charts
 import CoreText
 
 private extension Notification.Name {
@@ -1565,17 +1566,6 @@ extension SettingsView {
         }
     }
 
-    private func stat(_ label: String, _ value: String, _ note: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            mono(label, size: 11, color: Palette.ink70)
-            Text(value).font(WindowType.body(30, weight: .bold)).tracking(-1).lineLimit(1).minimumScaleFactor(0.6)
-            Text(note).font(WindowType.body(13)).foregroundStyle(Palette.ink70).fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(16).frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity, alignment: .topLeading)
-        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.ink20, lineWidth: 1))
-        .accessibilityElement(children: .combine)
-    }
-
     private var keptFor: String {
         switch controller.retention {
         case "six-months": return "six months"
@@ -1607,57 +1597,108 @@ extension SettingsView {
     }
 
     private func insightsStats(_ s: Insights.Stats) -> some View {
-        let untimed = "Counted from dictations made after this update."
-        return VStack(alignment: .leading, spacing: 0) {
-            Grid(horizontalSpacing: 12, verticalSpacing: 12) {
-                GridRow {
-                    stat("Words dictated", s.words.formatted(), s.dictations == 1 ? "In 1 dictation" : "In \(s.dictations.formatted()) dictations")
-                    stat("Speaking pace", s.wordsPerMinute.map { "\(Int($0.rounded())) WPM" } ?? "—",
-                         s.wordsPerMinute == nil ? untimed : "Typing averages \(Int(Insights.typingWPM.rounded())) WPM")
-                }
-                GridRow {
-                    stat("Time saved", s.secondsSaved.map(Insights.duration) ?? "—",
-                         s.secondsSaved == nil ? untimed : "Against typing the same text at \(Int(Insights.typingWPM.rounded())) WPM")
-                    stat("Words changed", s.wordsChanged.formatted(), "By cleanup and dictionary spellings, and your edits in History")
-                }
+        let timed = "Based on \(s.timedDictations) of \(s.dictations) dictations with a recorded duration. Includes pauses."
+        return VStack(alignment: .leading, spacing: 24) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12)], spacing: 12) {
+                insightMetric("Words dictated", s.words.formatted(), "Words in the final transcripts still in History.")
+                insightMetric("Dictations", s.dictations.formatted(), "Dictations with a nonempty final transcript.")
+                insightMetric("Recording time", s.recordingSeconds.map(Insights.duration) ?? "—", timed)
+                insightMetric("Speaking pace", s.wordsPerMinute.map { "\(Int($0.rounded())) WPM" } ?? "—", "Five-character words per minute. " + timed)
+                insightMetric("Est. time saved", s.secondsSaved.map(Insights.duration) ?? "—", "Estimated against typing at \(Int(Insights.typingWPM.rounded())) WPM; not your measured typing speed. " + timed)
+                insightMetric("Words / dictation", s.averageWords.formatted(.number.precision(.fractionLength(1))), "Average final word count per dictation.")
+                insightMetric("Words changed", s.wordsChanged.formatted(), "Differences between raw and final text, including cleanup, dictionary spellings and History edits. Not an accuracy score.")
             }
-            .padding(.top, 28)
-
-            eyebrow("Streak").padding(.top, 28)
-            HStack(spacing: 24) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(s.currentStreak == 1 ? "1 day" : "\(s.currentStreak) days").font(WindowType.body(22, weight: .bold))
-                    mono("Current", size: 11, color: Palette.ink70)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(s.longestStreak == 1 ? "1 day" : "\(s.longestStreak) days").font(WindowType.body(22, weight: .bold))
-                    mono("Longest in History", size: 11, color: Palette.ink70)
-                }
-            }
-            .padding(.top, 10)
-            StreakCalendar(days: s.days, weeks: controller.retention == "30-days" ? 5 : 26,
-                           cutoff: HistoryExpiry.cutoff(HistoryRetention(rawValue: controller.retention) ?? .thirtyDays))
-                .padding(.top, 14)
-            help("A day counts when you dictated at least once, in this Mac’s time zone. History keeps \(keptFor), so older days are not shown.", color: Palette.ink64).padding(.top, 8)
-
-            eyebrow("Apps").padding(.top, 28)
-            VStack(spacing: 0) {
-                ForEach(s.apps.prefix(8), id: \.app) { item in
-                    HStack {
-                        Text(appName(item.app)).font(WindowType.body(15))
-                        Spacer()
-                        mono(item.count == 1 ? "1 dictation" : "\(item.count) dictations", size: 12, color: Palette.ink70)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), alignment: .top)], alignment: .leading, spacing: 28) {
+                dailyActivity(s)
+                VStack(alignment: .leading, spacing: 12) {
+                    insightHeading("Streak", "Calendar shows the last five weeks. A day counts after one dictation in this Mac’s time zone. Streak totals use all retained History.")
+                    HStack(spacing: 24) {
+                        VStack(alignment: .leading) {
+                            Text("\(s.currentStreak) \(s.currentStreak == 1 ? "day" : "days")").font(WindowType.body(22, weight: .bold))
+                            mono("Current", size: 11, color: Palette.ink70)
+                        }
+                        VStack(alignment: .leading) {
+                            Text("\(s.longestStreak) \(s.longestStreak == 1 ? "day" : "days")").font(WindowType.body(22, weight: .bold))
+                            mono("Longest retained", size: 11, color: Palette.ink70)
+                        }
                     }
-                    .padding(.vertical, 10).overlay(alignment: .bottom) { softRule }
-                }
-                if s.withoutApp > 0 {
-                    help("\(s.withoutApp) \(s.withoutApp == 1 ? "dictation has" : "dictations have") no app recorded: made before this update, saved without pasting, or not pasted.", color: Palette.ink64)
-                        .padding(.top, 10).frame(maxWidth: .infinity, alignment: .leading)
-                }
+                    StreakCalendar(days: s.days, weeks: 5,
+                                   cutoff: HistoryExpiry.cutoff(HistoryRetention(rawValue: controller.retention) ?? .thirtyDays))
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                hourlyActivity(s)
+                VStack(alignment: .leading, spacing: 12) {
+                    insightHeading("Top apps", "Ranked by words in retained History. \(s.withoutApp) dictations have no destination app recorded.")
+                    if s.apps.isEmpty { help("App usage appears after a destination app is recorded.") }
+                    ForEach(s.apps.prefix(6), id: \.app) { item in
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Text(appName(item.app)).font(WindowType.body(14)).lineLimit(1)
+                                Spacer()
+                                Text("\(item.words.formatted()) words").font(WindowType.body(12)).foregroundStyle(Palette.ink70)
+                            }
+                            GeometryReader { geometry in
+                                Rectangle().fill(Palette.accent).frame(width: geometry.size.width * Double(item.words) / Double(max(s.apps.first?.words ?? 1, 1)))
+                            }.frame(height: 5).background(Palette.ink20)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(appName(item.app)), \(item.words) words, \(item.count) dictations")
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            .overlay(alignment: .top) { rule }.padding(.top, 8)
+            help("Based on retained History · kept for \(keptFor). Older entries may lack duration or app data.", color: Palette.ink64)
+        }.padding(.top, 20)
+    }
+
+    private func insightMetric(_ title: String, _ value: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            insightHeading(title, detail)
+            Text(value).font(WindowType.body(28, weight: .bold)).lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
+        .overlay(alignment: .bottom) { softRule }
+    }
+
+    private func insightHeading(_ title: String, _ detail: String) -> some View {
+        HStack(spacing: 4) {
+            eyebrow(title)
+            SettingInfoButton(text: detail).accessibilityLabel("About " + title)
         }
     }
+
+    private func dailyActivity(_ s: Insights.Stats) -> some View {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let days = (0..<30).compactMap { calendar.date(byAdding: .day, value: $0 - 29, to: today) }
+        return VStack(alignment: .leading, spacing: 12) {
+            insightHeading("Daily activity", "Words per day over the last 30 days, in this Mac’s time zone. Counts include only retained History.")
+            Chart(days, id: \.self) { day in
+                BarMark(x: .value("Day", day, unit: .day), y: .value("Words", s.dailyWords[day, default: 0]))
+                    .foregroundStyle(Palette.accent)
+                    .accessibilityLabel(day.formatted(date: .abbreviated, time: .omitted))
+                    .accessibilityValue("\(s.dailyWords[day, default: 0]) words")
+            }
+            .chartXAxis { AxisMarks(values: .stride(by: .day, count: 10)) { _ in AxisValueLabel(format: .dateTime.month(.abbreviated).day()) } }
+            .frame(height: 160)
+        }
+    }
+
+    private func hourlyActivity(_ s: Insights.Stats) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            insightHeading("Busiest hours", "Dictations started in each hour, using this Mac’s current time zone. Includes all retained History; not recording duration.")
+            Chart(0..<24, id: \.self) { hour in
+                BarMark(x: .value("Hour", hour), y: .value("Dictations", s.hourlyDictations[hour]))
+                    .foregroundStyle(Palette.accent)
+                    .accessibilityLabel("\(hour):00–\(hour):59")
+                    .accessibilityValue("\(s.hourlyDictations[hour]) dictations")
+            }
+            .chartXScale(domain: -0.5...23.5)
+            .chartXAxis { AxisMarks(values: [0, 6, 12, 18]) { value in
+                AxisValueLabel { if let hour = value.as(Int.self) { Text(hour == 0 ? "12am" : hour < 12 ? "\(hour)am" : hour == 12 ? "12pm" : "\(hour - 12)pm") } }
+            } }
+            .frame(height: 160)
+        }
+    }
+
 }
 
 /// Weeks as columns, Monday to Sunday down, today last; days before History's cutoff are hatched
@@ -1686,7 +1727,7 @@ private struct StreakCalendar: View {
             }
         }
         .accessibilityElement().accessibilityLabel("Dictation days")
-        .accessibilityValue("\(days.count) days with dictation in the last \(weeks) weeks")
+        .accessibilityValue("\(days.filter { $0 >= first && $0 <= today }.count) days with dictation in the last \(weeks) weeks")
     }
 }
 
