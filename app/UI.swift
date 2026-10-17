@@ -163,6 +163,11 @@ struct SettingsView: View {
     @State private var editingTextID: String?
     @State private var textDraft = ""
     @State private var searchText = ""
+    @State private var settingsQuery = ""
+    @State private var settingsSearchOpen = false
+    @State private var settingsTarget = "top"
+    @State private var settingsNavigationID = UUID()
+    @FocusState private var settingsSearchFocused: Bool
     @State private var newPreferred = ""
     @State private var newVariants = ""
     /// The dictionary row being edited, and its draft fields.
@@ -182,7 +187,7 @@ struct SettingsView: View {
     /// API address and model apply when editing ends (Return or leaving the field), not per keystroke.
     @FocusState private var apiFieldFocused: Bool
 
-    private static let sections = ["General", "Transcription", "Cleanup", "Modes", "Dictionary", "History & Privacy", "API Keys", "Updates", "Meetings"]
+    private static let sections = SettingsSearch.sections
     private static let sectionIcons = ["slider.horizontal.3", "waveform", "wand.and.stars", "switch.2", "character.book.closed", "hand.raised", "key", "arrow.triangle.2.circlepath", "gearshape.2"]
     private static let ledes = [
         "The shortcut, how text is inserted, and what Murmur is allowed to do.",
@@ -217,12 +222,15 @@ struct SettingsView: View {
                 }
             }
         }
+        .disabled(settingsSearchOpen).accessibilityHidden(settingsSearchOpen)
         .foregroundStyle(Palette.ink)
         .background(Palette.paper)
         // System leaves the window's appearance alone, so SwiftUI follows macOS.
         .transformEnvironment(\.colorScheme) { if appearance == "dark" { $0 = .dark } else if appearance == "light" { $0 = .light } }
         // preferredColorScheme leaks app-wide and darkened the floating bubble; set only this window.
         .background(WindowAppearance(name: appearance == "dark" ? .darkAqua : appearance == "light" ? .aqua : nil))
+        .overlay { if settingsSearchOpen { settingsSearchOverlay } }
+        .onChange(of: sidebarCollapsed) { settingsSearchOpen = false; settingsQuery = "" }
         .frame(minWidth: 760, minHeight: 560)
         // Every setting applies as soon as it changes; attached here so hidden sections still apply.
         .modifier(AutoApplyGeneral(controller: controller))
@@ -252,6 +260,9 @@ struct SettingsView: View {
         guard let request = controller.screenRequest else { return }
         controller.screenRequest = nil
         switch request {
+        case "settings-search":
+            screen = .settings; section = 0
+            settingsQuery = "meeting"; settingsSearchOpen = sidebarCollapsed
         case "guide": WelcomeGuide.replay(.standard); guideStep = .microphone; screen = .setup
         case "insights": screen = .insights
         case "meetings": screen = .meetings
@@ -259,7 +270,7 @@ struct SettingsView: View {
         case "settings": screen = .settings
         case let value where value.hasPrefix("settings-"):
             if let index = Int(value.dropFirst("settings-".count)), Self.sections.indices.contains(index) {
-                section = index; screen = .settings
+                settingsTarget = "top"; section = index; screen = .settings
             }
         case "history": screen = .history
         default: screen = .home
@@ -272,7 +283,7 @@ struct SettingsView: View {
         Text(text).font(.system(size: size, design: .monospaced)).tracking(size * 0.08).textCase(.uppercase).foregroundStyle(color)
     }
 
-    private func eyebrow(_ text: String) -> some View { mono(text, size: 11, color: Palette.accentInk) }
+    private func eyebrow(_ text: String) -> some View { mono(text, size: 11, color: Palette.accentInk).id(text) }
 
     private var rule: some View { Rectangle().fill(Palette.ink20).frame(height: 1) }
     private var softRule: some View { Rectangle().fill(Palette.ink20).frame(height: 1) }
@@ -316,7 +327,7 @@ struct SettingsView: View {
 
     private func toggleRow(_ title: String, _ detail: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) { titled(title, detail) }.toggleStyle(MurmurToggleStyle())
-            .padding(.vertical, 10)
+            .padding(.vertical, 10).id(title)
     }
 
     /// "Gemini 3.5 Transcribe (speech recognition, …)" → "Gemini 3.5 Transcribe" for segment labels.
@@ -376,6 +387,12 @@ struct SettingsView: View {
                     navigationRow("Insights", icon: "chart.bar.xaxis", selected: screen == .insights) { screen = .insights }
                     navigationRow("Meetings", icon: "person.2", selected: screen == .meetings) { screen = .meetings }
                     navigationRow("History", icon: "clock.arrow.circlepath", selected: screen == .history) { screen = .history }
+                    if sidebarCollapsed {
+                        navigationRow("Search settings", icon: "magnifyingglass", selected: settingsSearchOpen) { settingsSearchOpen = true }
+                    } else {
+                        settingsSearchField.padding(.vertical, 8)
+                        if !settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { settingsSearchResults }
+                    }
                     Color.clear.frame(height: 12)
                     ForEach(Self.sections.indices, id: \.self) { index in
                         navigationRow(index == 8 ? "Meeting Settings" : index == 5 ? "Privacy" : Self.sections[index],
@@ -395,6 +412,69 @@ struct SettingsView: View {
         }
         .padding(.horizontal, sidebarCollapsed ? 14 : 20).padding(.top, 16)
         .frame(width: sidebarCollapsed ? 64 : 216).frame(maxHeight: .infinity)
+    }
+
+    private var settingsSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Palette.ink70).accessibilityHidden(true)
+            TextField("Search settings", text: $settingsQuery)
+                .textFieldStyle(.plain).font(WindowType.body(14))
+                .accessibilityLabel("Search settings").focused($settingsSearchFocused)
+                .onSubmit { if let result = SettingsSearch.matches(settingsQuery).first { openSetting(result) } }
+                .onExitCommand { settingsSearchOpen = false; settingsQuery = "" }
+        }
+        .padding(8).background(Palette.ink.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private var settingsSearchResults: some View {
+        let results = SettingsSearch.matches(settingsQuery)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                if results.isEmpty {
+                    Text(settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Type to find a setting." : "No matching settings.")
+                        .font(WindowType.body(13)).foregroundStyle(Palette.ink70).padding(8)
+                }
+                ForEach(results) { result in
+                    Button { openSetting(result) } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(result.title).font(WindowType.body(14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                            Text(result.sectionName).font(WindowType.body(12)).foregroundStyle(Palette.ink70)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(8).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).accessibilityLabel("\(result.title), \(result.sectionName)")
+                }
+            }
+        }
+        .frame(maxHeight: settingsSearchOpen ? 300 : 240)
+    }
+
+    private var settingsSearchOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.3).ignoresSafeArea().onTapGesture { settingsSearchOpen = false }
+                .accessibilityHidden(true)
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    settingsSearchField
+                    Button { settingsSearchOpen = false } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).accessibilityLabel("Close settings search")
+                }
+                settingsSearchResults
+            }
+            .padding(20).frame(width: 440)
+            .background(Palette.paper, in: RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
+            .onAppear { DispatchQueue.main.async { settingsSearchFocused = true } }
+            .onExitCommand { settingsSearchOpen = false }
+            .accessibilityElement(children: .contain).accessibilityLabel("Settings search")
+        }
+    }
+
+    private func openSetting(_ result: SettingsSearch.Result) {
+        if result.target == "model-folder" { showAdvanced = true }
+        settingsTarget = result.target; settingsNavigationID = UUID()
+        section = result.section; screen = .settings
+        settingsSearchOpen = false; settingsQuery = ""; settingsSearchFocused = false
     }
 
     private func navigationRow(_ title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -445,18 +525,22 @@ struct SettingsView: View {
     // MARK: Settings
 
     private var settings: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                Text(Self.sections[section]).font(WindowType.display(40)).tracking(-0.8)
-                Text(Self.ledes[section]).font(WindowType.body(14)).foregroundStyle(Palette.ink70)
-                    .lineSpacing(2).padding(.top, 6).padding(.bottom, 8)
-                sectionBody.disabled(controller.isBusy)
-                if controller.isBusy { help("Finish dictating to change settings.", color: Palette.ink64).padding(.top, 12) }
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(Self.sections[section]).id("top").font(WindowType.display(40)).tracking(-0.8)
+                    Text(Self.ledes[section]).font(WindowType.body(14)).foregroundStyle(Palette.ink70)
+                        .lineSpacing(2).padding(.top, 6).padding(.bottom, 8)
+                    sectionBody.disabled(controller.isBusy)
+                    if controller.isBusy { help("Finish dictating to change settings.", color: Palette.ink64).padding(.top, 12) }
+                }
+                .padding(EdgeInsets(top: 16, leading: 24, bottom: 24, trailing: 24))
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(EdgeInsets(top: 16, leading: 24, bottom: 24, trailing: 24))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .onAppear { DispatchQueue.main.async { proxy.scrollTo(settingsTarget, anchor: .top) } }
+            .onChange(of: settingsNavigationID) { DispatchQueue.main.async { proxy.scrollTo(settingsTarget, anchor: .top) } }
+            .id(section)
         }
-        .id(section)
     }
 
     @ViewBuilder private var sectionBody: some View {
@@ -497,8 +581,8 @@ struct SettingsView: View {
     private var meetingSettings: some View {
         VStack(alignment: .leading, spacing: 12) {
             meetingRoutes
-            CallDetectionRows(presenter: controller.callOffers)
-            SpeakerSettingsSection(settings: controller.speakerSettings)
+            CallDetectionRows(presenter: controller.callOffers).id("call-detection")
+            SpeakerSettingsSection(settings: controller.speakerSettings).id("speaker-separation")
         }
     }
 
@@ -516,7 +600,7 @@ struct SettingsView: View {
             .padding(.vertical, 12).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
             toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
             toggleRow("Start and stop sounds", "A short sound when recording starts and when it stops or is canceled. No sound when text is inserted.", isOn: $controller.recordingSounds)
-            toggleRow(LiveWordsFacts.displayName, LiveWordsFacts.explanation, isOn: $controller.liveWords)
+            toggleRow(LiveWordsFacts.displayName, LiveWordsFacts.explanation, isOn: $controller.liveWords).id("live-words")
             if controller.liveWords {
                 liveWordsModel.padding(.vertical, 10)
                 toggleRow("Show live words on cloud routes", "Off: when transcription runs in the cloud, the bubble shows only the level meter and the extra model does not start. The preview always runs on this Mac.", isOn: $controller.liveWordsOnCloud)
@@ -541,7 +625,7 @@ struct SettingsView: View {
                 .buttonStyle(InkButtonStyle(kind: .outline)).padding(.top, 16)
 
             Toggle("Show detailed info", isOn: $showDetailedSettingsInfo)
-                .font(WindowType.body(13)).toggleStyle(.checkbox).padding(.top, 12)
+                .font(WindowType.body(13)).toggleStyle(.checkbox).padding(.top, 12).id("detailed-info")
 
             eyebrow("Appearance").padding(.top, 20)
             segmented([("system", "System"), ("light", "Light"), ("dark", "Dark")], $appearance).padding(.top, 8)
@@ -594,7 +678,7 @@ struct SettingsView: View {
             if showAdvanced {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Model folder").font(WindowType.body(16, weight: .semibold))
+                        Text("Model folder").id("model-folder").font(WindowType.body(16, weight: .semibold))
                         help((controller.usesCustomModelFolder ? "Custom folder" : "Default folder") + " · " + (controller.modelAvailable ? "model files found ✓" : "no model files in this folder"))
                         if !controller.modelDirectory.isEmpty {
                             Text(URL(fileURLWithPath: controller.modelDirectory).lastPathComponent)
@@ -1080,7 +1164,7 @@ struct SettingsView: View {
                 Spacer()
                 Button("Delete All Data…", role: .destructive, action: controller.deleteAllData).buttonStyle(InkButtonStyle())
             }
-            .padding(.vertical, 18).padding(.top, 36)
+            .padding(.vertical, 18).padding(.top, 36).id("delete-data")
         }
     }
 
