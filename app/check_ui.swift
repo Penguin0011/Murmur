@@ -190,7 +190,7 @@ import SwiftUI
                     // With --speakers the notes name the speaker ("Speaker 2"), and the rename below relabels them.
                     let them = MeetingSpeakers.label(call.lines[3], in: call)
                     var notes = MeetingNotes(title: "Synthetic launch checklist plan", summary: "The call went over the synthetic launch plan for next week. Me offered to draft the checklist by Thursday, and \(them) asked for it in the team channel.",
-                                             route: "Apple Intelligence (on-device, less accurate)", writtenAt: Date())
+                                             route: "Apple Intelligence (on-device)", writtenAt: Date())
                     notes.keyPoints = [NoteItem(text: "The synthetic launch plan is for next week", lines: [ids[0]])]
                     notes.decisions = [NoteItem(text: "Share the checklist in the team channel", lines: [ids[2], ids[3]])]
                     notes.actions = [NoteItem(text: "Draft the checklist", lines: [ids[2], ids[3]], owner: "Me", due: "Thursday", done: false),

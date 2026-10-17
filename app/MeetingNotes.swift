@@ -42,8 +42,7 @@ enum MeetingNotesRoute: String, CaseIterable, Codable {
     var label: String {
         switch self {
         case .none: return "None (transcript only)"
-        // Until its notes measurement passes (PRD 11.10, Q3).
-        case .appleIntelligence: return "Apple Intelligence (on-device, less accurate)"
+        case .appleIntelligence: return "Apple Intelligence (on-device)"
         case .gemini: return "Gemini"
         case .customAPI: return "Custom Provider"
         }
@@ -65,7 +64,7 @@ enum MeetingNotesRoute: String, CaseIterable, Codable {
     static func disclosure(_ route: MeetingNotesRoute, host: String?, local: Bool, retention: String?) -> String {
         switch route {
         case .none: return "No notes are written; the meeting keeps its transcript. Nothing leaves this Mac."
-        case .appleIntelligence: return "Apple's on-device model writes the notes; nothing leaves this Mac. It has not yet passed Murmur's notes measurement, so check its notes against the transcript."
+        case .appleIntelligence: return "Apple's on-device model writes the notes; nothing leaves this Mac."
         case .gemini, .customAPI:
             let host = host ?? "the provider"
             if local { return "Notes are written by the model server on this Mac (\(host)); nothing leaves this Mac." }

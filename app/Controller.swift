@@ -2052,7 +2052,7 @@ final class PreStart: @unchecked Sendable {
         let route = meetingNotesRoute ?? .none
         let built = meetingNotesProvider(route)
         guard let provider = built.provider else { throw NotesFailure.failed(built.refusal ?? "Notes could not be written.") }
-        let name = route == .appleIntelligence ? "Apple Intelligence (on-device, less accurate)" : provider.id.displayName
+        let name = route == .appleIntelligence ? "Apple Intelligence (on-device)" : provider.id.displayName
         let structured = route == .appleIntelligence
         return try await MeetingNotesWriter.write(meeting, route: route, routeName: name, structured: structured) { system, user in
             do { return structured ? try await AppleSystemModel.notes(system: system, user: user) : try await provider.cleanup(CleanupMessages(system: system, user: user)) }

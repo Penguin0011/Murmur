@@ -505,8 +505,8 @@ struct MeetingNotesRoutePicker: View {
             segmented([(MeetingNotesRoute.none, "None (transcript only)"), (.appleIntelligence, "Apple Intelligence")], $selection, size: 14)
             segmented([(MeetingNotesRoute.customAPI, "Custom Provider"), (.gemini, "Gemini")], $selection, size: 14)
             HStack(spacing: 4) {
-                if selection == .appleIntelligence { lede("On-device, less accurate", color: Palette.ink70) }
-                if tooltipDetails { SettingInfoButton(text: controller.meetingNotesDisclosure(selection)) }
+                if selection == .appleIntelligence { lede("On-device", color: Palette.ink70) }
+                if tooltipDetails && selection != .appleIntelligence { SettingInfoButton(text: controller.meetingNotesDisclosure(selection)) }
             }
             if !tooltipDetails { lede(controller.meetingNotesDisclosure(selection), color: Palette.ink) }
             if selection != MeetingNotesRoute.none, let refusal = controller.meetingNotesSetupProblem(selection) { lede(refusal, color: Palette.accentDeep) }

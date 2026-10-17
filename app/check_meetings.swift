@@ -412,7 +412,7 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             let defaults = UserDefaults(suiteName: "murmur-notes-\(UUID().uuidString)")!
             check(MeetingNotesRoute.load(defaults) == nil, "the notes route is unset until asked")
             defaults.set(MeetingNotesRoute.appleIntelligence.rawValue, forKey: MeetingNotesRoute.key)
-            check(MeetingNotesRoute.load(defaults) == .appleIntelligence && MeetingNotesRoute.appleIntelligence.label.contains("on-device, less accurate"), "Apple Intelligence is labelled less accurate")
+            check(MeetingNotesRoute.load(defaults) == .appleIntelligence && MeetingNotesRoute.appleIntelligence.label == "Apple Intelligence (on-device)", "Apple Intelligence is labelled on-device")
             let cloud = MeetingNotesRoute.disclosure(.gemini, host: "generativelanguage.googleapis.com", local: false, retention: "Google keeps prompts.")
             check(cloud.contains("generativelanguage.googleapis.com") && cloud.contains("other people’s words") && cloud.contains("speaker names") && cloud.contains("your own notes") && cloud.hasSuffix("Google keeps prompts."), "the cloud disclosure names the host and what is sent")
             check(MeetingNotesRoute.disclosure(.customAPI, host: "127.0.0.1:8080", local: true, retention: nil).contains("nothing leaves this Mac"), "a loopback endpoint counts as local")
