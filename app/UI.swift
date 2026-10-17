@@ -450,8 +450,6 @@ struct SettingsView: View {
                 Text(Self.ledes[section]).font(WindowType.body(14)).foregroundStyle(Palette.ink70)
                     .lineSpacing(2).padding(.top, 6).padding(.bottom, 8)
                 sectionBody.disabled(controller.isBusy)
-                Toggle("Show detailed info", isOn: $showDetailedSettingsInfo)
-                    .font(WindowType.body(13)).toggleStyle(.checkbox).padding(.top, 32)
                 if controller.isBusy { help("Finish dictating to change settings.", color: Palette.ink64).padding(.top, 12) }
             }
             .padding(EdgeInsets(top: 16, leading: 24, bottom: 24, trailing: 24))
@@ -532,8 +530,8 @@ struct SettingsView: View {
             Button("Refresh Permissions", action: controller.refreshPermissionsAndShortcut)
                 .buttonStyle(InkButtonStyle(kind: .outline)).padding(.top, 16)
 
-            Button("Run first-time setup…") { screen = .setup }
-                .buttonStyle(InkButtonStyle(kind: .plain)).padding(.top, 12)
+            Toggle("Show detailed info", isOn: $showDetailedSettingsInfo)
+                .font(WindowType.body(13)).toggleStyle(.checkbox).padding(.top, 12)
 
             eyebrow("Appearance").padding(.top, 20)
             segmented([("system", "System"), ("light", "Light"), ("dark", "Dark")], $appearance).padding(.top, 8)
