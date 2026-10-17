@@ -1701,7 +1701,7 @@ extension SettingsView {
 
 }
 
-/// Weeks as columns, Monday to Sunday down, today last; days before History's cutoff are hatched
+/// Weeks as rows, Monday to Sunday across; days before History's cutoff are faded
 /// out, since their dictations have expired.
 private struct StreakCalendar: View {
     let days: Set<Date>
@@ -1712,18 +1712,20 @@ private struct StreakCalendar: View {
         let today = calendar.startOfDay(for: Date())
         let thisWeek = calendar.dateInterval(of: .weekOfYear, for: today)?.start ?? today
         let first = calendar.date(byAdding: .weekOfYear, value: -(weeks - 1), to: thisWeek) ?? thisWeek
-        return HStack(alignment: .top, spacing: 3) {
-            ForEach(0..<weeks, id: \.self) { week in
-                VStack(spacing: 3) {
-                    ForEach(0..<7, id: \.self) { weekday in
-                        let day = calendar.date(byAdding: .day, value: week * 7 + weekday, to: first) ?? first
-                        let on = days.contains(day)
-                        Rectangle()
-                            .fill(on ? Palette.accent : day > today ? Color.clear : Palette.ink.opacity(cutoff.map { day < calendar.startOfDay(for: $0) } == true ? 0.03 : 0.1))
-                            .frame(width: 14, height: 14)
-                            .overlay(Rectangle().strokeBorder(day == today ? Palette.ink : Color.clear, lineWidth: 1.5))
-                    }
-                }
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
+            ForEach(0..<7, id: \.self) { weekday in
+                Text(calendar.shortStandaloneWeekdaySymbols[(weekday + 1) % 7])
+                    .font(WindowType.body(11)).foregroundStyle(Palette.ink70)
+                    .frame(maxWidth: .infinity).padding(.bottom, 4)
+            }
+            ForEach(0..<(weeks * 7), id: \.self) { offset in
+                let day = calendar.date(byAdding: .day, value: offset, to: first) ?? first
+                let on = days.contains(day)
+                Rectangle()
+                    .fill(on ? Palette.accent : day > today ? Color.clear : Palette.ink.opacity(cutoff.map { day < calendar.startOfDay(for: $0) } == true ? 0.03 : 0.1))
+                    .aspectRatio(1, contentMode: .fit)
+                    .overlay(Rectangle().strokeBorder(day == today ? Palette.ink : Color.clear, lineWidth: 1.5))
+                    .help(day.formatted(date: .abbreviated, time: .omitted) + (on ? ": dictated" : ": no retained dictation"))
             }
         }
         .accessibilityElement().accessibilityLabel("Dictation days")
