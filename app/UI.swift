@@ -262,7 +262,7 @@ struct SettingsView: View {
         switch request {
         case "settings-search":
             screen = .settings; section = 0
-            settingsQuery = "meeting"; settingsSearchOpen = sidebarCollapsed
+            settingsQuery = "meeting"; settingsSearchOpen = true
         case "guide": WelcomeGuide.replay(.standard); guideStep = .microphone; screen = .setup
         case "insights": screen = .insights
         case "meetings": screen = .meetings
@@ -387,12 +387,7 @@ struct SettingsView: View {
                     navigationRow("Insights", icon: "chart.bar.xaxis", selected: screen == .insights) { screen = .insights }
                     navigationRow("Meetings", icon: "person.2", selected: screen == .meetings) { screen = .meetings }
                     navigationRow("History", icon: "clock.arrow.circlepath", selected: screen == .history) { screen = .history }
-                    if sidebarCollapsed {
-                        navigationRow("Search settings", icon: "magnifyingglass", selected: settingsSearchOpen) { settingsSearchOpen = true }
-                    } else {
-                        settingsSearchField.padding(.vertical, 8)
-                        if !settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { settingsSearchResults }
-                    }
+                    navigationRow("Search settings", icon: "magnifyingglass", selected: settingsSearchOpen) { settingsSearchOpen = true }
                     Color.clear.frame(height: 12)
                     ForEach(Self.sections.indices, id: \.self) { index in
                         navigationRow(index == 8 ? "Meeting Settings" : index == 5 ? "Privacy" : Self.sections[index],
@@ -446,7 +441,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .frame(maxHeight: settingsSearchOpen ? 300 : 240)
+        .frame(maxHeight: 300)
     }
 
     private var settingsSearchOverlay: some View {
