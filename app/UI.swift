@@ -515,11 +515,14 @@ struct SettingsView: View {
 
     private var general: some View {
         VStack(alignment: .leading, spacing: 0) {
-            eyebrow("Shortcut").padding(.top, 12)
+            HStack(spacing: 4) {
+                eyebrow("Shortcut")
+                SettingInfoButton(text: controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop, or hold it and release. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
+                    .accessibilityLabel("How to use the shortcut")
+            }.padding(.top, 12)
             VStack(alignment: .leading, spacing: 8) {
                 segmented([("right-option", "Right Option"), ("fn", "Fn / Globe"), ("ctrl-option-space", "Control–Option–Space")], $controller.shortcut)
                 ShortcutRecorder(controller: controller)
-                help(controller.pressToToggle ? "Press the shortcut to start recording and press it again to stop, or hold it and release. Escape cancels." : "Hold to record until you release. Double-press to keep recording until you press again. Escape cancels.")
             }
             .padding(.vertical, 12).overlay(alignment: .top) { rule }.overlay(alignment: .bottom) { softRule }.padding(.top, 8)
             toggleRow("Press once to start, again to stop", "Holding still works: release to stop. Off means hold to record.", isOn: $controller.pressToToggle)
@@ -1503,19 +1506,18 @@ extension SettingsView {
 
     var home: some View {
         page("Home", "Dictate anywhere the cursor is.") {
-            help("Transcription: \(controller.transcriptionRoute == .local ? "On this Mac" : controller.cloudTranscriber.displayName) · Cleanup: \(controller.cleanupChoice.displayName)").padding(.top, 12)
-            DisclosureGroup("Where dictation data goes") {
-                disclosure(controller.routeDisclosure(.transcription))
-                disclosure(controller.routeDisclosure(.cleanup))
-                help("On-device routes process data on this Mac. Custom providers use the server configured in Settings.")
-            }
-            .font(WindowType.body(13)).padding(.top, 8)
-            eyebrow("Shortcut").padding(.top, 28)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                help("Transcription: \(controller.transcriptionRoute == .local ? "On this Mac" : controller.cloudTranscriber.displayName) · Cleanup: \(controller.cleanupChoice.displayName)")
+                SettingInfoButton(text: ([controller.routeDisclosure(.transcription), controller.routeDisclosure(.cleanup)].compactMap { $0 } + ["On-device routes process data on this Mac. Custom providers use the server configured in Settings."]).joined(separator: "\n\n"))
+                    .accessibilityLabel("Where dictation data goes")
+            }.padding(.top, 12)
+            HStack(spacing: 4) {
+                eyebrow("Shortcut")
+                SettingInfoButton(text: controller.pressToToggle ? "Press to start, press again to stop. Escape cancels." : "Hold to record, or double-press to keep recording until you press again. Escape cancels.")
+                    .accessibilityLabel("How to use the shortcut")
+            }.padding(.top, 28)
             HStack(alignment: .center, spacing: 20) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(controller.shortcutName).font(WindowType.body(28, weight: .bold)).tracking(-0.8)
-                    help(controller.pressToToggle ? "Press to start, press again to stop. Escape cancels." : "Hold to record, or double-press to keep recording until you press again. Escape cancels.")
-                }
+                Text(controller.shortcutName).font(WindowType.body(28, weight: .bold)).tracking(-0.8)
                 Spacer()
                 if controller.phase == "Listening" {
                     Button("Finish Dictation", action: controller.stopRecording).buttonStyle(InkButtonStyle(kind: .filled))
@@ -1526,7 +1528,6 @@ extension SettingsView {
                 }
             }
             .padding(.vertical, 18).padding(.top, 8)
-            help("Start Dictation hides this window so your words go to the app you were using; press the shortcut to finish.", color: Palette.ink64).padding(.top, 8)
             HStack(alignment: .center, spacing: 20) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Meeting notes").font(WindowType.body(17, weight: .semibold))
