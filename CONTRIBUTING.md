@@ -67,6 +67,8 @@ Visual fixture (macOS, temporary storage, no capture or insertion):
 ```sh
 app/check_ui.sh
 app/check_ui.sh --light --compact --opaque
+app/check_ui.sh --settings-search --sidebar-collapsed --snapshot /tmp/murmur-search-dark.png
+app/check_ui.sh --settings-search --light --compact --snapshot /tmp/murmur-search-light.png
 app/check_ui.sh --paste-failed --bubble-only
 app/check_ui.sh --undo --bubble-only
 app/check_ui.sh --light --insights

@@ -473,3 +473,70 @@ enum UpdateText {
         release.map { "Update Available: Murmur \($0.version)…" } ?? "Check for Updates…"
     }
 }
+
+/// Search only authored setting labels and aliases; never user text or credentials.
+enum SettingsSearch {
+    static let sections = ["General", "Transcription", "Cleanup", "Modes", "Dictionary", "History & Privacy", "API Keys", "Updates", "Meetings"]
+    struct Result: Identifiable {
+        let title: String
+        let section: Int
+        let keywords: String
+        let target: String
+        var id: String { "\(section):\(title)" }
+        var sectionName: String { sections[section] }
+        init(_ title: String, _ section: Int, _ keywords: String, target: String? = nil) {
+            self.title = title; self.section = section; self.keywords = keywords; self.target = target ?? title
+        }
+    }
+    static let all: [Result] = [
+        .init("Shortcut", 0, "hotkey keyboard fn globe right option hold record"),
+        .init("Press once to start, again to stop", 0, "toggle recording double press"),
+        .init("Start and stop sounds", 0, "sound audio chime feedback"),
+        .init("Live words", 0, "streaming preview real time", target: "live-words"),
+        .init("Show live words on cloud routes", 0, "preview streaming", target: "live-words"),
+        .init("Insert at the cursor", 0, "automatic paste typing clipboard insertion"),
+        .init("Add a leading space when needed", 0, "intelligent spacing whitespace"),
+        .init("Show menu bar icon", 0, "status tray hide"),
+        .init("Show in Dock", 0, "app switcher hide icon"),
+        .init("Open at login", 0, "startup launch background"),
+        .init("Microphone", 0, "input device audio mic"),
+        .init("Permissions", 0, "accessibility input monitoring microphone access"),
+        .init("Show detailed info", 0, "help explanations tooltips", target: "detailed-info"),
+        .init("Appearance", 0, "dark light mode theme system"),
+        .init("Speech model", 1, "download parakeet local on device offline", target: "top"),
+        .init("Where transcription runs", 1, "dictation cloud local on device provider gemini custom api"),
+        .init("Model folder", 1, "advanced storage location directory", target: "model-folder"),
+        .init("Cleanup runs with", 2, "location local rules apple intelligence cloud gemini custom provider"),
+        .init("Cleanup style", 2, "faithful strict polish professional tone rewrite"),
+        .init("Remove filler words", 2, "um uh cleanup"),
+        .init("Apply spoken corrections", 2, "backtrack no wait cleanup"),
+        .init("Format spoken lists", 2, "numbered bullets cleanup"),
+        .init("Fix punctuation and capitalization", 2, "commas periods capitals cleanup"),
+        .init("Spoken commands and numbers", 2, "email paragraph digits symbols cleanup"),
+        .init("Use screen context", 2, "clipboard selected text privacy cleanup"),
+        .init("Writing modes", 3, "apps websites trigger words custom instructions tone", target: "top"),
+        .init("Dictionary", 4, "vocabulary preferred spelling aliases words", target: "top"),
+        .init("Learn from my corrections", 4, "automatic learning spelling dictionary"),
+        .init("Limit learning to readable fields", 4, "keystroke learning privacy dictionary"),
+        .init("Transcript history", 5, "save off privacy storage"),
+        .init("Keep transcripts for", 5, "retention delete thirty 30 days six months forever"),
+        .init("Delete all data", 5, "erase wipe reset history recordings keys", target: "delete-data"),
+        .init("API Keys", 6, "credentials password keychain gemini custom transcription cleanup", target: "top"),
+        .init("Updates", 7, "version release download install", target: "top"),
+        .init("Meeting transcription", 8, "call audio cloud local on device provider"),
+        .init("Meeting notes", 8, "summary transcript only none apple intelligence gemini custom provider"),
+        .init("Call detection", 8, "automatic meeting prompt offer take notes zoom teams browser", target: "call-detection"),
+        .init("Speaker separation", 8, "diarization diarizer speakers pyannote model", target: "speaker-separation")
+    ]
+    static func matches(_ query: String) -> [Result] {
+        let words = normalized(query).split(whereSeparator: { $0.isWhitespace })
+        guard !words.isEmpty else { return [] }
+        return all.filter { result in
+            let text = normalized(result.title + " " + result.sectionName + " " + result.keywords)
+            return words.allSatisfy { text.contains($0) }
+        }
+    }
+    private static func normalized(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX")).replacingOccurrences(of: "-", with: " ")
+    }
+}

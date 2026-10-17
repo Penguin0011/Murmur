@@ -131,6 +131,7 @@ import SwiftUI
             }
             if args.contains("--speaker-settings") { controller.speakerSettings.showFixture(enabled: true, status: args.contains("--ready") ? .ready : .notDownloaded) }
             if args.contains("--meeting-settings") { controller.meetingTranscription = args.contains("--cloud") ? .cloud : .local; controller.screenRequest = "meeting-settings" }
+            if args.contains("--settings-search") { controller.screenRequest = "settings-search" }
             controller.voiceLevel = 0.6
             controller.phase = CommandLine.arguments.contains("--processing") ? "Processing" : CommandLine.arguments.contains("--listening") ? "Listening" : CommandLine.arguments.contains("--saved") ? "Saved" : "Error"
             controller.message = CommandLine.arguments.contains("--credential-warning")
