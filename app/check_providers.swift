@@ -1115,7 +1115,7 @@ func checkCustomTranscription() async {
         check(body.contains("custom/whisper:latest") && !body.contains("Murmur") && !body.contains("name=\"prompt\""), "custom speech sends the model without dictionary decoder context")
         check((request.value(forHTTPHeaderField: "Authorization") != nil) == !address.contains("192.168"), "custom speech refuses to send keys over off-device http")
         check(provider.disclosure.staysOnThisMac == address.contains("localhost"), "custom speech locality disclosure")
-        check(provider.disclosure.staysOnDevice.contains("the dictionary") && !provider.disclosure.leavesDevice.joined().contains("spelling"), "custom disclosure keeps dictionary local to transcription")
+        check(provider.disclosure.staysOnDevice.contains { $0.contains("dictionary") } && !provider.disclosure.leavesDevice.joined().contains("spelling"), "custom disclosure keeps dictionary local to transcription")
         let transport = MockTransport(.success(result(200, #"{"text":"Synthetic custom provider transcript."}"#)))
         provider.transport = transport
         let text = try? await provider.transcribe(audio)

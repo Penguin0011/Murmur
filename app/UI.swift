@@ -304,9 +304,9 @@ struct SettingsView: View {
                 if !saved.isEmpty && saved != MicrophoneChoice.automatic && !devices.contains(where: { $0.uid == saved }) { Text("Chosen microphone (not connected)").tag(saved) }
             }
             .labelsHidden()
-            help(saved == MicrophoneChoice.automatic
-                 ? "Uses the Mac’s built-in microphone instead of a Bluetooth headset’s while the built-in one is available, so AirPods and other headsets keep full playback quality. Otherwise the system default."
-                 : "Used for the next dictation. If the chosen microphone is not connected, Murmur uses the system default.")
+            if saved == MicrophoneChoice.automatic {
+                SettingInfoButton(text: "Uses the Mac’s built-in microphone instead of a Bluetooth headset’s while available, so AirPods keep full playback quality. Otherwise uses the system default.")
+            }
             help("If the microphone changes while you dictate, recording continues on the new one and keeps what was already recorded.")
         }
     }
@@ -477,20 +477,21 @@ struct SettingsView: View {
     /// Settings → Meetings (decision of October 15, 2026, amending Q2): the meeting transcription route.
     private var meetingSettings: some View {
         VStack(alignment: .leading, spacing: 12) {
-            eyebrow("Meeting transcription").padding(.top, 20)
+            HStack(spacing: 4) {
+                eyebrow("Meeting transcription")
+                SettingInfoButton(text: "A change applies to meetings started afterwards; a meeting in progress keeps its route. Dictation’s route is set separately in Transcription.\n\n" + (controller.meetingTranscription == .local
+                    ? "Meeting audio is transcribed on this Mac and never leaves it. This is the default."
+                    : controller.meetingCloudNote.map { $0.note + "\n\n" + $0.disclosure } ?? "Choose a cloud transcriber in Settings → Transcription."))
+            }.padding(.top, 20)
             segmented([(MeetingTranscription.local, "On this Mac (Parakeet)"), (MeetingTranscription.cloud, "Cloud (\(controller.cloudTranscriber.displayName))")], $controller.meetingTranscription)
-            if controller.meetingTranscription == .local {
-                help("Meeting audio is transcribed on this Mac and never leaves it. This is the default.")
-            } else if let cloud = controller.meetingCloudNote {
-                help(cloud.note, color: Palette.ink)
-                help(cloud.disclosure)
-            } else {
+            if controller.meetingTranscription == .cloud && controller.meetingCloudNote == nil {
                 help("No cloud transcriber is set up. Choose one and save its key in Settings → Transcription and API Keys.", color: Palette.ink)
             }
-            help("A change applies to meetings started afterwards; a meeting in progress keeps its route. Dictation’s route is set separately in Transcription.", color: Palette.ink64)
-            eyebrow("Meeting notes").padding(.top, 20)
-            MeetingNotesRoutePicker(controller: controller, selection: Binding(get: { controller.meetingNotesRoute ?? .none }, set: { controller.meetingNotesRoute = $0; controller.meetingRecorder.notesRouteChosen($0) }))
-            help(controller.meetingNotesRoute == nil ? "Not chosen yet: Murmur asks after your first meeting." : "Notes are written after Stop from the transcript and your own notes. Every item cites the lines it rests on; items the transcript does not support are left out.", color: Palette.ink64)
+            HStack(spacing: 4) {
+                eyebrow("Meeting notes")
+                SettingInfoButton(text: controller.meetingNotesRoute == nil ? "Not chosen yet: Murmur asks after your first meeting." : "Notes are written after Stop from the transcript and your own notes. Every item cites the lines it rests on; items the transcript does not support are left out.")
+            }.padding(.top, 20)
+            MeetingNotesRoutePicker(controller: controller, tooltipDetails: true, selection: Binding(get: { controller.meetingNotesRoute ?? .none }, set: { controller.meetingNotesRoute = $0; controller.meetingRecorder.notesRouteChosen($0) }))
             CallDetectionRows(presenter: controller.callOffers)
             SpeakerSettingsSection(settings: controller.speakerSettings)
         }
@@ -692,16 +693,8 @@ struct SettingsView: View {
             toggleRow("Spoken commands and numbers", "“comma”, “new paragraph”, “two hundred thousand” → 200,000, “at the rate” → @, and “write an email to…” layout.", isOn: $controller.cleanupSpoken)
             help("If cleanup goes too far, Murmur inserts your own words. The raw transcript stays in History.").padding(.top, 16)
 
-            help("Local rules are simple built-in rules. For AI cleanup, choose Apple Intelligence (on this Mac), Gemini or a Custom Provider (a local model server of 8B or larger works too). If AI cleanup fails, local rules clean that dictation; Murmur never switches routes on its own.")
-                .padding(.top, 12)
-            if controller.cleanupChoice == .localRules {
-                help("Cleanup runs on this Mac. Nothing is sent anywhere.").padding(.top, 12)
-            } else if controller.cleanupChoice == .appleIntelligence {
-                help("Cleanup runs on this Mac with Apple's on-device model. Nothing is sent anywhere. On Murmur's test corpus it is less accurate than local rules, so Murmur checks every edit and uses local rules when one fails.").padding(.top, 12)
-                if let reason = AppleSystemModel.status() { help(reason.userMessage + " Until then, local rules clean dictations.").padding(.top, 8) }
-            } else {
-                disclosure(controller.routeDisclosure(.cleanup)).padding(.top, 16)
-                disclosure(controller.cleanupExtrasDisclosure).padding(.top, 8)
+            if controller.cleanupChoice == .appleIntelligence, let reason = AppleSystemModel.status() {
+                help(reason.userMessage + " Until then, local rules clean dictations.").padding(.top, 8)
             }
             toggleRow("Use screen context", "AI cleanup also gets the selected text, the clipboard and the focused window's text, as reference for spelling names and terms. Never read under Secure Input, in password fields, or from clipboard items marked as passwords. Not used by On this Mac. Modes can turn it on or off.", isOn: $controller.screenContext)
                 .padding(.top, 12).disabled(controller.cleanupChoice == .localRules)
@@ -725,8 +718,10 @@ struct SettingsView: View {
 
     private var modes: some View {
         VStack(alignment: .leading, spacing: 0) {
-            help("A mode is picked by a trigger word said at the start or end of a dictation, then by the website, then by the app focused when you started. If two modes match the same way, the first in this list wins. Anything a mode leaves as “Same as Cleanup” follows the Cleanup settings.")
-                .padding(.top, 12)
+            HStack(spacing: 4) {
+                Text("How modes are chosen").font(WindowType.body(14, weight: .semibold))
+                SettingInfoButton(text: "A mode is picked by a trigger word said at the start or end of a dictation, then by the website, then by the app focused when you started. If two modes match the same way, the first in this list wins. Anything a mode leaves as “Same as Cleanup” follows the Cleanup settings.")
+            }.padding(.top, 12)
             rule.padding(.top, 20)
             ForEach($controller.writingModes) { $mode in
                 modeRow($mode).overlay(alignment: .bottom) { softRule }
@@ -1707,7 +1702,7 @@ func standardEditMenuItem() -> NSMenuItem {
 }
 
 /// Split in two so the compiler can type-check the chains.
-private struct SettingInfoButton: View {
+struct SettingInfoButton: View {
     let text: String
     @State private var isPresented = false
 
@@ -1872,10 +1867,12 @@ private struct CallDetectionRows: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Call detection").font(.system(size: 11, design: .monospaced)).tracking(0.88).textCase(.uppercase).foregroundStyle(Palette.accentInk).padding(.top, 20)
             Toggle(isOn: $presenter.enabled) {
-                Text("Offer to take notes when a call starts").font(WindowType.body(16, weight: .semibold))
+                HStack(spacing: 4) {
+                    Text("Offer to take notes when a call starts").font(WindowType.body(16, weight: .semibold))
+                    SettingInfoButton(text: "When a call app or a browser uses the microphone for a few seconds, Murmur offers meeting notes. It never starts recording on its own. It checks only which apps use the microphone, on this Mac; it reads no windows or web addresses.")
+                }
             }
             .toggleStyle(MurmurToggleStyle())
-            help("When a call app or a browser uses the microphone for a few seconds, Murmur offers meeting notes. It never starts recording on its own. It checks only which apps use the microphone, on this Mac; it reads no windows or web addresses.")
             if !presenter.never.isEmpty {
                 Text("Never offer for").font(WindowType.body(14, weight: .semibold))
                 ForEach(presenter.never, id: \.self) { id in

@@ -365,14 +365,18 @@ struct MeetingsPage: View {
 /// The notes route options with the selected route's disclosure (Settings, and the first-Stop question).
 struct MeetingNotesRoutePicker: View {
     @ObservedObject var controller: AppController
+    var tooltipDetails = false
     @Binding var selection: MeetingNotesRoute
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Meeting notes", selection: $selection) {
-                ForEach(MeetingNotesRoute.allCases, id: \.self) { Text($0.label).tag($0) }
+            HStack(alignment: .top, spacing: 4) {
+                Picker("Meeting notes", selection: $selection) {
+                    ForEach(MeetingNotesRoute.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.radioGroup).labelsHidden().font(WindowType.body(14))
+                if tooltipDetails { SettingInfoButton(text: controller.meetingNotesDisclosure(selection)) }
             }
-            .pickerStyle(.radioGroup).labelsHidden().font(WindowType.body(14))
-            lede(controller.meetingNotesDisclosure(selection), color: Palette.ink)
+            if !tooltipDetails { lede(controller.meetingNotesDisclosure(selection), color: Palette.ink) }
             if selection != MeetingNotesRoute.none, let refusal = controller.meetingNotesSetupProblem(selection) { lede(refusal, color: Palette.accentDeep) }
         }
     }
@@ -652,16 +656,19 @@ struct SpeakerSettingsSection: View {
         VStack(alignment: .leading, spacing: 10) {
             mono("Speakers", size: 11, color: Palette.accentInk).padding(.top, 18)
             Toggle(isOn: $settings.enabled) {
-                VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
                     Text(SpeakerFacts.displayName).font(.system(size: 16, weight: .semibold))
-                    lede(SpeakerFacts.explanation)
+                    SettingInfoButton(text: SpeakerFacts.explanation + (settings.row.isReady ? "" : "\n\nUntil it is downloaded, the call’s side is labelled Them and no audio is kept."))
                 }
             }
             .toggleStyle(MurmurToggleStyle())
             if settings.enabled {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(settings.summary).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 4) {
+                            Text(settings.summary).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                            SettingInfoButton(text: SpeakerFacts.credits)
+                        }
                         if settings.row.isReady { mono("Ready ✓", color: Palette.accentInk) }
                         else { lede(settings.row.statusText) }
                     }
@@ -675,9 +682,7 @@ struct SpeakerSettingsSection: View {
                 if let progress = settings.row.progress {
                     ProgressView(value: progress).accessibilityLabel("Download progress")
                 }
-                if !settings.row.isReady { lede("Until it is downloaded, the call’s side is labelled Them and no audio is kept.", color: Palette.ink64) }
                 if !settings.message.isEmpty { lede(settings.message, color: Palette.ink) }
-                lede(SpeakerFacts.credits, color: Palette.ink64)
             }
         }
     }
