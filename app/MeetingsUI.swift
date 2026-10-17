@@ -65,10 +65,15 @@ struct MeetingsPage: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Meetings").font(WindowType.display(64)).tracking(-1.28)
-                    lede(controller.speakerSettings.enabled
+                    Text("Meetings").font(WindowType.display(40)).tracking(-0.8)
+                    Text("Find transcripts and notes from your calls.")
+                        .font(WindowType.body(14)).foregroundStyle(Palette.ink70)
+                    DisclosureGroup("Audio and privacy") {
+                        lede(controller.speakerSettings.enabled
                          ? "Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Your audio is deleted as soon as it is transcribed; the call’s is kept until its speakers are separated, at most 24 hours."
                          : "Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Audio is deleted as soon as it is transcribed.")
+                    }
+                    .font(WindowType.body(13))
                 }
                 Spacer()
                 if let live = recorder.live {
@@ -81,7 +86,7 @@ struct MeetingsPage: View {
                     MeetingStartMenu(controller: controller)
                 }
             }
-            .padding(.horizontal, 24).padding(.vertical, 20)
+            .padding(.horizontal, 24).padding(.vertical, 12)
             if let message = recorder.message {
                 HStack {
                     Text(message).font(WindowType.body(14)).fixedSize(horizontal: false, vertical: true)
