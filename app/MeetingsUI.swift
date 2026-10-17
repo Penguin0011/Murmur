@@ -145,14 +145,16 @@ struct MeetingsPage: View {
                     } else if selecting {
                         list
                     } else if geometry.size.width < 680 {
-                        VStack(spacing: 12) {
-                            Picker("Meeting", selection: Binding(get: { selected?.id ?? "" }, set: { selectedID = $0 })) {
-                                ForEach(filtered) { meeting in Text(meeting.title).tag(meeting.id) }
+                        if selectedID != nil, let meeting = selected {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Button { selectedID = nil } label: {
+                                    Label("All meetings", systemImage: "chevron.left")
+                                }.buttonStyle(InkButtonStyle(kind: .plain)).padding(.horizontal, 24)
+                                detail(meeting)
                             }
-                            if let meeting = selected { detail(meeting) }
-                            else { noMatches }
+                        } else {
+                            list
                         }
-                        .padding(.horizontal, 24).padding(.top, 12)
                     } else {
                         HStack(spacing: 0) {
                             list.frame(width: 200)
