@@ -10,10 +10,10 @@ Keep fixes small, commit working checkpoints, and preserve existing provider, cr
 
 ## Starting point
 
-- Workspace: `/Users/aakash/.codex/worktrees/8947/Dictation`; branch: `aakash-insertion-behavior`. [Certain]
+- Workspace: `~/.codex/worktrees/8947/Dictation`; branch: `aakash-insertion-behavior`. [Certain]
 - Application changes: `1f07d1a` (quiet delivery and paste-last recovery), `20294e3` (secure/focus checks), and review documentation: `5ea3ce5`. The handoff commit follows these. [Certain]
-- Installed application: `/Users/aakash/Applications/Murmur.app`. Its executable SHA-256 at installation was `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`; source code was through `5ea3ce5`. [Certain]
-- Previous app: `/Users/aakash/Applications/Murmur-backups/20261005-132505/Murmur.app`. [Certain]
+- Installed application: `~/Applications/Murmur.app`. Its executable SHA-256 at installation was `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`; source code was through `5ea3ce5`. [Certain]
+- Previous app: `~/Applications/Murmur-backups/20261005-132505/Murmur.app`. [Certain]
 - Installation signature verification passed; installed launch showed Ready, the updated paste-last help text, and Microphone/Accessibility/Input Monitoring allowed. All 279 history filenames were preserved across replacement. [Certain]
 - Controller checks, `spike --check`, production build/signature verification, and preview launch passed. The native History fixture showed delivered rows without badges and no delivered rows under Needs attention. **Live microphone, provider, cross-app delivery, keyboard-layout, remote-client, and clipboard-manager tests have not been run for these changes.** [Certain]
 
@@ -42,7 +42,7 @@ Environment: macOS 26.6.2; app bundle version 0.1.0 (build 1); arm64; fixture wi
 | Isolated UI matrix | `app/check_ui.sh --history --saved --matrix`, light/full, light/compact/opaque, empty History, and listening/processing/recovery bubble fixtures were run. | PASS. [Certain] |
 | Source checks | Launch (normal/preview/probe and 13 invalid combinations), History persistence/retention/deletion, controller, insertion spike, dictionary, provider and processing checks passed. | PASS. [Certain] |
 | Build/signature/preview | Production build completed; deep/strict bundle signature verification succeeded; preview exited 0. | PASS. [Certain] |
-| Installed application after merge | `/Users/aakash/Applications/Murmur.app` signature verification passed and its executable remains `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`; the app and ModelBench processes are running. No replacement was needed because this task's runtime change only exposes the data directory to the synthetic fixture. | PASS for signature/hash/process; current Ready screen NOT RUN because macOS was locked during the final check. Previous Ready/permissions check is recorded in HANDOFF.md. [Certain] |
+| Installed application after merge | `~/Applications/Murmur.app` signature verification passed and its executable remains `c1b2097cb92c4ee9570efb9deee8b0fa9cf8d87b93b69bd607aa269d63aef8ea`; the app and ModelBench processes are running. No replacement was needed because this task's runtime change only exposes the data directory to the synthetic fixture. | PASS for signature/hash/process; current Ready screen NOT RUN because macOS was locked during the final check. Previous Ready/permissions check is recorded in HANDOFF.md. [Certain] |
 | Physical speech and live model insertion | Not run: the pinned Parakeet model directory contains metadata/configuration only, not its model weight files. The production `--test-audio` probe therefore cannot reach transcription. | NOT RUN; no weights downloaded and no provider/preferences changed. [Certain] |
 | Live target-app insertion and recovery | TextEdit, browser fields, rich-text/canvas editors, chat composers, code editor/terminal, secure fields, focus changes, physical shortcut, alternate keyboard layout, remote client, and clipboard-manager race cases were not exercised in this run. | NOT RUN; no disposable target-app matrix was executed. Synthetic UI is not delivery evidence. [Certain] |
 | Reduce Motion / contrast preferences | Not run because exercising them would require changing persistent system appearance/accessibility settings; opaque rendering was exercised in the fixture. | NOT RUN. [Certain] |
