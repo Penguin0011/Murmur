@@ -42,7 +42,9 @@ struct MeetingsPage: View {
     @State private var showEcho = false
     @State private var search = ""
     @State private var notesDraft = ""
-    @State private var confirmDelete: Meeting?
+    @State private var confirmDelete: [Meeting] = []
+    @State private var selecting = false
+    @State private var deletionIDs: Set<String> = []
     @State private var tab = MeetingsPage.initialTab
     /// The speaker being renamed (W7d) and the name typed so far.
     @State private var renaming: Int?
@@ -87,6 +89,22 @@ struct MeetingsPage: View {
                 }
             }
             .padding(.horizontal, 24).padding(.vertical, 12)
+            if !recorder.meetings.isEmpty {
+                HStack(spacing: 12) {
+                    if selecting {
+                        Text("\(deletionIDs.count) selected").font(WindowType.body(14, weight: .semibold))
+                        Button("Select All") { deletionIDs.formUnion(filtered.filter { $0.id != recorder.live?.id }.map(\.id)) }
+                            .buttonStyle(InkButtonStyle(kind: .plain))
+                        Spacer()
+                        Button("Cancel") { selecting = false; deletionIDs.removeAll() }.buttonStyle(InkButtonStyle(kind: .plain))
+                        Button("Delete Selected…") { confirmDelete = recorder.meetings.filter { deletionIDs.contains($0.id) } }
+                            .buttonStyle(InkButtonStyle(kind: .outline)).disabled(deletionIDs.isEmpty)
+                    } else {
+                        Spacer()
+                        Button("Select Meetings") { selecting = true }.buttonStyle(InkButtonStyle(kind: .plain))
+                    }
+                }.padding(.horizontal, 24).padding(.bottom, 12)
+            }
             if let message = recorder.message {
                 HStack {
                     Text(message).font(WindowType.body(14)).fixedSize(horizontal: false, vertical: true)
@@ -107,7 +125,9 @@ struct MeetingsPage: View {
                 .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 GeometryReader { geometry in
-                    if geometry.size.width < 680 {
+                    if selecting {
+                        list
+                    } else if geometry.size.width < 680 {
                         VStack(spacing: 12) {
                             TextField("Search meetings", text: $search).textFieldStyle(.roundedBorder)
                             Picker("Meeting", selection: Binding(get: { selected?.id ?? "" }, set: { selectedID = $0 })) {
@@ -133,10 +153,12 @@ struct MeetingsPage: View {
                 if acknowledged { MeetingConsent.acknowledge(.standard); controller.startMeeting(item.source) }
             }
         }
-        .alert("Delete this meeting?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } })) {
-            Button("Delete", role: .destructive) { if let meeting = confirmDelete { recorder.delete(meeting.id); selectedID = nil } }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("The transcript, its notes and your own notes are deleted. This cannot be undone.") }
+        .sheet(isPresented: Binding(get: { !confirmDelete.isEmpty }, set: { if !$0 { confirmDelete = [] } })) {
+            deletionConfirmation
+        }
+        .onChange(of: recorder.meetings.map(\.id)) {
+            deletionIDs.formIntersection(recorder.meetings.map(\.id))
+        }
         .background(Color.clear.sheet(isPresented: Binding(get: { recorder.notesChoicePending != nil && recorder.consentPending == nil }, set: { if !$0 { recorder.notesChoicePending = nil } })) {
             MeetingNotesChoiceSheet(controller: controller) { route in
                 controller.meetingNotesRoute = route
@@ -152,24 +174,68 @@ struct MeetingsPage: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(filtered) { meeting in
-                        Button { selectedID = meeting.id; notesDraft = meeting.myNotes } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(meeting.title).font(WindowType.body(14, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
-                                HStack(spacing: 8) {
-                                    mono(MeetingExport.clock(meeting.seconds), size: 11, color: Palette.ink70)
-                                    if recorder.finishing.contains(meeting.id) { mono("Finishing", size: 11, color: Palette.accentDeep) }
-                                    else if recorder.separating.contains(meeting.id) { mono("Separating speakers", size: 11, color: Palette.accentDeep) }
-                                    else if let left = recorder.leftovers[meeting.id] { mono("\(left) parts left", size: 11, color: Palette.accentDeep) }
-                                }
+                        Group {
+                            if selecting {
+                                Toggle(isOn: Binding(get: { deletionIDs.contains(meeting.id) }, set: { on in
+                                    if on { deletionIDs.insert(meeting.id) } else { deletionIDs.remove(meeting.id) }
+                                })) { meetingLabel(meeting) }
+                                .toggleStyle(.checkbox).disabled(meeting.id == recorder.live?.id)
+                                .padding(12).background(deletionIDs.contains(meeting.id) ? Palette.accent16 : Color.clear)
+                            } else {
+                                Button { selectedID = meeting.id; notesDraft = meeting.myNotes } label: {
+                                    meetingLabel(meeting)
+                                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(selected?.id == meeting.id ? Palette.accent16 : Color.clear).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
                             }
-                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(selected?.id == meeting.id ? Palette.accent16 : Color.clear).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink20).frame(height: 1) }
+                        }.overlay(alignment: .bottom) { Rectangle().fill(Palette.ink20).frame(height: 1) }
                     }
                 }
             }
         }
+    }
+
+    private func meetingLabel(_ meeting: Meeting) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(meeting.title).font(WindowType.body(14, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
+            HStack(spacing: 8) {
+                mono(MeetingExport.clock(meeting.seconds), size: 11, color: Palette.ink70)
+                if recorder.finishing.contains(meeting.id) { mono("Finishing", size: 11, color: Palette.accentDeep) }
+                else if recorder.separating.contains(meeting.id) { mono("Separating speakers", size: 11, color: Palette.accentDeep) }
+                else if let left = recorder.leftovers[meeting.id] { mono("\(left) parts left", size: 11, color: Palette.accentDeep) }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var deletionConfirmation: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(confirmDelete.count == 1 ? "Delete this meeting?" : "Delete \(confirmDelete.count) meetings?")
+                .font(WindowType.body(22, weight: .bold))
+            lede("This permanently deletes the selected meetings, transcripts, generated notes, your own notes and any retained audio. This cannot be undone.")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(confirmDelete) { meeting in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(meeting.title).font(WindowType.body(14, weight: .semibold))
+                            Text(meeting.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(WindowType.body(12)).foregroundStyle(Palette.ink70)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }.frame(maxHeight: 220)
+            HStack {
+                Spacer()
+                Button("Cancel") { confirmDelete = [] }.buttonStyle(InkButtonStyle(kind: .outline)).keyboardShortcut(.cancelAction)
+                Button(confirmDelete.count == 1 ? "Delete Meeting" : "Delete \(confirmDelete.count) Meetings", role: .destructive) {
+                    let requested = Set(confirmDelete.map(\.id))
+                    deletionIDs = recorder.delete(requested)
+                    selecting = !deletionIDs.isEmpty
+                    if let selectedID, requested.contains(selectedID) { self.selectedID = nil }
+                    if !deletionIDs.isEmpty { recorder.message = "Could not delete \(deletionIDs.count) meeting(s). They remain selected; try again." }
+                    confirmDelete = []
+                }.buttonStyle(InkButtonStyle(kind: .filled))
+            }
+        }.padding(24).frame(width: 460).foregroundStyle(Palette.ink).background(Palette.paper)
     }
 
     private func detail(_ meeting: Meeting) -> some View {
@@ -182,7 +248,7 @@ struct MeetingsPage: View {
                         if meeting.notes?.isEmpty == false { Button("Copy Notes") { recorder.copyNotes(meeting) }.buttonStyle(InkButtonStyle(kind: .outline)) }
                         Button("Copy Transcript") { recorder.copyTranscript(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
                         Button("Save Markdown…") { recorder.saveMarkdown(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
-                        Button("Delete…") { confirmDelete = meeting }.buttonStyle(InkButtonStyle(kind: .plain))
+                        Button("Delete…") { confirmDelete = [meeting] }.buttonStyle(InkButtonStyle(kind: .plain)).disabled(meeting.id == recorder.live?.id)
                     }
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { actions }.fixedSize(horizontal: true, vertical: false)
