@@ -27,6 +27,10 @@ MURMUR_RELEASE=1 \
 
 `runtime/` and `spike/.build/` are ignored by Git. Do not commit audio, transcripts, model files or API keys. [Certain]
 
+## Publication checks
+
+Run the redacted secret scans in [SECURITY.md](SECURITY.md) before sharing a branch or making a release. Review all fetched branches and PR refs, and hosted content separately before changing repository visibility. Keep private audit evidence outside this tree. [Certain]
+
 ## Checks
 
 None of these record audio, insert text or inject keys. Run the ones that cover your change, and all of them before a release. [Certain]
@@ -102,7 +106,7 @@ These are the patterns in the existing code and docs. [Likely]
 - Make small logical commits after each working checkpoint. [Certain]
 - Use Conventional Commit subjects: `type(scope): summary`, imperative and lowercase, such as `feat(cleanup): add …`, `fix(ui): …`, `docs(providers): …`, `test: …`, `refactor(app): …`. The scope is optional. [Certain]
 - Merge commits describe what is merged in plain words, such as "Merge cloud providers, Keychain credentials and GitHub update checker". [Certain]
-- If an agent wrote the change, end the message with its `Co-Authored-By:` trailer. [Certain]
+- Write commit messages as a human and do not add Codex co-author trailers.
 
 ## Licensing
 

@@ -126,7 +126,7 @@ enum ProviderError: Error, Equatable, Sendable, CustomStringConvertible, Localiz
         case .quota:
             return "\(name) reports no remaining quota or credits for this account. Check your plan or billing, or choose another route."
         case .rateLimited(_, let retryAfter):
-            if let seconds = retryAfter, seconds > 0 { return "\(name) is rate limiting requests. Try again in \(Int(seconds.rounded(.up))) seconds." }
+            if let seconds = retryAfter, seconds.isFinite, seconds > 0, seconds.rounded(.up) < Double(Int.max) { return "\(name) is rate limiting requests. Try again in \(Int(seconds.rounded(.up))) seconds." }
             return "\(name) is rate limiting requests. Try again shortly."
         case .network(let p) where p == .localServer:
             return "Couldn't reach the local model server. Check that it is running and that the address in Settings is correct."
@@ -415,7 +415,7 @@ enum ProviderErrorClassifier {
     /// `Retry-After` as delta-seconds or an HTTP-date.
     static func parseRetryAfter(_ value: String?, now: Date) -> TimeInterval? {
         guard let raw = value?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return nil }
-        if let seconds = Double(raw) { return seconds >= 0 ? seconds : nil }
+        if let seconds = Double(raw) { return seconds.isFinite && seconds >= 0 && seconds < Double(Int.max) ? seconds : nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "GMT")
@@ -426,7 +426,7 @@ enum ProviderErrorClassifier {
 
     /// Google duration string such as "30s" or "1.5s".
     static func parseGoogleDuration(_ value: String) -> TimeInterval? {
-        guard value.hasSuffix("s"), let seconds = Double(value.dropLast()), seconds >= 0 else { return nil }
+        guard value.hasSuffix("s"), let seconds = Double(value.dropLast()), seconds.isFinite, seconds >= 0, seconds < Double(Int.max) else { return nil }
         return seconds
     }
 }

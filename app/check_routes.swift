@@ -15,7 +15,7 @@ private func checkA(_ condition: @autoclosure () async -> Bool, _ label: String,
     let value = await condition(); check(value, label, line: line)
 }
 
-private let secret = "sk-test-SECRET-1234567890"
+private let secret = "test-key"
 private let testKey = APIKey(secret)!
 
 /// Counts requests and answers each with a fixed result. Never touches the network.

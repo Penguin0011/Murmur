@@ -1,8 +1,8 @@
 # Third-party notices
 
-Murmur's own source is intended to be MIT-licensed. The LICENSE file is not added yet, because the copyright holder's legal name has not been supplied (PRD section 10, item 4). [Certain]
+Murmur's own source is covered by the existing [MIT License](LICENSE). Bundled dependency license texts and notices are retained in `app/Licenses/` and copied into `Murmur.app/Contents/Resources/Licenses/` by the build. [Certain]
 
-Licenses below were checked on October 3, 2026 by fetching the listed pages. This file is a record for release, not legal advice. [Certain]
+The entries below record upstream sources and their verification scope. Bundled license copies are retained in `app/Licenses/`; dates on individual entries describe those checks. [Certain]
 
 ## Bundled in the app
 
@@ -28,14 +28,15 @@ FluidAudio's package includes these targets, which are linked into the FluidAudi
 #### NemoTextProcessing (via FluidAudio's binary target)
 
 - Prebuilt xcframework from FluidInference/text-processing-rs v0.3.1, per FluidAudio's `Package.swift` at the pinned revision. [Certain]
-- License: Apache-2.0, as declared on https://github.com/FluidInference/text-processing-rs. I checked the repository's current page, not the v0.3.1 tag. [Likely for v0.3.1]
-- `Package.swift` says it is always linked on Swift tools before 6.2, and that `Package@swift-6.2.swift` makes it an opt-out trait. Whether the Mac build (Swift 6.3.3) links it by default is unchecked. [Guessing]
+- License: Apache-2.0, as declared by the v0.3.1 release's `Cargo.toml`; the exact release `LICENSE`, `NOTICE`, and `THIRD-PARTY-LICENSES.md` are retained in `app/Licenses/Nemo-LICENSE.txt`, `app/Licenses/Nemo-NOTICE.txt`, and `app/Licenses/Nemo-THIRD-PARTY-LICENSES.md`. [Certain]
+- The local Swift 6.4 package dump selected FluidAudio's `Package@swift-6.2.swift`, whose default trait enables `NemoTextProcessing`; build workspace metadata resolves the v0.3.1 xcframework, and the built helper contains FluidAudio `TextNormalizer` symbols. [Certain]
+- These checks do not establish which individual framework components are included in the final executable. Verify that list and its required notices for the exact binary before distribution. [Certain]
 
 ## Downloaded at run time, not bundled
 
 ### Parakeet Unified English 0.6B
 
-The model weights are not in the repository or the app bundle. They are downloaded to `~/Library/Caches/Dictation/` from the pinned Hugging Face revision, and file checksums are verified. Today the model folder is chosen manually; the in-app downloader is in progress. [Certain]
+The model weights are not in the repository or the app bundle. They are downloaded to `~/Library/Caches/Dictation/` from the pinned Hugging Face revision, and file checksums are verified. Settings can download pinned models or use an existing verified model folder. [Certain]
 
 - Upstream model: `nvidia/parakeet-unified-en-0.6b`, https://huggingface.co/nvidia/parakeet-unified-en-0.6b [Certain]
   - License: NVIDIA Open Model License Agreement (Hugging Face tag `nvidia-open-model-license`). The card says the model "is ready for commercial/non-commercial use". [Certain]
@@ -75,3 +76,11 @@ Optional download from Settings → Meetings → "Separate speakers after a meet
 ## Cloud services
 
 Gemini API and any custom OpenAI-compatible endpoint the user configures are optional services reached with the user's own API keys. No provider code or SDK is bundled; Murmur sends plain HTTPS requests. Their terms apply to the user's account, not to redistribution. [Certain] See `app/PROVIDERS.md` for data-use terms.
+
+## Bundled fonts and retained dependency notices
+
+DM Sans and Instrument Serif are bundled under the SIL Open Font License; their license texts are in `app/Fonts/` and ship beside the fonts. [Certain]
+
+`app/Licenses/` retains FluidAudio's Apache-2.0 text and all five notices from `ThirdPartyLicenses/` at the pinned revision, plus the text-processing-rs v0.3.1 license, NOTICE and dependency list. Including a notice does not imply every optional subsystem is used by Murmur. [Certain]
+
+Before distributing a binary, review the exact linked Rust dependency license texts and the upstream/conversion model-license mismatch described above. These notices do not resolve ownership questions or grant permissions beyond the upstream licenses. [Certain]
