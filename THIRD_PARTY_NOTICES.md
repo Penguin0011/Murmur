@@ -2,7 +2,7 @@
 
 Murmur's own source is covered by the existing [MIT License](LICENSE). Bundled dependency license texts and notices are retained in `app/Licenses/` and copied into `Murmur.app/Contents/Resources/Licenses/` by the build. [Certain]
 
-Licenses below were checked on October 3, 2026 by fetching the listed pages. This file is a record for release, not legal advice. [Certain]
+The entries below record upstream sources and their verification scope. Bundled license copies are retained in `app/Licenses/`; dates on individual entries describe those checks. [Certain]
 
 ## Bundled in the app
 
@@ -28,8 +28,9 @@ FluidAudio's package includes these targets, which are linked into the FluidAudi
 #### NemoTextProcessing (via FluidAudio's binary target)
 
 - Prebuilt xcframework from FluidInference/text-processing-rs v0.3.1, per FluidAudio's `Package.swift` at the pinned revision. [Certain]
-- License: Apache-2.0, as declared on https://github.com/FluidInference/text-processing-rs. I checked the repository's current page, not the v0.3.1 tag. [Likely for v0.3.1]
-- `Package.swift` says it is always linked on Swift tools before 6.2, and that `Package@swift-6.2.swift` makes it an opt-out trait. Whether the Mac build (Swift 6.3.3) links it by default is unchecked. [Guessing]
+- License: Apache-2.0, as declared by the v0.3.1 release's `Cargo.toml`; the exact release `LICENSE`, `NOTICE`, and `THIRD-PARTY-LICENSES.md` are retained in `app/Licenses/Nemo-LICENSE.txt`, `app/Licenses/Nemo-NOTICE.txt`, and `app/Licenses/Nemo-THIRD-PARTY-LICENSES.md`. [Certain]
+- The local Swift 6.4 package dump selected FluidAudio's `Package@swift-6.2.swift`, whose default trait enables `NemoTextProcessing`; build workspace metadata resolves the v0.3.1 xcframework, and the built helper contains FluidAudio `TextNormalizer` symbols. [Certain]
+- These checks do not establish which individual framework components are included in the final executable. Verify that list and its required notices for the exact binary before distribution. [Certain]
 
 ## Downloaded at run time, not bundled
 
