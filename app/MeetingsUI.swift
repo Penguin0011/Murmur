@@ -41,6 +41,9 @@ struct MeetingsPage: View {
     @State private var selectedID: String?
     @State private var showEcho = false
     @State private var search = ""
+    @State private var dateFilter = MeetingDateFilter.all
+    @State private var fromDate = Calendar.current.date(byAdding: .day, value: -29, to: Date()) ?? Date()
+    @State private var throughDate = Date()
     @State private var notesDraft = ""
     @State private var confirmDelete: [Meeting] = []
     @State private var selecting = false
@@ -56,10 +59,21 @@ struct MeetingsPage: View {
 
     enum DetailTab: String, CaseIterable { case notes = "Notes", transcript = "Transcript", mine = "My notes" }
 
+    private enum MeetingDateFilter: String, CaseIterable {
+        case all = "All dates", today = "Today", week = "Last 7 days", month = "Last 30 days", custom = "Date range…"
+    }
+
     private var filtered: [Meeting] {
-        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return recorder.meetings }
-        return recorder.meetings.filter { $0.title.lowercased().contains(query) || $0.lines.contains { $0.text.lowercased().contains(query) } }
+        let today = Calendar.current.startOfDay(for: Date())
+        let from: Date?, through: Date?
+        switch dateFilter {
+        case .all: from = nil; through = nil
+        case .today: from = today; through = today
+        case .week: from = Calendar.current.date(byAdding: .day, value: -6, to: today); through = today
+        case .month: from = Calendar.current.date(byAdding: .day, value: -29, to: today); through = today
+        case .custom: from = fromDate; through = throughDate
+        }
+        return recorder.meetings.filter { $0.matches(query: search, from: from, through: through) }
     }
     private var selected: Meeting? { filtered.first { $0.id == selectedID } ?? filtered.first }
 
@@ -124,24 +138,26 @@ struct MeetingsPage: View {
                 }
                 .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
+                meetingFilters
                 GeometryReader { geometry in
-                    if selecting {
+                    if filtered.isEmpty {
+                        noMatches
+                    } else if selecting {
                         list
                     } else if geometry.size.width < 680 {
                         VStack(spacing: 12) {
-                            TextField("Search meetings", text: $search).textFieldStyle(.roundedBorder)
                             Picker("Meeting", selection: Binding(get: { selected?.id ?? "" }, set: { selectedID = $0 })) {
                                 ForEach(filtered) { meeting in Text(meeting.title).tag(meeting.id) }
                             }
                             if let meeting = selected { detail(meeting) }
-                            else { lede("No matching meetings.") }
+                            else { noMatches }
                         }
                         .padding(.horizontal, 24).padding(.top, 12)
                     } else {
                         HStack(spacing: 0) {
                             list.frame(width: 200)
                             Rectangle().fill(Palette.ink20).frame(width: 1)
-                            if let meeting = selected { detail(meeting) } else { Spacer() }
+                            if let meeting = selected { detail(meeting) } else { noMatches }
                         }
                     }
                 }
@@ -167,10 +183,59 @@ struct MeetingsPage: View {
         })
     }
 
+    private var meetingFilters: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { topicSearch; datePicker }
+                VStack(alignment: .leading, spacing: 10) { topicSearch; datePicker }
+            }
+            if dateFilter == .custom {
+                HStack(spacing: 16) {
+                    DatePicker("From", selection: $fromDate, in: ...throughDate, displayedComponents: .date)
+                    DatePicker("Through", selection: $throughDate, in: fromDate..., displayedComponents: .date)
+                }.font(WindowType.body(13))
+            }
+            HStack {
+                Text("\(filtered.count) of \(recorder.meetings.count) meetings").font(WindowType.body(12)).foregroundStyle(Palette.ink70)
+                Spacer()
+                if !search.isEmpty || dateFilter != .all {
+                    Button("Clear filters") { search = ""; dateFilter = .all }
+                        .font(WindowType.body(12)).buttonStyle(.plain).foregroundStyle(Palette.accentInk)
+                }
+            }
+        }.padding(.horizontal, 24).padding(.vertical, 12)
+    }
+
+    private var topicSearch: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Palette.ink70).accessibilityHidden(true)
+            TextField("Search topics, summaries and notes", text: $search)
+                .textFieldStyle(.plain).font(WindowType.body(14)).accessibilityLabel("Search meeting topics, summaries, notes and transcripts")
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(Palette.ink70).accessibilityLabel("Clear search")
+            }
+        }.padding(.horizontal, 12).frame(minWidth: 210, minHeight: 44)
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.ink20, lineWidth: 1))
+    }
+
+    private var datePicker: some View {
+        Picker("Meeting dates", selection: $dateFilter) {
+            ForEach(MeetingDateFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }.labelsHidden().pickerStyle(.menu).font(WindowType.body(14)).fixedSize()
+            .frame(minHeight: 44).accessibilityLabel("Filter meetings by date")
+    }
+
+    private var noMatches: some View {
+        VStack(spacing: 12) {
+            Text("No matching meetings").font(WindowType.body(18, weight: .semibold))
+            lede("Try another topic or date range.")
+            Button("Clear filters") { search = ""; dateFilter = .all }.buttonStyle(InkButtonStyle(kind: .outline))
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(24)
+    }
+
     private var list: some View {
         VStack(spacing: 0) {
-            TextField("Search meetings", text: $search).textFieldStyle(.plain).font(WindowType.body(14))
-                .padding(.horizontal, 12).frame(height: 40).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink20).frame(height: 1) }
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(filtered) { meeting in
@@ -198,8 +263,14 @@ struct MeetingsPage: View {
     private func meetingLabel(_ meeting: Meeting) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(meeting.title).font(WindowType.body(14, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
+            let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let preview = meeting.searchDetails.first(where: { !query.isEmpty && $0.localizedStandardContains(query) }) ?? meeting.searchDetails.first {
+                Text(preview).font(WindowType.body(12)).foregroundStyle(Palette.ink70).lineLimit(2).multilineTextAlignment(.leading)
+            }
             HStack(spacing: 8) {
                 mono(MeetingExport.clock(meeting.seconds), size: 11, color: Palette.ink70)
+                Text(meeting.recordedAt, format: .dateTime.month(.abbreviated).day())
+                    .font(WindowType.body(11)).foregroundStyle(Palette.ink70)
                 if recorder.finishing.contains(meeting.id) { mono("Finishing", size: 11, color: Palette.accentDeep) }
                 else if recorder.separating.contains(meeting.id) { mono("Separating speakers", size: 11, color: Palette.accentDeep) }
                 else if let left = recorder.leftovers[meeting.id] { mono("\(left) parts left", size: 11, color: Palette.accentDeep) }
