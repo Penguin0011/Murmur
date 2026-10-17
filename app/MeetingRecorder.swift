@@ -501,14 +501,23 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     }
 
     func delete(_ id: String) {
-        pumps.removeValue(forKey: id)?.stop(); finishing.remove(id); notesProblem[id] = nil
-        if notesChoicePending == id { notesChoicePending = nil }
-        speakerRunner.cancel(id); separating.remove(id); deleteKeptAudio(id)
+        guard live?.id != id else { message = "Stop the meeting before deleting it."; return }
         if persists, let store, FileManager.default.fileExists(atPath: store.directory.appendingPathComponent(id + ".json").path) {
             do { try store.delete(id) } catch { message = "Could not delete this meeting."; return }
         }
+        pumps.removeValue(forKey: id)?.stop(); finishing.remove(id); notesProblem[id] = nil
+        if notesChoicePending == id { notesChoicePending = nil }
+        speakerRunner.cancel(id); separating.remove(id); deleteKeptAudio(id)
         if let audioRoot { try? FileManager.default.removeItem(at: MeetingAudio.folder(audioRoot, meeting: id)) }
         meetings.removeAll { $0.id == id }; refreshLeftovers()
+    }
+
+    /// Return IDs that remain so a failed deletion can be retried without selecting again.
+    func delete(_ ids: Set<String>) -> Set<String> {
+        for id in ids { delete(id) }
+        var remaining = Set(meetings.map(\.id))
+        if let live { remaining.insert(live.id) }
+        return ids.intersection(remaining)
     }
 
     /// Expires meetings with History's retention, and chunk audio after 24 hours.

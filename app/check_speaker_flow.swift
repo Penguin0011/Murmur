@@ -98,6 +98,26 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
         recorder.purge(cutoff: Date().addingTimeInterval(-30 * 86400))
         check(!kept(expired) && recorder.meetings.allSatisfy { $0.id != expired.id }, "retention deletes the meeting and its kept audio")
 
+        let bulkA = try pending(), bulkB = try pending()
+        recorder.reload()
+        check(recorder.delete(Set([bulkA.id, bulkB.id])).isEmpty, "bulk deletion reports success")
+        check(!kept(bulkA) && !kept(bulkB) && recorder.meetings.allSatisfy { $0.id != bulkA.id && $0.id != bulkB.id }, "bulk deletion removes only selected meetings and retained audio")
+        check(try store.meetings().contains { $0.id == skipped.id }, "bulk deletion preserves unselected meetings")
+        check(try store.meetings().allSatisfy { $0.id != bulkA.id && $0.id != bulkB.id }, "bulk deletion removes selected records from disk")
+        check(recorder.delete(Set<String>()).isEmpty, "empty bulk deletion is harmless")
+        let liveCheck = MeetingRecorder()
+        liveCheck.showFixture([waiting], live: waiting)
+        check(liveCheck.delete(Set([waiting.id])) == [waiting.id] && liveCheck.live?.id == waiting.id && liveCheck.meetings.count == 1, "bulk deletion refuses a live meeting and returns its ID")
+
+        // Force the store's identifier validation to refuse deletion without touching user files.
+        let refused = Meeting(id: "../invalid", recordedAt: Date(), source: .microphoneOnly)
+        try Data().write(to: store.directory.deletingLastPathComponent().appendingPathComponent("invalid.json"))
+        let failureCheck = MeetingRecorder()
+        failureCheck.configure(store: store, audioRoot: nil, persists: true)
+        failureCheck.showFixture([refused], live: nil, separating: [refused.id])
+        check(failureCheck.delete(Set([refused.id])) == [refused.id] && failureCheck.message != nil, "failed bulk deletion returns the remaining ID and reports an error")
+        check(failureCheck.separating.contains(refused.id), "failed record deletion does not discard background state")
+
         // Turning the switch off (or removing the model) skips finished meetings still waiting.
         let abandoned = try pending()
         recorder.reload()
