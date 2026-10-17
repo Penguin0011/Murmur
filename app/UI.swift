@@ -1526,9 +1526,10 @@ extension SettingsView {
             }
             .padding(.vertical, 18).padding(.top, 8)
             HStack(alignment: .center, spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 4) {
                     Text("Meeting notes").font(WindowType.body(17, weight: .semibold))
-                    help(controller.meetingRecorder.live == nil ? "Transcribe a call on this Mac: your microphone as Me, the call’s audio as Them." : "Recording now. The live panel shows the transcript.")
+                    SettingInfoButton(text: controller.meetingRecorder.live == nil ? "Transcribe a call on this Mac: your microphone as Me, the call’s audio as Them." : "Recording now. The live panel shows the transcript.")
+                        .accessibilityLabel("About meeting notes")
                 }
                 Spacer()
                 if controller.meetingRecorder.live == nil { MeetingStartMenu(controller: controller) }
