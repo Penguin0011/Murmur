@@ -474,7 +474,7 @@ struct SettingsView: View {
     }
 
     /// Settings → Meetings (decision of October 15, 2026, amending Q2): the meeting transcription route.
-    private var meetingSettings: some View {
+    private var meetingRoutes: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 4) {
                 eyebrow("Meeting transcription")
@@ -491,6 +491,12 @@ struct SettingsView: View {
                 SettingInfoButton(text: controller.meetingNotesRoute == nil ? "Not chosen yet: Murmur asks after your first meeting." : "Notes are written after Stop from the transcript and your own notes. Every item cites the lines it rests on; items the transcript does not support are left out.")
             }.padding(.top, 20)
             MeetingNotesRoutePicker(controller: controller, tooltipDetails: true, selection: Binding(get: { controller.meetingNotesRoute ?? .none }, set: { controller.meetingNotesRoute = $0; controller.meetingRecorder.notesRouteChosen($0) }))
+        }
+    }
+
+    private var meetingSettings: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            meetingRoutes
             CallDetectionRows(presenter: controller.callOffers)
             SpeakerSettingsSection(settings: controller.speakerSettings)
         }
@@ -579,41 +585,7 @@ struct SettingsView: View {
             }
             .padding(.vertical, 18).padding(.top, 20)
 
-            eyebrow("Where transcription runs").padding(.top, 28)
-            segmented([(TranscriptionRoute.local, "On this Mac (Parakeet)"), (TranscriptionRoute.cloud, "Cloud")], $controller.transcriptionRoute).padding(.top, 8)
-            if controller.transcriptionRoute == .local {
-                help("Audio stays on this Mac. Downloading the model uses the network once; dictation does not.").padding(.top, 12)
-            } else {
-                segmented(CloudTranscriber.allCases.map { ($0, $0.displayName) }, $controller.cloudTranscriber, size: 14).padding(.top, 16)
-                    .help(controller.cloudTranscriber.displayName)
-                if controller.cloudTranscriber == .gemini {
-                    let modelHint = controller.geminiTranscriptionModel.trimmingCharacters(in: .whitespacesAndNewlines) == GeminiTranscribeProvider.defaultModel
-                        ? "Recommended: Gemini 3.5 Transcribe, dedicated speech recognition."
-                        : "Other Gemini models may follow spoken instructions, skip words, or invent text."
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 4) {
-                            Text("Gemini transcription model").font(WindowType.body(14, weight: .semibold))
-                            settingInfo(modelHint)
-                        }
-                        field(GeminiTranscribeProvider.defaultModel, text: $controller.geminiTranscriptionModel)
-                            .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
-                        keyRow(.gemini)
-                    }.padding(.top, 16)
-                }
-                disclosure(controller.routeDisclosure(.transcription)).padding(.top, 16)
-                if controller.cloudTranscriber == .customAPI {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Transcription API base URL").font(WindowType.body(14, weight: .semibold))
-                        field("https://api.example.com/v1", text: $controller.customTranscriptionAPIBaseURL)
-                            .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
-                        Text("Transcription model name").font(WindowType.body(14, weight: .semibold))
-                        field("whisper-1", text: $controller.customTranscriptionModel)
-                            .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
-                        keyRow(.customTranscription)
-                        help("Needs an OpenAI-compatible /v1/audio/transcriptions endpoint. Separate from cleanup.")
-                    }.padding(.top, 16)
-                }
-            }
+            transcriptionRoutes
 
             Button { showAdvanced.toggle() } label: {
                 mono((showAdvanced ? "▾" : "▸") + " Advanced", size: 13).frame(height: 44).contentShape(Rectangle())
@@ -636,6 +608,52 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, 16).overlay(alignment: .top) { rule }
                 help("A folder you choose takes effect at once.")
+            }
+        }
+    }
+
+    private var transcriptionRoutes: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow("Where transcription runs").padding(.top, 28)
+            segmented([(TranscriptionRoute.local, "On this Mac (Parakeet)"), (TranscriptionRoute.cloud, "Cloud")], $controller.transcriptionRoute).padding(.top, 8)
+            if controller.transcriptionRoute == .local {
+                help("Audio stays on this Mac. Downloading the model uses the network once; dictation does not.").padding(.top, 12)
+            } else {
+                cloudTranscriptionSettings
+                disclosure(controller.routeDisclosure(.transcription)).padding(.top, 16)
+            }
+        }
+    }
+
+    private var cloudTranscriptionSettings: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            segmented(CloudTranscriber.allCases.map { ($0, $0.displayName) }, $controller.cloudTranscriber, size: 14).padding(.top, 16)
+                .help(controller.cloudTranscriber.displayName)
+            if controller.cloudTranscriber == .gemini {
+                let modelHint = controller.geminiTranscriptionModel.trimmingCharacters(in: .whitespacesAndNewlines) == GeminiTranscribeProvider.defaultModel
+                    ? "Recommended: Gemini 3.5 Transcribe, dedicated speech recognition."
+                    : "Other Gemini models may follow spoken instructions, skip words, or invent text."
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 4) {
+                        Text("Gemini transcription model").font(WindowType.body(14, weight: .semibold))
+                        settingInfo(modelHint)
+                    }
+                    field(GeminiTranscribeProvider.defaultModel, text: $controller.geminiTranscriptionModel)
+                        .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+                    keyRow(.gemini)
+                }.padding(.top, 16)
+            }
+            if controller.cloudTranscriber == .customAPI {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Transcription API base URL").font(WindowType.body(14, weight: .semibold))
+                    field("https://api.example.com/v1", text: $controller.customTranscriptionAPIBaseURL)
+                        .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+                    Text("Transcription model name").font(WindowType.body(14, weight: .semibold))
+                    field("whisper-1", text: $controller.customTranscriptionModel)
+                        .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+                    keyRow(.customTranscription)
+                    help("Needs an OpenAI-compatible /v1/audio/transcriptions endpoint. Separate from cleanup.")
+                }.padding(.top, 16)
             }
         }
     }
@@ -663,7 +681,7 @@ struct SettingsView: View {
         })
     }
 
-    private var cleanup: some View {
+    private var cleanupChoices: some View {
         VStack(alignment: .leading, spacing: 0) {
             eyebrow("Cleanup runs with").padding(.top, 28)
             segmented(CleanupChoice.allCases.map { ($0, short($0.displayName)) }, $controller.cleanupChoice, size: 14)
@@ -686,6 +704,12 @@ struct SettingsView: View {
                  ? "Keeps your voice and fixes small slips: fillers, false starts, grammar. Names, numbers and “not” stay."
                  : "Only the edits below. Your wording never changes.")
                 .padding(.top, 8)
+        }
+    }
+
+    private var cleanup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cleanupChoices
             rule.padding(.top, 20)
             toggleRow("Remove filler words", "Takes out “um”, “uh” and similar.", isOn: $controller.cleanupFillers)
             toggleRow("Apply spoken corrections", "“Friday, no wait, Monday” becomes “Monday”.", isOn: $controller.cleanupCorrections)
@@ -700,19 +724,23 @@ struct SettingsView: View {
             toggleRow("Use screen context", "AI cleanup also gets the selected text, the clipboard and the focused window's text, as reference for spelling names and terms. Never read under Secure Input, in password fields, or from clipboard items marked as passwords. Not used by On this Mac. Modes can turn it on or off.", isOn: $controller.screenContext)
                 .padding(.top, 12).disabled(controller.cleanupChoice == .localRules)
             if controller.cleanupChoice == .customAPI {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Cleanup API base URL").font(WindowType.body(14, weight: .semibold))
-                    field("https://api.cerebras.ai/v1", text: $controller.customAPIBaseURL)
-                        .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
-                    Text("Model name").font(WindowType.body(14, weight: .semibold)).padding(.top, 4)
-                    field("gpt-oss-120b", text: $controller.customAPIModel)
-                        .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
-                    keyRow(.customCleanup)
-                    help("This provider needs OpenAI-compatible POST /v1/chat/completions. Its address and API key are separate from transcription. Enter the provider's exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
-                }
-                .padding(.top, 16)
+                customCleanupSettings
             }
         }
+    }
+
+    private var customCleanupSettings: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Cleanup API base URL").font(WindowType.body(14, weight: .semibold))
+            field("https://api.cerebras.ai/v1", text: $controller.customAPIBaseURL)
+                .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+            Text("Model name").font(WindowType.body(14, weight: .semibold)).padding(.top, 4)
+            field("gpt-oss-120b", text: $controller.customAPIModel)
+                .focused($apiFieldFocused).onSubmit(controller.settingsChanged)
+            keyRow(.customCleanup)
+            help("This provider needs OpenAI-compatible POST /v1/chat/completions. Its address and API key are separate from transcription. Enter the provider's exact model ID. A key is sent only over HTTPS; local endpoints can be used without one.")
+        }
+        .padding(.top, 16)
     }
 
     // MARK: Writing modes (gaps #6-#8)
@@ -1341,13 +1369,16 @@ struct SettingsView: View {
             ("Microphone", "So Murmur can hear you while the shortcut is held. Audio stays on this Mac unless you choose a cloud route.", controller.microphoneAuthorized, "Allow", controller.requestMicrophone),
             ("Accessibility", "So Murmur can paste into the field you are using. It never presses Return or sends a message.", controller.accessibilityAuthorized, "Open Settings…", { controller.openPermissionSettings("accessibility") }),
             ("Input Monitoring", "So the shortcut works in every app. Murmur listens only for the shortcut, Escape and its two ⌃⌘ chords.", controller.inputMonitoringAuthorized, "Open Settings…", { controller.openPermissionSettings("input-monitoring") }),
-            ("Speech model", controller.transcriptionRoute == .cloud && !controller.modelRow.isReady ? "Not needed while transcription runs in the cloud." : ModelFacts.displayName, modelSatisfied,
+            ("Transcription", "Choose where dictation audio is transcribed. Cloud routes send audio to the provider shown below.", WelcomeGuide.isConfirmed(.transcription, .standard), "", {}),
+            ("Cleanup", "Choose where cleanup runs and how much it changes your words. Faithful keeps cleanup off.", WelcomeGuide.isConfirmed(.cleanup, .standard), "", {}),
+            ("Meetings", "Choose meeting transcription separately from dictation, then choose how meeting notes are written. None keeps only the transcript.", WelcomeGuide.isConfirmed(.meetings, .standard), "", {}),
+            ("Speech model", controller.transcriptionRoute == .cloud && controller.meetingTranscription == .cloud && !controller.modelRow.isReady ? "Not needed while dictation and meeting transcription both run in the cloud." : ModelFacts.displayName, controller.modelRow.isReady || (controller.transcriptionRoute == .cloud && controller.meetingTranscription == .cloud),
              controller.modelRow.actions.contains(.retry) ? "Retry…" : "Download…", controller.downloadModel),
             ("Try it", "Press \(controller.shortcutName) and say a sentence. With this window in front, your words land in the field below instead of another app.", !controller.setupTestTranscript.isEmpty, "", {})
         ]
     }
 
-    /// The first-run test dictation, into a field inside the guide, and the faithful-transcription choice.
+    /// Test dictation uses the routes and cleanup style chosen earlier in the guide.
     private var tryIt: some View {
         VStack(alignment: .leading, spacing: 0) {
             if !setupComplete { help("Finish the earlier steps first; dictation needs all of them.", color: Palette.ink).padding(.bottom, 12) }
@@ -1362,22 +1393,19 @@ struct SettingsView: View {
                 }
                 .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.ink20, lineWidth: 1))
                 .accessibilityLabel("Test dictation")
-            toggleRow("Clean up my dictation", "Removes filler words, applies spoken corrections and formats spoken lists. Off is faithful transcription: exactly what was heard, with dictionary spellings.", isOn: Binding(
-                get: { controller.cleanupFillers || controller.cleanupCorrections || controller.cleanupLists },
-                set: { on in if on { controller.cleanupFillers = true; controller.cleanupCorrections = true; controller.cleanupLists = true } else { controller.useFaithfulTranscription() } }))
-                .padding(.top, 8)
         }
         .onAppear { controller.setupShowing = true }
         .onDisappear { controller.setupShowing = false }
     }
 
     private func finishGuide() {
+        if let pending = WelcomeGuide.nextUnconfirmed(.standard) { guideStep = pending; return }
         WelcomeGuide.complete(.standard); guideStep = .microphone; screen = .home
     }
 
     private var setup: some View {
         let steps = guideSteps
-        let index = guideStep.rawValue, step = steps[index]
+        let index = WelcomeGuide.Step.allCases.firstIndex(of: guideStep)!, step = steps[index]
         let last = guideStep == .tryIt
         return GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -1388,21 +1416,23 @@ struct SettingsView: View {
                         wordmark("Murmur", size: 48)
                     }
                     .accessibilityElement(children: .combine).padding(.top, 16)
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(steps.indices, id: \.self) { i in
-                            let on = i == index
-                            Button { guideStep = WelcomeGuide.Step(rawValue: i)! } label: {
-                                HStack(spacing: 12) {
-                                    mono(String(format: "%02d", i + 1), size: 12, color: Palette.ink70)
-                                    mono(steps[i].title, size: 12, color: Palette.ink)
-                                    Spacer()
-                                    if steps[i].done { mono("✓", size: 12, color: Palette.accentInk) }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(steps.indices, id: \.self) { i in
+                                let on = i == index
+                                Button { guideStep = WelcomeGuide.Step.allCases[i] } label: {
+                                    HStack(spacing: 12) {
+                                        mono(String(format: "%02d", i + 1), size: 12, color: Palette.ink70)
+                                        mono(steps[i].title, size: 12, color: Palette.ink)
+                                        Spacer()
+                                        if steps[i].done { mono("✓", size: 12, color: Palette.accentInk) }
+                                    }
+                                    .frame(height: 40)
+                                    .overlay(alignment: .bottom) { Rectangle().fill(on ? Palette.accentInk : Color.clear).frame(height: 2) }
+                                    .contentShape(Rectangle())
                                 }
-                                .frame(height: 40)
-                                .overlay(alignment: .bottom) { Rectangle().fill(on ? Palette.accentInk : Color.clear).frame(height: 2) }
-                                .contentShape(Rectangle())
+                                .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
                             }
-                            .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
                         }
                     }
                     .padding(.top, 28)
@@ -1425,7 +1455,25 @@ struct SettingsView: View {
                                 }
                             }.padding(.top, 10)
                             Group {
-                                if last { tryIt }
+                                if guideStep == .transcription { transcriptionRoutes }
+                                else if guideStep == .cleanup {
+                                    cleanupChoices
+                                    if controller.cleanupChoice == .customAPI { customCleanupSettings }
+                                    if controller.cleanupChoice == .appleIntelligence, let reason = AppleSystemModel.status() { help(reason.userMessage).padding(.top, 12) }
+                                    if controller.cleanupChoice == .gemini { keyRow(.gemini).padding(.top, 12) }
+                                    disclosure(controller.routeDisclosure(.cleanup)).padding(.top, 12)
+                                }
+                                else if guideStep == .meetings {
+                                    meetingRoutes
+                                    if controller.meetingTranscription == .cloud {
+                                        cloudTranscriptionSettings
+                                        disclosure(controller.meetingCloudNote?.disclosure).padding(.top, 12)
+                                    }
+                                    help("Cloud meetings use the provider configured in the Transcription step. Notes use the cleanup provider configuration.").padding(.top, 12)
+                                    if controller.meetingNotesRoute == .gemini { keyRow(.gemini).padding(.top, 12) }
+                                    if controller.meetingNotesRoute == .customAPI { customCleanupSettings }
+                                }
+                                else if last { tryIt }
                                 else {
                                     let working = guideStep == .model && controller.modelRow.isWorking
                                     VStack(alignment: .leading, spacing: 10) {
@@ -1451,13 +1499,18 @@ struct SettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     HStack(spacing: 8) {
-                        if index > 0 { Button("← Back") { guideStep = WelcomeGuide.Step(rawValue: index - 1)! }.buttonStyle(InkButtonStyle(kind: .outline)) }
+                        if index > 0 { Button("← Back") { guideStep = WelcomeGuide.Step.allCases[index - 1] }.buttonStyle(InkButtonStyle(kind: .outline)) }
                         Button("Not Now") { screen = .home }.buttonStyle(InkButtonStyle(kind: .plain))
                         Spacer()
                         if last {
-                            Button("Finish") { finishGuide() }.buttonStyle(InkButtonStyle(kind: .filled))
+                            Button(WelcomeGuide.nextUnconfirmed(.standard) == nil ? "Finish" : "Review Choices →") { finishGuide() }.buttonStyle(InkButtonStyle(kind: .filled))
                         } else {
-                            Button(step.done ? "Continue →" : "Skip for Now →") { guideStep = WelcomeGuide.Step(rawValue: index + 1)! }
+                            Button(guideStep.isConfiguration ? "Use These Settings →" : step.done ? "Continue →" : "Skip for Now →") {
+                                if guideStep == .meetings && controller.meetingNotesRoute == nil { controller.meetingNotesRoute = MeetingNotesRoute.none }
+                                WelcomeGuide.confirm(guideStep, .standard)
+                                controller.settingsChanged()
+                                guideStep = WelcomeGuide.Step.allCases[index + 1]
+                            }
                                 .buttonStyle(InkButtonStyle(kind: step.done ? .filled : .outline))
                         }
                     }
