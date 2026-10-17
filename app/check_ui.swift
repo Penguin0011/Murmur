@@ -23,6 +23,7 @@ import SwiftUI
         item.submenu = appMenu; menu.addItem(item); menu.addItem(standardEditMenuItem()); application.mainMenu = menu
         let light = CommandLine.arguments.contains("--light")
         let args = CommandLine.arguments
+        UserDefaults.standard.set(args.contains("--sidebar-collapsed"), forKey: "sidebarCollapsed")
         // --system-appearance leaves the app's appearance alone, so the bubble shows it follows macOS
         // while the window uses the stored choice.
         if args.contains("--system-appearance") {
@@ -40,12 +41,34 @@ import SwiftUI
         } else {
             WelcomeGuide.complete(.standard)
         }
+        // Catch missing bundled typography instead of silently accepting a system-font fallback.
+        _ = WindowType.display(64); _ = WindowType.body(14)
+        precondition(NSFont(name: "InstrumentSerif-Regular", size: 64) != nil)
+        precondition(NSFont(name: "DMSans-9ptRegular", size: 14) != nil)
         let controller = AppController(preview: true)
         if CommandLine.arguments.contains("--custom-transcription") {
             controller.transcriptionRoute = .cloud
             controller.cloudTranscriber = .customAPI
         }
         delegate.controller = controller
+        // Exercise the style binding without capture, providers, or saved user data.
+        let styleView = SettingsView(controller: controller)
+        let savedChoice = controller.cleanupChoice
+        controller.cleanupChoice = .localRules
+        styleView.cleanupStyle.wrappedValue = -1
+        precondition(styleView.cleanupStyle.wrappedValue == -1)
+        precondition(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists && !controller.cleanupPunctuation && !controller.cleanupSpoken)
+        styleView.cleanupStyle.wrappedValue = 0
+        precondition(styleView.cleanupStyle.wrappedValue == 0 && controller.cleanupFillers && controller.cleanupPunctuation)
+        controller.cleanupChoice = .customAPI
+        styleView.cleanupStyle.wrappedValue = 2
+        precondition(styleView.cleanupStyle.wrappedValue == 2 && controller.cleanupPolish && controller.cleanupProfessional)
+        styleView.cleanupStyle.wrappedValue = -1
+        precondition(styleView.cleanupStyle.wrappedValue == -1)
+        styleView.cleanupStyle.wrappedValue = 1
+        precondition(styleView.cleanupStyle.wrappedValue == 1 && controller.cleanupPolish && !controller.cleanupProfessional && controller.cleanupSpoken)
+        styleView.cleanupStyle.wrappedValue = 0
+        controller.cleanupChoice = savedChoice
         let compact = CommandLine.arguments.contains("--compact")
         let opaque = CommandLine.arguments.contains("--opaque")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: compact ? 760 : 1000, height: compact ? 560 : args.contains("--tall") ? 1100 : 680), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
@@ -74,7 +97,7 @@ import SwiftUI
         }
         if CommandLine.arguments.contains("--matrix") && !CommandLine.arguments.contains("--empty") {
             entries += [
-                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-7200), rawText: "Synthetic failed paste.", finalText: "Synthetic failed paste.", insertionStatus: "failed"),
+                HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-7200), rawText: "Synthetic failed paste before cleanup.", finalText: "Synthetic failed paste.", insertionStatus: "failed"),
                 HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-10800), rawText: "Synthetic pending delivery. Check the target before recovering this text.\nSecond line for wrapping.", finalText: "Synthetic pending delivery. Check the target before recovering this text.\nSecond line for wrapping.", insertionStatus: "insertion-pending"),
                 HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-14400), rawText: "Synthetic saved output.", finalText: "Synthetic saved output.", insertionStatus: "saved-not-inserted"),
                 HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-18000), rawText: "Synthetic cleanup hold.", finalText: "", insertionStatus: "held-cleanup"),
@@ -100,7 +123,12 @@ import SwiftUI
             }
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }
-            if args.contains("--settings") || args.contains("--dictionary") { controller.screenRequest = "settings" }
+            if args.contains("--history") { controller.screenRequest = "history" }
+            if args.contains("--settings") { controller.screenRequest = "settings" }
+            if args.contains("--dictionary") { controller.screenRequest = "settings-4" }
+            if let flag = args.firstIndex(of: "--section"), args.indices.contains(flag + 1) {
+                controller.screenRequest = "settings-" + args[flag + 1]
+            }
             if args.contains("--speaker-settings") { controller.speakerSettings.showFixture(enabled: true, status: args.contains("--ready") ? .ready : .notDownloaded) }
             if args.contains("--meeting-settings") { controller.meetingTranscription = args.contains("--cloud") ? .cloud : .local; controller.screenRequest = "meeting-settings" }
             controller.voiceLevel = 0.6
@@ -108,6 +136,7 @@ import SwiftUI
             controller.message = CommandLine.arguments.contains("--credential-warning")
                 ? "Save the API key again for this server address."
                 : "Model verification failed. Choose the pinned model folder."
+            if args.contains("--quiet") { controller.dismissStatus() }
             if CommandLine.arguments.contains("--recovery") { controller.hasRecoveryAudio = true }
             if CommandLine.arguments.contains("--live-words") {
                 controller.showLiveWordsFixture("Synthetic live words keep the newest tail of a long dictation on two lines, with only the last word dimm")
@@ -161,7 +190,7 @@ import SwiftUI
                     // With --speakers the notes name the speaker ("Speaker 2"), and the rename below relabels them.
                     let them = MeetingSpeakers.label(call.lines[3], in: call)
                     var notes = MeetingNotes(title: "Synthetic launch checklist plan", summary: "The call went over the synthetic launch plan for next week. Me offered to draft the checklist by Thursday, and \(them) asked for it in the team channel.",
-                                             route: "Apple Intelligence (on-device, less accurate)", writtenAt: Date())
+                                             route: "Apple Intelligence (on-device)", writtenAt: Date())
                     notes.keyPoints = [NoteItem(text: "The synthetic launch plan is for next week", lines: [ids[0]])]
                     notes.decisions = [NoteItem(text: "Share the checklist in the team channel", lines: [ids[2], ids[3]])]
                     notes.actions = [NoteItem(text: "Draft the checklist", lines: [ids[2], ids[3]], owner: "Me", due: "Thursday", done: false),

@@ -2052,7 +2052,7 @@ final class PreStart: @unchecked Sendable {
         let route = meetingNotesRoute ?? .none
         let built = meetingNotesProvider(route)
         guard let provider = built.provider else { throw NotesFailure.failed(built.refusal ?? "Notes could not be written.") }
-        let name = route == .appleIntelligence ? "Apple Intelligence (on-device, less accurate)" : provider.id.displayName
+        let name = route == .appleIntelligence ? "Apple Intelligence (on-device)" : provider.id.displayName
         let structured = route == .appleIntelligence
         return try await MeetingNotesWriter.write(meeting, route: route, routeName: name, structured: structured) { system, user in
             do { return structured ? try await AppleSystemModel.notes(system: system, user: user) : try await provider.cleanup(CleanupMessages(system: system, user: user)) }
@@ -2064,6 +2064,7 @@ final class PreStart: @unchecked Sendable {
 
     /// Shows or hides the live meeting panel; set by the app delegate.
     var meetingPanelChanged: (() -> Void)?
+    private lazy var meetingConsent = MeetingConsentPresenter()
     /// Start from the Meetings page, Home or the menu bar. Meetings need the local model (Q2).
     func startMeeting(_ source: MeetingSource) {
         var cloud: MeetingRoute.Cloud?, cloudName: String?
@@ -2090,7 +2091,17 @@ final class PreStart: @unchecked Sendable {
             meetingRecorder.message = "Meeting notes transcribe on this Mac. Download the speech model in Settings → Transcription first."
             screenRequest = "meetings"; openSettings?(); return
         }
-        if !meetingRecorder.start(source, cloud: cloud, cloudName: cloudName), meetingRecorder.consentPending != nil { screenRequest = "meetings"; openSettings?() }
+        if !meetingRecorder.start(source, cloud: cloud, cloudName: cloudName) {
+            if let pending = meetingRecorder.consentPending {
+                meetingConsent.show(source: pending) { [weak self] acknowledged in
+                    guard let self else { return }
+                    self.meetingRecorder.consentPending = nil
+                    if acknowledged { MeetingConsent.acknowledge(.standard); self.startMeeting(pending) }
+                }
+            } else {
+                screenRequest = "meetings"; openSettings?()
+            }
+        }
     }
 
     // MARK: History cap and Delete All Data (R9, §6)

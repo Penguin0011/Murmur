@@ -1,143 +1,111 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-03T04:28:44.785144+00:00",
-  "title": "Design System: Dictation",
+  "generatedAt": "2026-10-16T20:37:20.375535+00:00",
+  "title": "Design System: Murmur",
   "extensions": {
     "nativeMacOS": {
       "platform": "macos",
       "minimumVersion": "26",
-      "mode": "operate",
-      "source": "app/UI.swift",
-      "semanticColors": {
-        "foreground": "SwiftUI.primary",
-        "muted": "Color.primary.opacity(0.72) for authored supporting text, metadata, and search prompt",
-        "accent": "Color.accentColor",
-        "attention": "Color.orange for Settings error-state icon",
-        "surface": "NSColor.windowBackgroundColor",
-        "prominentAction": "NSColor.controlAccentColor background; Color.white label",
-        "selectedHistoryText": "Color.primary",
-        "modelAttentionText": "Color.primary"
-      },
-      "typography": {
-        "windowTitle": "largeTitle.weight(.semibold)",
-        "historyTitle": "title2.weight(.semibold)",
-        "label": "headline",
-        "content": "callout",
-        "metadata": "caption",
-        "prominentGlassAction": "system(size: 14, weight: .bold); white foreground applied inside actual Text/Label"
-      },
-      "materials": {
-        "utility": "glassEffect(.regular, in: RoundedRectangle)",
-        "button": "glass / glassProminent",
-        "bubbleButtons": "bordered, small control size",
-        "fallback": "windowBackgroundColor; bordered / borderedProminent",
-        "fallbackCondition": "utilityOpaquePreview || accessibilityReduceTransparency || colorSchemeContrast == .increased",
-        "previewOverride": "utilityOpaquePreview supplied only by synthetic fixture; does not modify system accessibility preferences"
-      },
-      "layout": {
-        "searchWidthPoints": 220,
-        "historyListWidthPoints": {
-          "min": 210,
-          "ideal": 240,
-          "max": 300
-        },
-        "historyDetailMinimumPoints": 300,
-        "glassContainerSpacingPoints": 12,
-        "bubbleWidth": "80pt transparent live; min(240, max(180, screen.visibleFrame.width - 32)) error",
-        "bubbleBottomOffsetPoints": 24,
-        "windowContentMinimumPoints": [
-          700,
-          560
-        ],
-        "windowChrome": "NSWindow transparent titlebar, hidden title; app/main.swift",
-        "windowInitialRequestedContentRectPoints": [
-          820,
-          660
-        ],
-        "capturedWindowIncludingChromePoints": {
-          "regular": [
-            820,
-            744
-          ],
-          "compact": [
-            700,
-            644
-          ]
-        },
-        "fixtureRegularContentLayoutRectPoints": [
-          820,
-          692
-        ]
-      },
+      "sources": [
+        "app/UI.swift",
+        "app/MeetingsUI.swift"
+      ],
+      "authority": "User-supplied Murmur Settings Final standalone.html; active balanced variant. [Certain]",
+      "scope": "Source inspection of the rebuilt main window; floating indicators preserve their existing native macOS treatment. [Certain]",
+      "exceptions": [
+        "Floating meeting recording panel retains system typography. [Certain]",
+        "Speaker settings subsection retains some system-font labels. [Certain]"
+      ],
+      "selection": "2pt accent-ink underline on sidebar, segmented choices, setup steps, and Meetings detail tabs; selected accessibility traits. [Certain]",
+      "switch": "44\u00d726pt capsule track; 22pt paper thumb; native Toggle accessibility representation. [Certain]",
+      "appearance": "System, Light, Dark are main-window scoped; floating indicators follow system appearance. [Certain]",
+      "verification": "Documentation extracted from source only; no runtime or visual validation claimed by this documentation pass. [Certain]",
       "components": [
-        {
-          "name": "UtilityGlass",
-          "source": "app/UI.swift",
-          "swiftUI": "content.modifier(UtilityGlass())"
-        },
         {
           "name": "Primary action",
           "source": "app/UI.swift",
-          "swiftUI": "Button(action: controller.applySettings) { Text(\"Apply Settings\").foregroundStyle(.white) }.modifier(UtilityButton(prominent: true))"
+          "swiftUI": "Button(\"Action\", action: {}).buttonStyle(InkButtonStyle(kind: .filled))"
         },
         {
-          "name": "Secondary action",
+          "name": "Outlined action",
           "source": "app/UI.swift",
-          "swiftUI": "Button(\"Refresh\", action: controller.refreshHistory).modifier(UtilityButton())"
+          "swiftUI": "Button(\"Action\", action: {}).buttonStyle(InkButtonStyle(kind: .outline))"
         },
         {
-          "name": "Navigation",
+          "name": "Accent action",
           "source": "app/UI.swift",
-          "swiftUI": "TabView(selection: $selectedTab)"
+          "swiftUI": "Button(\"Action\", action: {}).buttonStyle(InkButtonStyle(kind: .accent))"
         },
         {
-          "name": "Transcript search",
+          "name": "Switch",
           "source": "app/UI.swift",
-          "swiftUI": "TextField(\"\", text: $searchText).textFieldStyle(.plain) with accessible label and noninteractive Color.primary.opacity(0.72) placeholder overlay"
+          "swiftUI": "Toggle(\"Setting\", isOn: binding).toggleStyle(MurmurToggleStyle())"
+        },
+        {
+          "name": "Native floating material",
+          "source": "app/UI.swift",
+          "swiftUI": "content.modifier(UtilityGlass(radius: 18))"
         }
       ],
-      "verification": "Integrated source compilation passed. Lead captured runtime/glass-review/dark-bubble.png and clicked native Dismiss; fixture assertion confirmed synthetic recovery history was preserved. AX inspection timed out after the panel successfully hid. Light, dark, and forced opaque compact captures reviewed; scoped contrast findings resolved, search placeholder approximately 5.8:1 in light capture; no real destination focus, physical recording, or live insertion verification claimed."
-    },
-    "shadows": [
-      {
-        "name": "floating-panel",
-        "value": "NSPanel.hasShadow = true",
-        "purpose": "Native shadow on the nonactivating bubble."
+      "layout": {
+        "sidebar": "184pt width; 24pt leading, 16pt trailing; 36pt minimum rows, 2pt gaps. [Certain]",
+        "meetings": "At content width \u2265680pt, 200pt list beside detail; below 680pt, search and native meeting picker above detail. Selection stays within search results. [Certain]",
+        "setup": "5:7 split on paper with 24pt insets; five numbered steps with selected underline; monochrome mark. [Certain]",
+        "historyActions": "ViewThatFits keeps a horizontal action row when all labels fit; otherwise it stacks Copy Text, Copy Raw, Edit, and Delete vertically. [Certain]",
+        "windowGutters": "24pt horizontal; 12pt header top and 16pt page top; Settings, Home, and Insights fill available content width. [Certain]",
+        "history": "24pt outer gutters, 80pt day column, 16pt column gap; no nested indent on expanded entries. [Certain]",
+        "settingsDensity": "40pt serif title, 14pt introduction with 6pt top/8pt bottom gaps; shared toggle rows use 10pt vertical insets while retaining the 40pt minimum interaction height. [Certain]"
       }
-    ],
+    },
     "motion": [
       {
-        "name": "status",
-        "value": "No authored animation",
-        "purpose": "Immediate state replacement; platform controls own native feedback."
+        "name": "button-press",
+        "value": "opacity 0.7",
+        "purpose": "Shared button pressed feedback. [Certain]"
+      }
+    ],
+    "materials": [
+      {
+        "name": "floating-native-glass",
+        "value": "UtilityGlass / native glassEffect",
+        "purpose": "Floating panels only; UtilityGlass uses opaque fallback for Reduce Transparency or Increase Contrast. [Certain]"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "meeting-list-detail",
+        "value": "680pt content width"
       }
     ]
   },
   "components": [],
   "narrative": {
-    "northStar": "Native glass, calm content",
-    "overview": "Native macOS Liquid Glass lifts status and actions above calm, readable content. Settings retain native forms and navigation; History keeps a selectable list and readable transcript detail. [Certain]",
+    "northStar": "User-supplied balanced reference",
+    "overview": "Expressive serif headings, quiet sans-serif content, text navigation, restrained blue underlines, and pill actions in the native macOS main window. [Certain]",
     "keyCharacteristics": [
-      "System typography and semantic colors. [Certain]",
-      "Glass for status, search, and actions; opaque reading surfaces. [Certain]",
-      "Nonactivating recording bubble with explicit recovery. [Certain]"
+      "Flat paper and ink window surfaces. [Certain]",
+      "Instrument Serif display and DM Sans reading text in the rebuilt main window. [Certain]",
+      "Native floating indicators remain a separate material and typography exception. [Certain]"
     ],
     "rules": [
       {
-        "name": "The One Glass Layer Rule",
-        "body": "Keep the bubble's own controls bordered; never place glass buttons inside its glass surface.",
+        "name": "Reference authority",
+        "body": "Use the supplied active balanced variant for the main window.",
+        "section": "typography"
+      },
+      {
+        "name": "Native floating exception",
+        "body": "Preserve the existing native macOS floating indicator treatment.",
         "section": "elevation"
       }
     ],
     "dos": [
-      "Do use native glassEffect and system button styles.",
-      "Do keep transcripts and grouped settings readable on calm surfaces.",
-      "Do provide opaque fallbacks and explicit labels for icon actions."
+      "Do preserve native macOS keyboard and accessibility semantics.",
+      "Do use underline selection and pill actions in rebuilt window controls."
     ],
     "donts": [
-      "Don't imitate glass with custom blur, gradients, or extra shadows.",
-      "Don't stack glass cards or put glass controls inside a glass bubble.",
-      "Don't replace system type or semantic colors with hard-coded approximations."
+      "Don't extend window typography into native floating indicators without a separate decision.",
+      "Don't equate source inspection with runtime validation."
     ]
   }
 }

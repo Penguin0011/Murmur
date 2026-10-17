@@ -615,9 +615,9 @@ struct OpenAICompatibleTranscriptionProvider: TranscriptionProvider {
                                   retentionNote: "Audio goes only to the server on this Mac; its logging settings apply.")
         case .leavesDevice(let host, let encrypted):
             return DataDisclosure(provider: id, stage: .transcription, destinationHost: host,
-                                  leavesDevice: ["the audio"],
-                                  staysOnDevice: ["the dictionary", "history"],
-                                  retentionNote: "Retention is up to whoever runs that server.",
+                                  leavesDevice: ["audio"],
+                                  staysOnDevice: ["dictionary", "history"],
+                                  retentionNote: "Server retention applies.",
                                   warning: encrypted ? nil : "Audio is sent over unencrypted http. Your API key is not sent; use https to send it.")
         }
     }

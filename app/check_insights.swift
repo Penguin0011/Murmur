@@ -55,7 +55,18 @@ func stats(_ items: [InsightsItem], calendar: Calendar = utc, at: Date = now) ->
 
         // Apps, where History has them.
         let apps = stats([item(0, app: "com.apple.TextEdit"), item(0, app: "com.apple.mail"), item(1, app: "com.apple.mail"), item(1)])
-        check(apps?.apps == [.init(app: "com.apple.mail", count: 2), .init(app: "com.apple.TextEdit", count: 1)] && apps?.withoutApp == 1, "apps ranked, unknown counted apart")
+        check(apps?.apps == [.init(app: "com.apple.mail", count: 2, words: 4), .init(app: "com.apple.TextEdit", count: 1, words: 2)] && apps?.withoutApp == 1, "apps ranked, unknown counted apart")
+
+        check(near(mixed?.recordingSeconds, 24), "recording time pools valid durations")
+        check(untimed?.recordingSeconds == nil, "missing duration stays unknown")
+        let activity = stats([item(0, raw: "one two three", seconds: 8, app: "a"), item(0, raw: "one", seconds: .infinity, app: "b"), item(1, raw: "one two", seconds: -1, app: "b")])!
+        check(activity.dailyWords[utc.startOfDay(for: now)] == 4 && activity.dailyWords.count == 2, "daily words grouped by local day")
+        check(activity.hourlyDictations.reduce(0, +) == 3 && activity.hourlyDictations[utc.component(.hour, from: now)] == 3, "hourly activity includes untimed entries")
+        check(near(activity.averageWords, 2) && near(activity.recordingSeconds, 8), "average words and invalid durations")
+        check(activity.apps.map(\.app) == ["a", "b"], "equal app words use stable identifier order")
+        let byWords = stats([item(0, raw: "one two three four", app: "a"), item(0, raw: "one", app: "b"), item(1, raw: "two", app: "b")])!
+        check(byWords.apps.first?.app == "a", "apps rank by words rather than dictation count")
+        check(stats([item(0)], calendar: calendar("Asia/Tokyo"))?.hourlyDictations[calendar("Asia/Tokyo").component(.hour, from: now)] == 1, "hours follow local timezone")
 
         // Streaks.
         check(stats([item(0), item(1), item(2), item(5), item(6)]).map { [$0.currentStreak, $0.longestStreak] } == [3, 3], "current and longest")

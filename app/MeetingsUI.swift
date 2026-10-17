@@ -8,7 +8,7 @@ private func mono(_ text: String, size: CGFloat = 12, color: Color = Palette.ink
     Text(text).font(.system(size: size, design: .monospaced)).tracking(size * 0.08).textCase(.uppercase).foregroundStyle(color)
 }
 private func lede(_ text: String, color: Color = Palette.ink70) -> some View {
-    Text(text).font(.system(size: 14)).lineSpacing(2).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
+    Text(text).font(WindowType.body(14)).lineSpacing(2).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
 }
 
 /// The Start menu (Q1): running call apps first, then All apps, then the microphone alone.
@@ -26,8 +26,8 @@ struct MeetingStartMenu: View {
             Button("All apps (includes music and notifications)") { controller.startMeeting(.everything) }
             Button("Only my microphone") { controller.startMeeting(.microphoneOnly) }
         } label: {
-            Text(title).font(.system(size: 15, weight: .semibold)).padding(.horizontal, 16).frame(height: 44)
-                .foregroundStyle(Palette.paper).background(Palette.ink)
+            Text(title).font(WindowType.body(14, weight: .semibold)).padding(.horizontal, 18).frame(height: 36)
+                .foregroundStyle(Palette.paper).background(Palette.ink, in: Capsule())
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .disabled(controller.meetingRecorder.live != nil)
@@ -41,8 +41,13 @@ struct MeetingsPage: View {
     @State private var selectedID: String?
     @State private var showEcho = false
     @State private var search = ""
+    @State private var dateFilter = MeetingDateFilter.all
+    @State private var fromDate = Calendar.current.date(byAdding: .day, value: -29, to: Date()) ?? Date()
+    @State private var throughDate = Date()
     @State private var notesDraft = ""
-    @State private var confirmDelete: Meeting?
+    @State private var confirmDelete: [Meeting] = []
+    @State private var selecting = false
+    @State private var deletionIDs: Set<String> = []
     @State private var tab = MeetingsPage.initialTab
     /// The speaker being renamed (W7d) and the name typed so far.
     @State private var renaming: Int?
@@ -54,21 +59,37 @@ struct MeetingsPage: View {
 
     enum DetailTab: String, CaseIterable { case notes = "Notes", transcript = "Transcript", mine = "My notes" }
 
-    private var filtered: [Meeting] {
-        let query = search.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !query.isEmpty else { return recorder.meetings }
-        return recorder.meetings.filter { $0.title.lowercased().contains(query) || $0.lines.contains { $0.text.lowercased().contains(query) } }
+    private enum MeetingDateFilter: String, CaseIterable {
+        case all = "All dates", today = "Today", week = "Last 7 days", month = "Last 30 days", custom = "Date range…"
     }
-    private var selected: Meeting? { recorder.meetings.first { $0.id == selectedID } ?? filtered.first }
+
+    private var filtered: [Meeting] {
+        let today = Calendar.current.startOfDay(for: Date())
+        let from: Date?, through: Date?
+        switch dateFilter {
+        case .all: from = nil; through = nil
+        case .today: from = today; through = today
+        case .week: from = Calendar.current.date(byAdding: .day, value: -6, to: today); through = today
+        case .month: from = Calendar.current.date(byAdding: .day, value: -29, to: today); through = today
+        case .custom: from = fromDate; through = throughDate
+        }
+        return recorder.meetings.filter { $0.matches(query: search, from: from, through: through) }
+    }
+    private var selected: Meeting? { filtered.first { $0.id == selectedID } ?? filtered.first }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Meetings").font(.system(size: 28, weight: .bold)).tracking(-0.8)
-                    lede(controller.speakerSettings.enabled
+                    Text("Meetings").font(WindowType.display(40)).tracking(-0.8)
+                    Text("Find transcripts and notes from your calls.")
+                        .font(WindowType.body(14)).foregroundStyle(Palette.ink70)
+                    DisclosureGroup("Audio and privacy") {
+                        lede(controller.speakerSettings.enabled
                          ? "Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Your audio is deleted as soon as it is transcribed; the call’s is kept until its speakers are separated, at most 24 hours."
                          : "Your microphone as Me and the call’s audio as Them, transcribed on this Mac. Audio is deleted as soon as it is transcribed.")
+                    }
+                    .font(WindowType.body(13))
                 }
                 Spacer()
                 if let live = recorder.live {
@@ -81,10 +102,26 @@ struct MeetingsPage: View {
                     MeetingStartMenu(controller: controller)
                 }
             }
-            .padding(.horizontal, 24).padding(.vertical, 20)
+            .padding(.horizontal, 24).padding(.vertical, 12)
+            if !recorder.meetings.isEmpty {
+                HStack(spacing: 12) {
+                    if selecting {
+                        Text("\(deletionIDs.count) selected").font(WindowType.body(14, weight: .semibold))
+                        Button("Select All") { deletionIDs.formUnion(filtered.filter { $0.id != recorder.live?.id }.map(\.id)) }
+                            .buttonStyle(InkButtonStyle(kind: .plain))
+                        Spacer()
+                        Button("Cancel") { selecting = false; deletionIDs.removeAll() }.buttonStyle(InkButtonStyle(kind: .plain))
+                        Button("Delete Selected…") { confirmDelete = recorder.meetings.filter { deletionIDs.contains($0.id) } }
+                            .buttonStyle(InkButtonStyle(kind: .outline)).disabled(deletionIDs.isEmpty)
+                    } else {
+                        Spacer()
+                        Button("Select Meetings") { selecting = true }.buttonStyle(InkButtonStyle(kind: .plain))
+                    }
+                }.padding(.horizontal, 24).padding(.bottom, 12)
+            }
             if let message = recorder.message {
                 HStack {
-                    Text(message).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
+                    Text(message).font(WindowType.body(14)).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button { recorder.message = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain).accessibilityLabel("Dismiss")
                 }
@@ -101,23 +138,39 @@ struct MeetingsPage: View {
                 }
                 .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
-                HStack(spacing: 0) {
-                    list.frame(width: 280)
-                    Rectangle().fill(Palette.ink20).frame(width: 1)
-                    if let meeting = selected { detail(meeting) } else { Spacer() }
+                meetingFilters
+                GeometryReader { geometry in
+                    if filtered.isEmpty {
+                        noMatches
+                    } else if selecting {
+                        list
+                    } else if geometry.size.width < 680 {
+                        if selectedID != nil, let meeting = selected {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Button { selectedID = nil } label: {
+                                    Label("All meetings", systemImage: "chevron.left")
+                                }.buttonStyle(InkButtonStyle(kind: .plain)).padding(.horizontal, 24)
+                                detail(meeting)
+                            }
+                        } else {
+                            list
+                        }
+                    } else {
+                        HStack(spacing: 0) {
+                            list.frame(width: 200)
+                            Rectangle().fill(Palette.ink20).frame(width: 1)
+                            if let meeting = selected { detail(meeting) } else { noMatches }
+                        }
+                    }
                 }
             }
         }
-        .sheet(item: Binding(get: { recorder.consentPending.map(ConsentItem.init) }, set: { if $0 == nil { recorder.consentPending = nil } })) { item in
-            MeetingConsentSheet(source: item.source) { acknowledged in
-                recorder.consentPending = nil
-                if acknowledged { MeetingConsent.acknowledge(.standard); controller.startMeeting(item.source) }
-            }
+        .sheet(isPresented: Binding(get: { !confirmDelete.isEmpty }, set: { if !$0 { confirmDelete = [] } })) {
+            deletionConfirmation
         }
-        .alert("Delete this meeting?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } })) {
-            Button("Delete", role: .destructive) { if let meeting = confirmDelete { recorder.delete(meeting.id); selectedID = nil } }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("The transcript, its notes and your own notes are deleted. This cannot be undone.") }
+        .onChange(of: recorder.meetings.map(\.id)) {
+            deletionIDs.formIntersection(recorder.meetings.map(\.id))
+        }
         .background(Color.clear.sheet(isPresented: Binding(get: { recorder.notesChoicePending != nil && recorder.consentPending == nil }, set: { if !$0 { recorder.notesChoicePending = nil } })) {
             MeetingNotesChoiceSheet(controller: controller) { route in
                 controller.meetingNotesRoute = route
@@ -126,45 +179,147 @@ struct MeetingsPage: View {
         })
     }
 
+    private var meetingFilters: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { topicSearch; datePicker }
+                VStack(alignment: .leading, spacing: 10) { topicSearch; datePicker }
+            }
+            if dateFilter == .custom {
+                HStack(spacing: 16) {
+                    DatePicker("From", selection: $fromDate, in: ...throughDate, displayedComponents: .date)
+                    DatePicker("Through", selection: $throughDate, in: fromDate..., displayedComponents: .date)
+                }.font(WindowType.body(13))
+            }
+            HStack {
+                Text("\(filtered.count) of \(recorder.meetings.count) meetings").font(WindowType.body(12)).foregroundStyle(Palette.ink70)
+                Spacer()
+                if !search.isEmpty || dateFilter != .all {
+                    Button("Clear filters") { search = ""; dateFilter = .all }
+                        .font(WindowType.body(12)).buttonStyle(.plain).foregroundStyle(Palette.accentInk)
+                }
+            }
+        }.padding(.horizontal, 24).padding(.vertical, 12)
+    }
+
+    private var topicSearch: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Palette.ink70).accessibilityHidden(true)
+            TextField("Search topics, summaries and notes", text: $search)
+                .textFieldStyle(.plain).font(WindowType.body(14)).accessibilityLabel("Search meeting topics, summaries, notes and transcripts")
+            if !search.isEmpty {
+                Button { search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain).foregroundStyle(Palette.ink70).accessibilityLabel("Clear search")
+            }
+        }.padding(.horizontal, 12).frame(minWidth: 210, minHeight: 44)
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.ink20, lineWidth: 1))
+    }
+
+    private var datePicker: some View {
+        Picker("Meeting dates", selection: $dateFilter) {
+            ForEach(MeetingDateFilter.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }.labelsHidden().pickerStyle(.menu).font(WindowType.body(14)).fixedSize()
+            .frame(minHeight: 44).accessibilityLabel("Filter meetings by date")
+    }
+
+    private var noMatches: some View {
+        VStack(spacing: 12) {
+            Text("No matching meetings").font(WindowType.body(18, weight: .semibold))
+            lede("Try another topic or date range.")
+            Button("Clear filters") { search = ""; dateFilter = .all }.buttonStyle(InkButtonStyle(kind: .outline))
+        }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(24)
+    }
+
     private var list: some View {
         VStack(spacing: 0) {
-            TextField("Search meetings", text: $search).textFieldStyle(.plain).font(.system(size: 14))
-                .padding(.horizontal, 12).frame(height: 40).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink20).frame(height: 1) }
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(filtered) { meeting in
-                        Button { selectedID = meeting.id; notesDraft = meeting.myNotes } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(meeting.title).font(.system(size: 14, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
-                                HStack(spacing: 8) {
-                                    mono(MeetingExport.clock(meeting.seconds), size: 11, color: Palette.ink70)
-                                    if recorder.finishing.contains(meeting.id) { mono("Finishing", size: 11, color: Palette.accentDeep) }
-                                    else if recorder.separating.contains(meeting.id) { mono("Separating speakers", size: 11, color: Palette.accentDeep) }
-                                    else if let left = recorder.leftovers[meeting.id] { mono("\(left) parts left", size: 11, color: Palette.accentDeep) }
-                                }
+                        Group {
+                            if selecting {
+                                Toggle(isOn: Binding(get: { deletionIDs.contains(meeting.id) }, set: { on in
+                                    if on { deletionIDs.insert(meeting.id) } else { deletionIDs.remove(meeting.id) }
+                                })) { meetingLabel(meeting) }
+                                .toggleStyle(.checkbox).disabled(meeting.id == recorder.live?.id)
+                                .padding(12).background(deletionIDs.contains(meeting.id) ? Palette.accent16 : Color.clear)
+                            } else {
+                                Button { selectedID = meeting.id; notesDraft = meeting.myNotes } label: {
+                                    meetingLabel(meeting)
+                                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(selected?.id == meeting.id ? Palette.accent16 : Color.clear).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
                             }
-                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(selected?.id == meeting.id ? Palette.accent16 : Color.clear).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain).overlay(alignment: .bottom) { Rectangle().fill(Palette.ink20).frame(height: 1) }
+                        }.overlay(alignment: .bottom) { Rectangle().fill(Palette.ink20).frame(height: 1) }
                     }
                 }
             }
         }
     }
 
+    private func meetingLabel(_ meeting: Meeting) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(meeting.title).font(WindowType.body(14, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
+            let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let preview = meeting.searchDetails.first(where: { !query.isEmpty && $0.localizedStandardContains(query) }) ?? meeting.searchDetails.first {
+                Text(preview).font(WindowType.body(12)).foregroundStyle(Palette.ink70).lineLimit(2).multilineTextAlignment(.leading)
+            }
+            HStack(spacing: 8) {
+                mono(MeetingExport.clock(meeting.seconds), size: 11, color: Palette.ink70)
+                Text(meeting.recordedAt, format: .dateTime.month(.abbreviated).day())
+                    .font(WindowType.body(11)).foregroundStyle(Palette.ink70)
+                if recorder.finishing.contains(meeting.id) { mono("Finishing", size: 11, color: Palette.accentDeep) }
+                else if recorder.separating.contains(meeting.id) { mono("Separating speakers", size: 11, color: Palette.accentDeep) }
+                else if let left = recorder.leftovers[meeting.id] { mono("\(left) parts left", size: 11, color: Palette.accentDeep) }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var deletionConfirmation: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(confirmDelete.count == 1 ? "Delete this meeting?" : "Delete \(confirmDelete.count) meetings?")
+                .font(WindowType.body(22, weight: .bold))
+            lede("This permanently deletes the selected meetings, transcripts, generated notes, your own notes and any retained audio. This cannot be undone.")
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(confirmDelete) { meeting in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(meeting.title).font(WindowType.body(14, weight: .semibold))
+                            Text(meeting.recordedAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(WindowType.body(12)).foregroundStyle(Palette.ink70)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }.frame(maxHeight: 220)
+            HStack {
+                Spacer()
+                Button("Cancel") { confirmDelete = [] }.buttonStyle(InkButtonStyle(kind: .outline)).keyboardShortcut(.cancelAction)
+                Button(confirmDelete.count == 1 ? "Delete Meeting" : "Delete \(confirmDelete.count) Meetings", role: .destructive) {
+                    let requested = Set(confirmDelete.map(\.id))
+                    deletionIDs = recorder.delete(requested)
+                    selecting = !deletionIDs.isEmpty
+                    if let selectedID, requested.contains(selectedID) { self.selectedID = nil }
+                    if !deletionIDs.isEmpty { recorder.message = "Could not delete \(deletionIDs.count) meeting(s). They remain selected; try again." }
+                    confirmDelete = []
+                }.buttonStyle(InkButtonStyle(kind: .filled))
+            }
+        }.padding(24).frame(width: 460).foregroundStyle(Palette.ink).background(Palette.paper)
+    }
+
     private func detail(_ meeting: Meeting) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text(meeting.title).font(.system(size: 22, weight: .bold)).tracking(-0.5).textSelection(.enabled)
+                    Text(meeting.title).font(WindowType.body(22, weight: .bold)).tracking(-0.5).textSelection(.enabled)
                     mono("\(MeetingExport.clock(meeting.seconds)) · \(meeting.source.micOnly ? "My microphone only" : "Me and \(meeting.source.name)") · \(meeting.transcribedBy.map { "Transcribed by \($0)" } ?? "Transcribed on this Mac")", size: 11, color: Palette.ink70)
-                    HStack(spacing: 12) {
+                    let actions = Group {
                         if meeting.notes?.isEmpty == false { Button("Copy Notes") { recorder.copyNotes(meeting) }.buttonStyle(InkButtonStyle(kind: .outline)) }
                         Button("Copy Transcript") { recorder.copyTranscript(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
                         Button("Save Markdown…") { recorder.saveMarkdown(meeting) }.buttonStyle(InkButtonStyle(kind: .outline))
-                        Spacer()
-                        Button("Delete…") { confirmDelete = meeting }.buttonStyle(InkButtonStyle(kind: .plain))
+                        Button("Delete…") { confirmDelete = [meeting] }.buttonStyle(InkButtonStyle(kind: .plain)).disabled(meeting.id == recorder.live?.id)
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { actions }.fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: 8) { actions }
                     }
                     if recorder.finishing.contains(meeting.id) { lede("Finishing the transcript…", color: Palette.accentDeep) }
                     else if let left = recorder.leftovers[meeting.id] {
@@ -173,12 +328,13 @@ struct MeetingsPage: View {
                             Button("Finish Transcript") { recorder.finishLeftovers(meeting.id) }.buttonStyle(InkButtonStyle(kind: .filled))
                         }
                     }
-                    HStack(spacing: -1.5) {
+                    HStack(spacing: 12) {
                         ForEach(DetailTab.allCases, id: \.self) { item in
                             Button { tab = item } label: {
-                                Text(item.rawValue).font(.system(size: 13, weight: .semibold)).padding(.horizontal, 14).frame(height: 32)
-                                    .foregroundStyle(tab == item ? Palette.paper : Palette.ink).background(tab == item ? Palette.ink : Color.clear)
-                                    .overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5)).contentShape(Rectangle())
+                                Text(item.rawValue).font(WindowType.body(13, weight: .semibold)).padding(.horizontal, 14).frame(height: 32)
+                                    .foregroundStyle(tab == item ? Palette.ink : Palette.ink70)
+                                    .overlay(alignment: .bottom) { Rectangle().fill(tab == item ? Palette.accentInk : Color.clear).frame(height: 2) }
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain).accessibilityAddTraits(tab == item ? .isSelected : [])
                         }
@@ -187,7 +343,7 @@ struct MeetingsPage: View {
                     switch tab {
                     case .notes: notesTab(meeting)
                     case .mine:
-                        TextEditor(text: $notesDraft).font(.system(size: 14)).scrollContentBackground(.hidden).frame(minHeight: 160)
+                        TextEditor(text: $notesDraft).font(WindowType.body(14)).scrollContentBackground(.hidden).frame(minHeight: 160)
                             .padding(6).overlay(Rectangle().strokeBorder(Palette.ink, lineWidth: 1.5))
                             .onChange(of: notesDraft) { if notesDraft != meeting.myNotes { recorder.setNotes(notesDraft, for: meeting.id) } }
                             .onAppear { notesDraft = meeting.myNotes }
@@ -197,7 +353,7 @@ struct MeetingsPage: View {
                         HStack {
                             Spacer()
                             if meeting.lines.contains(where: { $0.shown != nil }) {
-                                Toggle("Show hidden echo", isOn: $showEcho).toggleStyle(.checkbox).font(.system(size: 13))
+                                Toggle("Show hidden echo", isOn: $showEcho).toggleStyle(.checkbox).font(WindowType.body(13))
                             }
                         }
                         if meeting.lines.isEmpty { lede("No words were transcribed.") }
@@ -247,7 +403,7 @@ struct MeetingsPage: View {
                 }
             }
             if notes.isEmpty { lede("Nothing in the transcript could be written up as a point, decision or action item.") }
-            if let summary = notes.summary { Text(summary).font(.system(size: 15)).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+            if let summary = notes.summary { Text(summary).font(WindowType.body(15)).lineSpacing(3).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
             noteSection("Key points", notes.keyPoints, meeting: meeting)
             noteSection("Decisions", notes.decisions, meeting: meeting)
             noteSection("Action items", notes.actions, meeting: meeting, actions: true)
@@ -316,9 +472,9 @@ struct MeetingsPage: View {
                         if actions {
                             Toggle("", isOn: Binding(get: { item.done == true }, set: { _ in recorder.toggleAction(index, of: meeting.id) }))
                                 .toggleStyle(.checkbox).labelsHidden().accessibilityLabel(item.done == true ? "Done" : "Not done")
-                        } else { Text("•").font(.system(size: 14)).accessibilityHidden(true) }
+                        } else { Text("•").font(WindowType.body(14)).accessibilityHidden(true) }
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(item.text).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            Text(item.text).font(WindowType.body(14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                                 .strikethrough(item.done == true)
                             HStack(spacing: 8) {
                                 if let owner = item.owner { mono(owner, size: 10, color: Palette.ink70) }
@@ -342,14 +498,17 @@ struct MeetingsPage: View {
 /// The notes route options with the selected route's disclosure (Settings, and the first-Stop question).
 struct MeetingNotesRoutePicker: View {
     @ObservedObject var controller: AppController
+    var tooltipDetails = false
     @Binding var selection: MeetingNotesRoute
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Picker("Meeting notes", selection: $selection) {
-                ForEach(MeetingNotesRoute.allCases, id: \.self) { Text($0.label).tag($0) }
+            segmented([(MeetingNotesRoute.none, "None (transcript only)"), (.appleIntelligence, "Apple Intelligence")], $selection, size: 14)
+            segmented([(MeetingNotesRoute.customAPI, "Custom Provider"), (.gemini, "Gemini")], $selection, size: 14)
+            HStack(spacing: 4) {
+                if selection == .appleIntelligence { lede("On-device", color: Palette.ink70) }
+                if tooltipDetails && selection != .appleIntelligence { SettingInfoButton(text: controller.meetingNotesDisclosure(selection)) }
             }
-            .pickerStyle(.radioGroup).labelsHidden().font(.system(size: 14))
-            lede(controller.meetingNotesDisclosure(selection), color: Palette.ink)
+            if !tooltipDetails { lede(controller.meetingNotesDisclosure(selection), color: Palette.ink) }
             if selection != MeetingNotesRoute.none, let refusal = controller.meetingNotesSetupProblem(selection) { lede(refusal, color: Palette.accentDeep) }
         }
     }
@@ -362,7 +521,7 @@ struct MeetingNotesChoiceSheet: View {
     @State private var route = MeetingNotesRoute.none
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Write notes for your meetings?").font(.system(size: 20, weight: .bold))
+            Text("Write notes for your meetings?").font(WindowType.body(20, weight: .bold))
             lede("After Stop, a model can write a title, a summary, key points, decisions and action items from the transcript. Each item cites the lines it rests on, and items the transcript does not support are left out. You can change this in Settings → Meetings.")
             MeetingNotesRoutePicker(controller: controller, selection: $route)
             HStack {
@@ -374,7 +533,27 @@ struct MeetingNotesChoiceSheet: View {
     }
 }
 
-private struct ConsentItem: Identifiable { let source: MeetingSource; var id: String { source.name + (source.bundleID ?? "") } }
+/// Consent is independent of Settings, including when a detected call starts from its offer.
+@MainActor final class MeetingConsentPresenter {
+    private var panel: NSPanel?
+
+    func show(source: MeetingSource, done: @escaping (Bool) -> Void) {
+        panel?.orderOut(nil)
+        let next = NSPanel(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        next.title = "Start Meeting Notes"
+        next.isReleasedWhenClosed = false; next.hidesOnDeactivate = false
+        next.level = .floating
+        next.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let host = NSHostingView(rootView: MeetingConsentSheet(source: source) { [weak self] acknowledged in
+            self?.panel?.orderOut(nil); self?.panel = nil
+            done(acknowledged)
+        })
+        next.contentView = host
+        next.setContentSize(host.fittingSize); next.center()
+        panel = next
+        NSApp.activate(ignoringOtherApps: true); next.makeKeyAndOrderFront(nil)
+    }
+}
 
 struct MeetingLineRow: View {
     let line: MeetingLine
@@ -401,7 +580,7 @@ struct MeetingLineRow: View {
             }
             .frame(width: label == nil ? 44 : 96, alignment: .leading)
             VStack(alignment: .leading, spacing: 2) {
-                Text(showEcho ? line.text : line.visibleText).font(.system(size: 14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text(showEcho ? line.text : line.visibleText).font(WindowType.body(14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(line.isHidden ? Palette.ink45 : Palette.ink)
                 if line.localFallback == true { mono("Transcribed on this Mac: the cloud failed", size: 10, color: Palette.ink45) }
                 if showEcho && line.shown != nil { mono(line.isHidden ? "Hidden as echo" : "Echo partly hidden", size: 10, color: Palette.ink45) }
@@ -418,9 +597,9 @@ struct MeetingConsentSheet: View {
     @State private var ticked = false
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(MeetingConsent.title).font(.system(size: 20, weight: .bold))
+            Text(MeetingConsent.title).font(WindowType.body(20, weight: .bold))
             lede(MeetingConsent.body)
-            Toggle(MeetingConsent.acknowledgement, isOn: $ticked).toggleStyle(.checkbox).font(.system(size: 14, weight: .semibold))
+            Toggle(MeetingConsent.acknowledgement, isOn: $ticked).toggleStyle(.checkbox).font(WindowType.body(14, weight: .semibold))
             HStack {
                 Spacer()
                 Button("Cancel") { done(false) }.buttonStyle(InkButtonStyle(kind: .plain)).keyboardShortcut(.cancelAction)
@@ -449,19 +628,17 @@ struct MeetingLiveView: View {
 
     private var dot: some View { Circle().fill(Color.red).frame(width: 10, height: 10).accessibilityHidden(true) }
 
-    /// The minimized panel: red dot, timer and Stop. Clicking the dot or timer expands it; drag it anywhere.
+    /// Click the compact indicator to expand; drag it to move. Stop stays in the full panel.
     private var pill: some View {
-        HStack(spacing: 10) {
-            Button { collapsed = false } label: {
-                HStack(spacing: 8) { dot; mono(MeetingExport.clock(recorder.elapsed), size: 12) }.contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).help("Show the meeting panel").accessibilityLabel("Recording meeting notes, \(MeetingExport.clock(recorder.elapsed)). Show the panel")
-            Button("Stop", action: recorder.stop).buttonStyle(.plain).font(.system(size: 12, weight: .semibold))
-                .padding(.horizontal, 8).frame(height: 24).background(Palette.ink).foregroundStyle(Palette.paper)
-                .accessibilityLabel("Stop meeting notes")
+        Button { collapsed = false } label: {
+            HStack(spacing: 8) { dot; mono(MeetingExport.clock(recorder.elapsed), size: 12) }
+                .frame(width: 120, height: 40).contentShape(Capsule())
         }
-        .padding(.horizontal, 12).frame(height: 40).modifier(UtilityGlass(radius: 20))
-        .accessibilityElement(children: .contain)
+        .buttonStyle(.plain)
+        .overlay { MeetingDragHandle { collapsed = false }.accessibilityHidden(true) }
+        .help("Drag to move; click to show the meeting panel")
+        .accessibilityLabel("Recording meeting notes, \(MeetingExport.clock(recorder.elapsed)). Show the panel")
+        .modifier(UtilityGlass(radius: 20))
     }
 
     private var full: some View {
@@ -472,7 +649,7 @@ struct MeetingLiveView: View {
                 Spacer()
                 if let live = recorder.live { mono((live.source.micOnly ? "Mic only" : live.source.name) + (live.transcribedBy.map { " · " + $0 } ?? ""), size: 11, color: Palette.ink70).lineLimit(1) }
                 Button { collapsed = true } label: { Label("Minimize", systemImage: "arrow.down.right.and.arrow.up.left").labelStyle(.iconOnly).font(.system(size: 13, weight: .semibold)).frame(width: 28, height: 24).contentShape(Rectangle()) }
-                    .buttonStyle(.plain).help("Minimize to a small pill with the timer and Stop").accessibilityLabel("Minimize to a small indicator")
+                    .buttonStyle(.plain).help("Minimize to a small indicator with the recording timer").accessibilityLabel("Minimize to a small indicator")
             }
             HStack(spacing: 8) {
                 Text(MeetingConsent.reminder).font(.system(size: 13, weight: .semibold))
@@ -539,6 +716,31 @@ struct MeetingLiveView: View {
     }
 }
 
+/// Keep the compact indicator's click action while handing drags to AppKit.
+private struct MeetingDragHandle: NSViewRepresentable {
+    let clicked: () -> Void
+    func makeNSView(context: Context) -> MeetingDragView { MeetingDragView(clicked: clicked) }
+    func updateNSView(_ view: MeetingDragView, context: Context) { view.clicked = clicked }
+}
+
+final class MeetingDragView: NSView {
+    var clicked: () -> Void
+    init(clicked: @escaping () -> Void) { self.clicked = clicked; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override var acceptsFirstResponder: Bool { true }
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if next.type == .leftMouseUp { clicked(); return }
+            if hypot(next.locationInWindow.x - event.locationInWindow.x,
+                     next.locationInWindow.y - event.locationInWindow.y) >= 4 {
+                window.performDrag(with: event)
+                return
+            }
+        }
+    }
+}
+
 private final class MeetingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
@@ -587,7 +789,7 @@ private final class MeetingPanel: NSPanel {
     /// Keeps the panel's top-right corner where it was (or where it was last left) and resizes around it.
     private func place(initial: Bool = false) {
         guard let panel, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let size = collapsed ? NSSize(width: 180, height: 40) : NSSize(width: 340, height: 520)
+        let size = collapsed ? NSSize(width: 120, height: 40) : NSSize(width: 340, height: 520)
         let visible = screen.visibleFrame
         var corner = NSPoint(x: visible.maxX - 16, y: visible.maxY - 16)
         if !initial { corner = NSPoint(x: panel.frame.maxX, y: panel.frame.maxY) }
@@ -629,16 +831,19 @@ struct SpeakerSettingsSection: View {
         VStack(alignment: .leading, spacing: 10) {
             mono("Speakers", size: 11, color: Palette.accentInk).padding(.top, 18)
             Toggle(isOn: $settings.enabled) {
-                VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
                     Text(SpeakerFacts.displayName).font(.system(size: 16, weight: .semibold))
-                    lede(SpeakerFacts.explanation)
+                    SettingInfoButton(text: SpeakerFacts.explanation + (settings.row.isReady ? "" : "\n\nUntil it is downloaded, the call’s side is labelled Them and no audio is kept."))
                 }
             }
-            .toggleStyle(SquareToggleStyle())
+            .toggleStyle(MurmurToggleStyle())
             if settings.enabled {
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(settings.summary).font(.system(size: 14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 4) {
+                            Text("pyannote community-1").font(WindowType.body(14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                            ModelInfoIcons(license: SpeakerFacts.credits, details: settings.summary)
+                        }
                         if settings.row.isReady { mono("Ready ✓", color: Palette.accentInk) }
                         else { lede(settings.row.statusText) }
                     }
@@ -652,9 +857,7 @@ struct SpeakerSettingsSection: View {
                 if let progress = settings.row.progress {
                     ProgressView(value: progress).accessibilityLabel("Download progress")
                 }
-                if !settings.row.isReady { lede("Until it is downloaded, the call’s side is labelled Them and no audio is kept.", color: Palette.ink64) }
                 if !settings.message.isEmpty { lede(settings.message, color: Palette.ink) }
-                lede(SpeakerFacts.credits, color: Palette.ink64)
             }
         }
     }

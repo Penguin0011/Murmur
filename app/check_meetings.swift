@@ -412,7 +412,7 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             let defaults = UserDefaults(suiteName: "murmur-notes-\(UUID().uuidString)")!
             check(MeetingNotesRoute.load(defaults) == nil, "the notes route is unset until asked")
             defaults.set(MeetingNotesRoute.appleIntelligence.rawValue, forKey: MeetingNotesRoute.key)
-            check(MeetingNotesRoute.load(defaults) == .appleIntelligence && MeetingNotesRoute.appleIntelligence.label.contains("on-device, less accurate"), "Apple Intelligence is labelled less accurate")
+            check(MeetingNotesRoute.load(defaults) == .appleIntelligence && MeetingNotesRoute.appleIntelligence.label == "Apple Intelligence (on-device)", "Apple Intelligence is labelled on-device")
             let cloud = MeetingNotesRoute.disclosure(.gemini, host: "generativelanguage.googleapis.com", local: false, retention: "Google keeps prompts.")
             check(cloud.contains("generativelanguage.googleapis.com") && cloud.contains("other people’s words") && cloud.contains("speaker names") && cloud.contains("your own notes") && cloud.hasSuffix("Google keeps prompts."), "the cloud disclosure names the host and what is sent")
             check(MeetingNotesRoute.disclosure(.customAPI, host: "127.0.0.1:8080", local: true, retention: nil).contains("nothing leaves this Mac"), "a loopback endpoint counts as local")
@@ -470,6 +470,30 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(clash.notes?.outdated == true && clash.notes?.keyPoints.first?.text == "Sam will ship the build next week", "a name another speaker has marks the notes out of date")
             var moved = renamed; moved.reassignLine(moved.lines[2].id, to: 2)
             check(moved.notes?.outdated == true, "reassigning a line marks the notes out of date")
+        }
+
+        // Topic search includes generated and personal notes; dates include whole local days.
+        do {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "America/New_York")!
+            let day = calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 12))!
+            let late = calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 23, minute: 30))!
+            var meeting = Meeting(id: UUID().uuidString, recordedAt: late, source: .microphoneOnly)
+            meeting.myNotes = "Café budget"
+            meeting.insert(stream: .me, start: 0, end: 2, text: "Transcript marker")
+            meeting.notes = MeetingNotes(title: "Quarterly launch", summary: "Discussed vendor renewal", route: "Synthetic", writtenAt: late)
+            meeting.notes?.keyPoints = [NoteItem(text: "Migration timeline", lines: [1])]
+            meeting.notes?.decisions = [NoteItem(text: "Extend support", lines: [1])]
+            meeting.notes?.actions = [NoteItem(text: "Send invoice", lines: [1], owner: "Priya", due: "Friday")]
+            for query in ["QUARTERLY", "renewal", "cafe", "migration", "support", "invoice", "Priya", "Friday", "Transcript marker", "  "] {
+                check(meeting.matches(query: query, from: nil, through: nil, calendar: calendar), "search finds \(query) across meeting content")
+            }
+            check(!meeting.matches(query: "unrelated topic", from: nil, through: nil, calendar: calendar), "unmatched topics excluded")
+            check(meeting.matches(query: "renewal", from: day, through: day, calendar: calendar), "date range includes end of a 25-hour DST day")
+            check(!meeting.matches(query: "renewal", from: calendar.date(byAdding: .day, value: 1, to: day), through: nil, calendar: calendar), "date and topic filters intersect")
+            check(!meeting.matches(query: "", from: nil, through: calendar.date(byAdding: .day, value: -1, to: day), calendar: calendar), "meeting after end date excluded")
+            let nextDay = Meeting(id: UUID().uuidString, recordedAt: calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day))!, source: .microphoneOnly)
+            check(!nextDay.matches(query: "", from: day, through: day, calendar: calendar), "next midnight excluded from inclusive end date")
         }
 
         if failures > 0 { print("\(failures) meeting check(s) failed"); exit(1) }
