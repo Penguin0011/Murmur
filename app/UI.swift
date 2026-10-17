@@ -1216,24 +1216,11 @@ struct SettingsView: View {
                     if !controller.updateStatus.isEmpty { help(controller.updateStatus) }
                 }
                 Spacer()
-                Button("Check for Updates", action: controller.checkForUpdates).buttonStyle(InkButtonStyle()).disabled(controller.checkingForUpdates)
+                Button("Check for Updates", action: controller.checkForUpdates).buttonStyle(InkButtonStyle())
             }
             .padding(.vertical, 18).padding(.top, 20)
-            if let release = controller.availableRelease {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(UpdateText.headline(release)).font(WindowType.body(16, weight: .semibold))
-                    if !release.notes.isEmpty {
-                        Text(UpdateText.notesExcerpt(release.notes)).font(WindowType.body(14)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    }
-                    HStack(spacing: 16) {
-                        help("Murmur never downloads or installs updates. Download the new version from GitHub and replace the app yourself.")
-                        Spacer()
-                        Button("Open Release Page…", action: controller.openReleasePage).buttonStyle(InkButtonStyle())
-                    }
-                }
-                .padding(16).background(Palette.accent16).padding(.top, 16)
-            }
             toggleRow("Check automatically", UpdateText.explanation, isOn: $controller.updateChecksEnabled)
+            toggleRow("Install updates automatically", "Download verified updates in the background. Installation waits until dictation and meeting recording finish.", isOn: $controller.installUpdatesAutomatically)
         }
     }
 
@@ -1994,6 +1981,7 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.retention) { controller.settingsChanged() }
             .onChange(of: controller.historyMode) { controller.settingsChanged() }
             .onChange(of: controller.updateChecksEnabled) { controller.settingsChanged() }
+            .onChange(of: controller.installUpdatesAutomatically) { controller.settingsChanged() }
     }
 }
 

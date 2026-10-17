@@ -409,11 +409,17 @@ final class PreStart: @unchecked Sendable {
     /// Home and Insights (gap #19), from the History kept on disk only.
     @Published private(set) var insights: Insights = .empty
     var historySummary: String { HistoryText.summary(mode: appliedHistoryMode, count: history.count, sessionOnly: sessionOnlyIDs.count) }
-    // Update checks (R12). Results are shown quietly in Settings only.
+    // Sparkle owns update dialogs, installation and the automatic schedule (R12).
     @Published var updateChecksEnabled: Bool
     @Published var updateStatus = ""
-    @Published var availableRelease: ReleaseInfo?
-    @Published var checkingForUpdates = false
+    @Published var installUpdatesAutomatically = false
+    private lazy var sparkleUpdater = AppUpdater(isBusy: { [weak self] in
+        guard let self else { return true }
+        return self.isBusy || self.meetingRecorder.live != nil
+    }, preferencesChanged: { [weak self] checks, installs in
+        self?.updateChecksEnabled = checks
+        self?.installUpdatesAutomatically = installs
+    })
     var currentVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0" }
     // Processing routes (R4) apply as soon as they change.
     // API keys (R5) save immediately to the Keychain; only their presence is published.
@@ -477,9 +483,6 @@ final class PreStart: @unchecked Sendable {
     /// Set by start(); until then dictionary refreshes do not pre-warm, so launch hashes the model once.
     private var started = false
     private let dictionaryModelDirectory = DictionaryModelFacts.directory(home: FileManager.default.homeDirectoryForCurrentUser)
-    private var lastAutomaticUpdateAttempt: Date?
-    // R12 uses the confirmed Penguin0011/Murmur release repository.
-    private lazy var updateChecker: UpdateChecker? = (try? UpdateConfiguration(currentVersion: currentVersion)).map { UpdateChecker(configuration: $0) }
     private var retry: RetryAudio?
     private var processing: ProcessingCoordinator?
     private var appliedRoutes: RouteSettings
@@ -654,7 +657,13 @@ final class PreStart: @unchecked Sendable {
         noNap = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "Respond to the dictation shortcut without delay")
         refreshPermissions()
         if !preview { configureShortcut() }
-        if !preview && updateChecksEnabled { runUpdateCheck(manual: false) }
+        if !preview {
+            updateStatus = sparkleUpdater.start(checksEnabled: updateChecksEnabled)
+            if Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") != nil {
+                updateChecksEnabled = sparkleUpdater.automaticallyChecksForUpdates
+            }
+            installUpdatesAutomatically = sparkleUpdater.automaticallyDownloadsUpdates
+        }
         for name in [AVCaptureDevice.wasConnectedNotification, AVCaptureDevice.wasDisconnectedNotification] {
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.refreshInputDevices() } }
         }
@@ -702,8 +711,6 @@ final class PreStart: @unchecked Sendable {
                     if self.isBusy { self.message = "Data expiry failed. Open History after this dictation to review saved data." }
                     else { self.setPhase("Error", "Data expiry failed. Open History to review saved data.") }
                 }
-                // Throttled to once a day by the checker's UserDefaults store; skipped checks make no request.
-                if !self.preview && self.updateChecksEnabled { self.runUpdateCheck(manual: false) }
             }
         }
     }
@@ -799,6 +806,7 @@ final class PreStart: @unchecked Sendable {
         defaults.set(historyMode.rawValue, forKey: ProcessingSettings.Key.historyMode)
         defaults.set(learningRequiresReadableField, forKey: ProcessingSettings.Key.readableLearning)
         defaults.set(updateChecksEnabled, forKey: ProcessingSettings.Key.updateChecks)
+        if !preview { sparkleUpdater.setPreferences(checks: updateChecksEnabled, installs: installUpdatesAutomatically) }
         do { try store?.purge(retention: appliedRetention); meetingRecorder.purge(cutoff: HistoryExpiry.cutoff(HistoryRetention(rawValue: appliedRetention) ?? .thirtyDays)); try enforceHistoryCap(); refreshHistory() } catch { setPhase("Error", "Could not apply history retention.") }
         refreshPermissions(); if !preview { configureShortcut() }
         if phase == "Ready" { message = idleMessage }
@@ -2238,30 +2246,10 @@ final class PreStart: @unchecked Sendable {
 
     // MARK: Update checks (R12)
 
-    func checkForUpdates() { runUpdateCheck(manual: true) }
-    private func runUpdateCheck(manual: Bool) {
-        guard let checker = updateChecker else { if manual { updateStatus = "Update checks are unavailable in this build." }; return }
-        guard !checkingForUpdates else { return }
-        if !manual {
-            // No automatic network request while a meeting records (PRD 11.10).
-            guard meetingRecorder.live == nil else { return }
-            guard UpdateSchedule.shouldAttemptAutomatic(lastAttempt: lastAutomaticUpdateAttempt) else { return }
-            lastAutomaticUpdateAttempt = Date()
-        }
-        checkingForUpdates = true
-        if manual { updateStatus = "Checking for updates…" }
-        let version = currentVersion
-        Task { @MainActor [weak self] in
-            let result = await checker.check(manual: manual)
-            guard let self else { return }
-            self.checkingForUpdates = false
-            if let text = UpdateText.status(result, manual: manual, currentVersion: version) { self.updateStatus = text }
-            self.availableRelease = UpdateText.release(result, previous: self.availableRelease)
-            self.updateMenu?()
-        }
+    func checkForUpdates() {
+        guard !preview else { return }
+        updateStatus = sparkleUpdater.checkForUpdates()
     }
-    /// Opens the validated GitHub release page. Murmur never downloads or installs the update.
-    func openReleasePage() { if let url = availableRelease?.pageURL { NSWorkspace.shared.open(url) } }
 
     func shutdown() {
         undo.discard(); stopLiveWords(); liveWordsDownloader?.cancel()

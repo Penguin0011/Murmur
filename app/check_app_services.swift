@@ -236,7 +236,7 @@ func checkUpdates() async throws {
     check(!UpdateSchedule.shouldAttemptAutomatic(lastAttempt: t0, now: t0.addingTimeInterval(60)), "no automatic retry a minute later")
     check(UpdateSchedule.shouldAttemptAutomatic(lastAttempt: t0, now: t0.addingTimeInterval(3600)), "automatic attempt again after an hour")
     check(UpdateSchedule.shouldAttemptAutomatic(lastAttempt: t0.addingTimeInterval(500), now: t0), "a future attempt time (clock change) does not block")
-    check(UpdateText.explanation.contains("uses the network") && UpdateText.explanation.contains("Nothing is downloaded"), "automatic-check explanation")
+    check(UpdateText.explanation.contains("uses the network") && UpdateText.explanation.contains("Sparkle checks GitHub daily"), "automatic-check explanation")
 
     // The bundled version string parses, and the UserDefaults throttle store skips a second automatic check.
     let plist = try PropertyListSerialization.propertyList(from: Data(contentsOf: URL(fileURLWithPath: "app/Info.plist")), format: nil) as? [String: Any]
