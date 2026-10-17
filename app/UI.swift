@@ -319,23 +319,6 @@ struct SettingsView: View {
             .padding(.vertical, 10)
     }
 
-    private func segmented<T: Hashable>(_ options: [(T, String)], _ selection: Binding<T>, size: CGFloat = 15) -> some View {
-        HStack(spacing: 12) {
-            ForEach(options.indices, id: \.self) { index in
-                let (value, label) = options[index]
-                let on = selection.wrappedValue == value
-                Button { selection.wrappedValue = value } label: {
-                    Text(label).font(WindowType.body(size, weight: .medium)).lineLimit(1).minimumScaleFactor(0.75)
-                        .frame(maxWidth: .infinity).frame(minHeight: 40)
-                        .foregroundStyle(on ? Palette.ink : Palette.ink70)
-                        .overlay(alignment: .bottom) { Rectangle().fill(on ? Palette.accentInk : Color.clear).frame(height: 2) }
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
-            }
-        }
-    }
-
     /// "Gemini 3.5 Transcribe (speech recognition, …)" → "Gemini 3.5 Transcribe" for segment labels.
     private func short(_ name: String) -> String {
         name.components(separatedBy: CharacterSet(charactersIn: "(,")).first?.trimmingCharacters(in: .whitespaces) ?? name
@@ -2217,6 +2200,23 @@ final class BubblePresenter {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             guard let self, self.notice == shown else { return }
             self.hide()
+        }
+    }
+}
+
+func segmented<T: Hashable>(_ options: [(T, String)], _ selection: Binding<T>, size: CGFloat = 15) -> some View {
+    HStack(spacing: 12) {
+        ForEach(options.indices, id: \.self) { index in
+            let (value, label) = options[index]
+            let on = selection.wrappedValue == value
+            Button { selection.wrappedValue = value } label: {
+                Text(label).font(WindowType.body(size, weight: .medium)).lineLimit(1).minimumScaleFactor(0.75)
+                    .frame(maxWidth: .infinity).frame(minHeight: 40)
+                    .foregroundStyle(on ? Palette.ink : Palette.ink70)
+                    .overlay(alignment: .bottom) { Rectangle().fill(on ? Palette.accentInk : Color.clear).frame(height: 2) }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
         }
     }
 }

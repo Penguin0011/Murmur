@@ -502,11 +502,10 @@ struct MeetingNotesRoutePicker: View {
     @Binding var selection: MeetingNotesRoute
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 4) {
-                Picker("Meeting notes", selection: $selection) {
-                    ForEach(MeetingNotesRoute.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.radioGroup).labelsHidden().font(WindowType.body(14))
+            segmented([(MeetingNotesRoute.none, "None (transcript only)"), (.appleIntelligence, "Apple Intelligence")], $selection, size: 14)
+            segmented([(MeetingNotesRoute.customAPI, "Custom Provider"), (.gemini, "Gemini")], $selection, size: 14)
+            HStack(spacing: 4) {
+                if selection == .appleIntelligence { lede("On-device, less accurate", color: Palette.ink70) }
                 if tooltipDetails { SettingInfoButton(text: controller.meetingNotesDisclosure(selection)) }
             }
             if !tooltipDetails { lede(controller.meetingNotesDisclosure(selection), color: Palette.ink) }
