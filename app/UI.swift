@@ -198,7 +198,6 @@ struct SettingsView: View {
         Group {
             if screen == .setup { setup } else {
                 VStack(spacing: 0) {
-                    windowHeader
                     HStack(spacing: 0) {
                         sidebar
                         VStack(spacing: 0) {
@@ -375,19 +374,6 @@ struct SettingsView: View {
 
     // MARK: Window navigation
 
-    private var windowHeader: some View {
-        HStack(spacing: 10) {
-            Logo.path(in: CGSize(width: 22, height: 22)).fill(Palette.ink)
-                .frame(width: 22, height: 22).accessibilityHidden(true)
-            wordmark("Murmur", size: 28)
-            Spacer()
-            Button("Run first-time setup…") { screen = .setup }
-                .font(WindowType.body(13)).buttonStyle(.plain).foregroundStyle(Palette.ink70)
-                .frame(minHeight: 40)
-        }
-        .padding(.horizontal, 24).padding(.top, 12)
-    }
-
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
@@ -467,8 +453,7 @@ struct SettingsView: View {
                 sectionBody.disabled(controller.isBusy)
                 Toggle("Show detailed info", isOn: $showDetailedSettingsInfo)
                     .font(WindowType.body(13)).toggleStyle(.checkbox).padding(.top, 32)
-                help(controller.isBusy ? "Finish dictating to change settings." : "Changes apply as soon as you make them.", color: Palette.ink64)
-                    .padding(.top, 12)
+                if controller.isBusy { help("Finish dictating to change settings.", color: Palette.ink64).padding(.top, 12) }
             }
             .padding(EdgeInsets(top: 16, leading: 24, bottom: 24, trailing: 24))
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -547,6 +532,9 @@ struct SettingsView: View {
             Button("Refresh Permissions", action: controller.refreshPermissionsAndShortcut)
                 .buttonStyle(InkButtonStyle(kind: .outline)).padding(.top, 16)
 
+            Button("Run first-time setup…") { screen = .setup }
+                .buttonStyle(InkButtonStyle(kind: .plain)).padding(.top, 12)
+
             eyebrow("Appearance").padding(.top, 20)
             segmented([("system", "System"), ("light", "Light"), ("dark", "Dark")], $appearance).padding(.top, 8)
             help("Murmur’s windows only. The dictation bubble always follows macOS.").padding(.top, 8)
@@ -570,6 +558,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 4) {
                             Text(ModelFacts.displayName).font(WindowType.body(18, weight: .semibold))
+                            if let license = controller.modelLicense { SettingInfoButton(text: ModelFacts.licenseText(license)) }
                             if !controller.modelSummary.isEmpty { settingInfo(controller.modelSummary) }
                         }
                         Group {
@@ -588,16 +577,6 @@ struct SettingsView: View {
                 if !controller.modelMessage.isEmpty { help(controller.modelMessage) }
             }
             .padding(.vertical, 18).padding(.top, 20)
-            if let license = controller.modelLicense {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(license.declarations) { declaration in
-                        Button { controller.openLink(declaration.url) } label: { Text("License: " + declaration.name + " · " + declaration.source).underline() }
-                            .buttonStyle(.plain).font(WindowType.body(13)).foregroundStyle(Palette.accentInk).help(declaration.url.absoluteString)
-                    }
-                    help(license.note, color: Palette.ink64).font(WindowType.body(12))
-                }
-                .padding(.top, 10)
-            }
 
             eyebrow("Where transcription runs").padding(.top, 28)
             segmented([(TranscriptionRoute.local, "On this Mac (Parakeet)"), (TranscriptionRoute.cloud, "Cloud")], $controller.transcriptionRoute).padding(.top, 8)
@@ -668,10 +647,19 @@ struct SettingsView: View {
         }
     }
 
-    /// Strict, Polish or Professional; Professional sets Polish too.
-    private var cleanupStyle: Binding<Int> {
-        Binding(get: { controller.cleanupProfessional ? 2 : controller.cleanupPolish ? 1 : 0 },
-                set: { controller.cleanupPolish = $0 >= 1; controller.cleanupProfessional = $0 == 2 })
+    /// Faithful disables the edit toggles; choosing another style restores the standard edits.
+    var cleanupStyle: Binding<Int> {
+        Binding(get: {
+            guard controller.cleanupFillers || controller.cleanupCorrections || controller.cleanupLists || controller.cleanupPunctuation || controller.cleanupSpoken else { return -1 }
+            return controller.cleanupChoice == .localRules ? 0 : controller.cleanupProfessional ? 2 : controller.cleanupPolish ? 1 : 0
+        }, set: { style in
+            if style == -1 { controller.useFaithfulTranscription(); return }
+            if self.cleanupStyle.wrappedValue == -1 {
+                controller.cleanupFillers = true; controller.cleanupCorrections = true; controller.cleanupLists = true
+                controller.cleanupPunctuation = true; controller.cleanupSpoken = true
+            }
+            controller.cleanupPolish = style >= 1; controller.cleanupProfessional = style == 2
+        })
     }
 
     private var cleanup: some View {
@@ -680,9 +668,16 @@ struct SettingsView: View {
             segmented(CleanupChoice.allCases.map { ($0, short($0.displayName)) }, $controller.cleanupChoice, size: 14)
                 .padding(.top, 8).help(controller.cleanupChoice.displayName)
             eyebrow("Cleanup style").padding(.top, 20)
-            segmented([(0, "Strict"), (1, "Polish"), (2, "Professional")], controller.cleanupChoice == .localRules ? .constant(0) : cleanupStyle, size: 14).padding(.top, 8)
-                .disabled(controller.cleanupChoice == .localRules)
-            help(controller.cleanupChoice == .localRules
+            HStack(spacing: 4) {
+                segmented(controller.cleanupChoice == .localRules
+                          ? [(-1, "Faithful"), (0, "Strict")]
+                          : [(-1, "Faithful"), (0, "Strict"), (1, "Polish"), (2, "Professional")], cleanupStyle, size: 14)
+                SettingInfoButton(text: "Faithful turns all cleanup off and keeps your dictated wording. Dictionary spelling corrections still apply. The raw transcript stays in History.")
+                    .accessibilityLabel("About Faithful")
+            }.padding(.top, 8)
+            help(cleanupStyle.wrappedValue == -1
+                 ? "Your dictated wording, with cleanup off."
+                 : controller.cleanupChoice == .localRules
                  ? "Local rules use Strict. Choose an AI cleanup route above to enable Polish or Professional."
                  : controller.cleanupProfessional
                  ? "Rewrites into clear, professional writing. May reword and change tone; names, numbers and “not” stay."
@@ -696,14 +691,7 @@ struct SettingsView: View {
             toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
             toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
             toggleRow("Spoken commands and numbers", "“comma”, “new paragraph”, “two hundred thousand” → 200,000, “at the rate” → @, and “write an email to…” layout.", isOn: $controller.cleanupSpoken)
-            HStack(spacing: 16) {
-                help("If cleanup goes too far, Murmur inserts your own words. The raw transcript stays in History. Faithful turns all cleanup off.")
-                Spacer()
-                Button("Faithful Transcription", action: controller.useFaithfulTranscription)
-                    .buttonStyle(InkButtonStyle(kind: .outline))
-                    .disabled(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists && !controller.cleanupPunctuation && !controller.cleanupSpoken)
-            }
-            .padding(.top, 16)
+            help("If cleanup goes too far, Murmur inserts your own words. The raw transcript stays in History.").padding(.top, 16)
 
             help("Local rules are simple built-in rules. For AI cleanup, choose Apple Intelligence (on this Mac), Gemini or a Custom Provider (a local model server of 8B or larger works too). If AI cleanup fails, local rules clean that dictation; Murmur never switches routes on its own.")
                 .padding(.top, 12)
@@ -883,7 +871,10 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(controller.liveWordsSummary).font(WindowType.body(14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 4) {
+                        Text(controller.liveWordsSummary).font(WindowType.body(14, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                        if let license = controller.liveWordsLicense { SettingInfoButton(text: ModelFacts.licenseText(license)) }
+                    }
                     if controller.liveWordsRow.isReady { mono("Ready ✓", color: Palette.accentInk) }
                     else { Text(controller.liveWordsRow.statusText).font(WindowType.body(13)).foregroundStyle(Palette.ink70).fixedSize(horizontal: false, vertical: true) }
                 }
@@ -896,9 +887,6 @@ struct SettingsView: View {
             }
             if let progress = controller.liveWordsRow.progress { progressBar(progress) }
             if !controller.liveWordsMessage.isEmpty { help(controller.liveWordsMessage) }
-            if let license = controller.liveWordsLicense, let declaration = license.declarations.first {
-                help("License: \(declaration.name) (\(declaration.url.absoluteString))", color: Palette.ink64)
-            }
         }
     }
 
@@ -909,6 +897,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 4) {
                         Text(DictionaryModelFacts.displayName).font(WindowType.body(18, weight: .semibold))
+                        if let license = controller.dictionaryModelLicense { SettingInfoButton(text: ModelFacts.licenseText(license)) }
                         if !controller.dictionaryModelSummary.isEmpty { settingInfo(controller.dictionaryModelSummary) }
                     }
                     Group {
@@ -928,9 +917,6 @@ struct SettingsView: View {
             if let progress = controller.dictionaryModelRow.progress { progressBar(progress) }
             if controller.dictionarySupportFailed { Text(DictionaryModelFacts.unavailableMessage).font(WindowType.body(14, weight: .semibold)).fixedSize(horizontal: false, vertical: true) }
             if !controller.dictionaryModelMessage.isEmpty { help(controller.dictionaryModelMessage) }
-            if let license = controller.dictionaryModelLicense, let declaration = license.declarations.first {
-                help("License: \(declaration.name) (\(declaration.url.absoluteString))", color: Palette.ink64)
-            }
         }
         .padding(.vertical, 18).padding(.top, 20)
     }

@@ -65,7 +65,6 @@ import SwiftUI
         let state = NSMenuItem(title: controller.phase, action: nil, keyEquivalent: ""); state.isEnabled = false; menu.addItem(state)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Settings and History…", action: #selector(openSettings), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Welcome Guide…", action: #selector(openGuide), keyEquivalent: "").target = self
         menu.addItem(withTitle: recording ? "Stop Meeting Notes" : "Start Meeting Notes…", action: recording ? #selector(stopMeeting) : #selector(openMeetings), keyEquivalent: "").target = self
         menu.addItem(withTitle: UpdateText.menuTitle(controller.availableRelease), action: #selector(checkForUpdates), keyEquivalent: "").target = self
         if controller.phase == "Listening" {

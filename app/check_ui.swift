@@ -50,6 +50,24 @@ import SwiftUI
             controller.cloudTranscriber = .customAPI
         }
         delegate.controller = controller
+        // Exercise the style binding without capture, providers, or saved user data.
+        let styleView = SettingsView(controller: controller)
+        let savedChoice = controller.cleanupChoice
+        controller.cleanupChoice = .localRules
+        styleView.cleanupStyle.wrappedValue = -1
+        precondition(styleView.cleanupStyle.wrappedValue == -1)
+        precondition(!controller.cleanupFillers && !controller.cleanupCorrections && !controller.cleanupLists && !controller.cleanupPunctuation && !controller.cleanupSpoken)
+        styleView.cleanupStyle.wrappedValue = 0
+        precondition(styleView.cleanupStyle.wrappedValue == 0 && controller.cleanupFillers && controller.cleanupPunctuation)
+        controller.cleanupChoice = .customAPI
+        styleView.cleanupStyle.wrappedValue = 2
+        precondition(styleView.cleanupStyle.wrappedValue == 2 && controller.cleanupPolish && controller.cleanupProfessional)
+        styleView.cleanupStyle.wrappedValue = -1
+        precondition(styleView.cleanupStyle.wrappedValue == -1)
+        styleView.cleanupStyle.wrappedValue = 1
+        precondition(styleView.cleanupStyle.wrappedValue == 1 && controller.cleanupPolish && !controller.cleanupProfessional && controller.cleanupSpoken)
+        styleView.cleanupStyle.wrappedValue = 0
+        controller.cleanupChoice = savedChoice
         let compact = CommandLine.arguments.contains("--compact")
         let opaque = CommandLine.arguments.contains("--opaque")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: compact ? 760 : 1000, height: compact ? 560 : args.contains("--tall") ? 1100 : 680), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
