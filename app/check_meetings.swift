@@ -43,9 +43,12 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             new.insert(stream: .me, start: 0, end: 3, text: "Synthetic line.")
             try store.save(old); try store.save(new)
             try Data("not json".utf8).write(to: store.directory.appendingPathComponent(UUID().uuidString + ".json"))
+            let forged = Meeting(id: "not-a-uuid", recordedAt: Date(), source: .everything)
+            let forgedFile = store.directory.appendingPathComponent("not-a-uuid.json")
+            try JSONEncoder().encode(forged).write(to: forgedFile)
             let listed = try store.meetings()
             check(listed.map(\.id) == [new.id, old.id], "newest first, damaged file skipped")
-            check(((try? FileManager.default.contentsOfDirectory(atPath: store.unreadable.path)) ?? []).count == 1, "damaged file moved to unreadable/")
+            check(((try? FileManager.default.contentsOfDirectory(atPath: store.unreadable.path)) ?? []).count == 2, "damaged and invalid-identifier files moved to unreadable/")
             let mode = (try FileManager.default.attributesOfItem(atPath: store.directory.appendingPathComponent(new.id + ".json").path)[.posixPermissions] as? NSNumber)?.intValue
             check(mode == 0o600, "meeting file is owner-only")
             check(try store.meetings().first?.lines.first?.text == "Synthetic line.", "lines round-trip")
@@ -53,6 +56,7 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
             check(try expired == [old.id] && (store.meetings()).map(\.id) == [new.id], "30-day retention expires the old meeting")
             check(try store.purge(cutoff: nil).isEmpty, "Forever expires nothing")
             check((try? store.delete("../escape")) == nil, "ids must be UUIDs")
+            check(!listed.contains { $0.id == "not-a-uuid" } && !FileManager.default.fileExists(atPath: forgedFile.path), "invalid loaded identifiers are quarantined before deletion or retention")
 
             // The cap drops the oldest item of either kind, keeping the newest.
             let history = root.appendingPathComponent("history")
