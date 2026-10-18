@@ -1,8 +1,8 @@
 # Window typography
 
-The supplied standalone design uses Instrument Serif for display text and DM Sans for body text. These original TrueType fonts ship locally so the native app needs no network requests for typography.
+Murmur bundles Instrument Serif for display text and DM Sans for body text, so typography needs no network requests at runtime. [Certain]
 
-- InstrumentSerif-Regular.ttf: https://github.com/google/fonts/blob/main/ofl/instrumentserif/InstrumentSerif-Regular.ttf
-- DMSans.ttf (variable optical size/weight): https://github.com/google/fonts/blob/main/ofl/dmsans/DMSans%5Bopsz,wght%5D.ttf
+- [InstrumentSerif-Regular.ttf](InstrumentSerif-Regular.ttf): [upstream source](https://github.com/google/fonts/blob/main/ofl/instrumentserif/InstrumentSerif-Regular.ttf). [Certain]
+- [DMSans.ttf](DMSans.ttf), variable optical size and weight: [upstream source](https://github.com/google/fonts/blob/main/ofl/dmsans/DMSans%5Bopsz,wght%5D.ttf). [Certain]
 
-The corresponding SIL Open Font License notices are included beside the fonts and copied into the application bundle. WindowType in app/UI.swift registers them for this process. app/check_ui.swift asserts both PostScript names resolve before opening the isolated fixture.
+The corresponding SIL Open Font License notices are included beside the fonts and copied into the application bundle. `WindowType` in [UI.swift](../UI.swift) registers them for this process. [check_ui.swift](../check_ui.swift) asserts both PostScript names resolve before opening the isolated fixture. [Certain]
