@@ -415,7 +415,7 @@ final class PreStart: @unchecked Sendable {
     @Published var installUpdatesAutomatically = false
     private lazy var sparkleUpdater = AppUpdater(isBusy: { [weak self] in
         guard let self else { return true }
-        return self.isBusy || self.meetingRecorder.live != nil
+        return self.isBusy || self.meetingRecorder.hasPendingUpdateWork
     }, preferencesChanged: { [weak self] checks, installs in
         self?.updateChecksEnabled = checks
         self?.installUpdatesAutomatically = installs
