@@ -1,132 +1,30 @@
-# Native Murmur app
+# App development
 
-Run commands from the repository root on Apple Silicon/macOS 26 or later. See [CONTRIBUTING.md](../CONTRIBUTING.md) for toolchain setup, the SDK selection used by direct `swiftc` checks, and release signing requirements. [Certain]
+See the [main README](../README.md) for requirements, setup, privacy and data removal, and [CONTRIBUTING.md](../CONTRIBUTING.md) for build, signing and check commands. Run commands from the repository root.
 
-```sh
-app/build.sh
-open runtime/Murmur.app
-```
+## Source map
 
-`build.sh` and `check_ui.sh` select a sibling macOS 26 SDK when available unless `SDKROOT` is set, to work around the Command Line Tools' macOS 27 SwiftUI macro-plugin limitation. Direct `swiftc` checks need the same SDK selection in their shell. The bundle uses the pinned local ModelBench helper. `build.sh` compiles the app with `-O` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)). Cloud transcription and cleanup routes and API keys are wired in (see [Processing routes and API keys](#processing-routes-and-api-keys-wired-in)) with route-specific live validation still required before a production release. Signing/notarization, and production release remain separate work. [Certain]
+- `Controller.swift` coordinates recording, processing, delivery and recovery.
+- `Processing.swift`, `Cleanup.swift`, `Dictionary.swift` and `Learning.swift` handle text processing and correction learning. [Vocabulary routing](VOCABULARY.md) describes the transcription safeguards.
+- `Providers.swift`, `Credentials.swift` and `Routes.swift` handle optional cloud processing and Keychain credentials. See [provider integration](PROVIDERS.md).
+- `History.swift`, `Retention.swift` and `AppServices.swift` handle local storage, retention and data removal.
+- `ModelDownload.swift` verifies and installs pinned model artifacts. `AppUpdater.swift` integrates Sparkle updates; [update packaging](UPDATES.md) covers release configuration and signing.
+- `Meetings.swift`, `MeetingRecorder.swift`, `MeetingCapture.swift`, `MeetingNotes.swift` and `MeetingSpeakers.swift` implement meeting capture, transcription, notes and speaker separation.
+- `UI.swift`, `MeetingsUI.swift` and `CallOfferUI.swift` provide the interface.
 
-## Verification scope
+Save recoverable text before attempting insertion. Never automatically retry an uncertain paste or send Return. Keep API keys and transcript contents out of logs. Test secure fields, permission loss, clipboard ownership and storage failures when changing these paths; synthetic checks do not establish live cross-app reliability.
 
-The source-publication candidate built on macOS on October 17, 2026 with ad-hoc Hardened Runtime signing and deep/strict signature verification. Offline checks passed, including providers (620 assertions), routes (169) and updates (108). This is source/build evidence, not notarization or an end-to-end live release matrix. [Certain]
+## Settings and recovery
 
-Dated results below retain their original counts and environment; a Linux-only limitation at an earlier checkpoint does not describe the later Mac build. Live provider benchmarks exist in development records, but do not establish every model, account, capture source or insertion destination. See the [documentation guide](../DOCUMENTATION.md) for the evidence map. [Certain]
+Toggles and route choices apply automatically. Provider URL and model fields apply on Return or focus loss; API keys require Save. Route choices, model IDs, endpoint URLs and custom-key destination bindings use UserDefaults; keys stay in the Keychain. Changing a custom endpoint requires saving its key for the new destination.
 
-## Recovery and interface
+Settings → Cleanup offers Faithful and Strict for local rules, plus Polish and Professional on AI routes. Faithful disables cleanup, while dictionary spelling corrections still apply. If an AI rewrite fails its guard, processing tries guarded punctuation transfer onto the transcript's words, then local rules, then the dictionary-applied transcript. Cleanup rejection or a provider error alone does not hold the dictation.
 
-Idle errors have a Dismiss control. Dismissal hides status without deleting history or retry audio; it is unavailable while recording or processing. Storage failure remains an error rather than claiming the app is ready. [Certain]
+If the dictionary or learning ledger cannot be read, dictation can still produce a transcript, but it is held in History for review until the data is repaired. Failed or interrupted insertion also leaves recoverable text; check the destination before explicitly pasting again to avoid duplication. Dismissing an error does not delete recovery data.
 
-Settings provides model availability and permission controls. Toggles and route choices apply automatically; provider text fields apply on Return or focus loss. Model availability checks file sizes; full checksums are verified before inference. History supports search, delivery status, initial selection, and recovery-entry selection. [Certain]
+Settings → Transcription downloads the pinned model after showing its size, license declarations and links. The folder chooser also accepts an existing pinned model. Optional local dictionary-support weights are managed in Settings → Dictionary; their FluidAudio model folder may be shared with other apps. Removing user data leaves settings and model downloads in place; see the [data-removal guide](../README.md#removing-your-data).
 
-Recording and processing use a compact standalone glass-dot voice indicator on a transparent background by default. Posted pastes return quietly to Ready, with no Inserted or Delivery uncertain badge in History; read-back evidence stays in the local log and stored records. History shows actionable failures and interrupted delivery, with copy controls. Only errors show a compact clickable message. Floating popups are buttonless except the Recording canceled and learned-word notices, which have Undo. Clicking an error opens Settings with the full error, even when History was selected. Retained audio is reachable through Settings → History & Privacy → Show Retained Audio; learned entries can be removed in Settings → Dictionary. [Certain]
-
-Unreadable or mismatched history files are quarantined inside the history directory at startup; they still count toward retention and are removed by Delete All Data. [Certain]
-
-## Checks
-
-All of these avoid live recording, insertion, and keyboard injection:
-
-```sh
-swiftc app/LaunchOptions.swift app/check_launch.swift -o /tmp/dictation-launch-check
-/tmp/dictation-launch-check
-swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/check_history.swift -o /tmp/dictation-history-check
-/tmp/dictation-history-check
-swiftc -swift-version 5 spike/Shortcut.swift spike/Insertion.swift spike/Observation.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Insights.swift app/Controller.swift app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/ModelDownload.swift app/Updates.swift app/AppUpdater.swift app/AppServices.swift app/Routes.swift app/AppleCleanup.swift app/UI.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/MeetingsUI.swift app/CallDetection.swift app/CallOfferUI.swift app/check_controller.swift -o /tmp/dictation-controller-check
-/tmp/dictation-controller-check
-swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/check_recording.swift -o /tmp/murmur-recording-check
-/tmp/murmur-recording-check
-```
-
-`check_recording.swift` covers the recording-experience gaps (BetterWispr #14, #16, #18): which custom shortcuts are refused and why, the stored form, the custom binding's hold, double-press, toggle and Escape behaviour (synthetic CGEvents fed to `ShortcutListener.receive`, no tap); the Automatic microphone rule and the format conversion after a device change; the cancel-undo window (taken once inside 5 s, nothing after, discarded on demand), the session hook that sees a canceled file before deletion, and Undo running as processing. No capture, insertion or key injection. [Certain]
-
-**Verified on macOS, October 6, 2026** (Command Line Tools, macOS 26 SDK): every check passes: launch; history; cleanup (0/237 guard false rejects, 2349/2349 adversarial outputs rejected, 2685/2685 punctuation transfers keep the transcript's words); processing 126; dictionary 177; providers 632 assertions; updates 91 assertions; model download 158; app services; routes 119; boost filter 18; native controller. Counts in dated records below are as of their dates. [Certain]
-
-## Processing: dictionary, cleanup and recovery
-
-`Processing.swift` is Foundation-only and is compiled into the app. `ProcessingCoordinator` runs after transcription, on the main thread:
-
-1. `DictionaryStore.apply` runs first, in every mode including faithful transcription.
-2. Cleanup runs on the selected route with the enabled options. Local rules (`RuleCleaner`) run synchronously through `process`. Any other route (Gemini or a custom OpenAI-compatible endpoint, which may be a local model server) goes through `processAsync`: one `CleanupProvider` call via `CleanupPrompt`, with only the relevant dictionary entries, on the main actor except for the request itself. The synchronous path never calls the network.
-3. Cleanup rejection or a cleanup-provider error no longer creates a review hold (PRD decision, October 6, 2026); dictionary unavailability and suspicious transcription can still hold output. When the guard rejects the cleaned words, `CleanupPipeline.punctuated` puts the model's . , ? : and capitals on the transcript's own words (keeping a dictionary-term respelling), guarded as `ProcessingCoordinator.punctuationOnly`; there is no second call. A provider error (not retried), an unconfigured provider, or a transfer that fails the guard uses local rules, and if those fail the guard, the dictionary-applied transcript. `check_cleanup.swift` checks that every transfer over the corpus and adversarial outputs keeps the transcript's words and passes the guard. With punctuation on, the prompt asks for a paragraph break where a longer dictation changes topic; with punctuation on, the guard does not count a line break after a sentence end (a `.`, `?` or `!` token, so not "Dr.") that closes at least three words as added structure (`CleanupText.joiningParagraphs`), and the transfer keeps those breaks. Settings → Cleanup → Cleanup style picks Strict (default) or Polish (`CleanupOptions.polish`, key `cleanupPolish`): Polish applies on model cleanup routes; the built-in On this Mac rules always use Strict. Polish changes the prompt to ask for filler, false-start and grammar edits, and `CleanupGuard.check` accepts them within bounds (closed word lists, similarity, budgets of 8% new words and max(4, 10%) dropped words, runs of at most 3 new and 6 dropped words). `check_cleanup.swift` requires polish to reject every adversarial output too. Professional (`CleanupOptions.professional`, key `cleanupProfessional`, which also sets `polish`) asks the model to rewrite into clear professional writing; the guard lets words move, accepts comma-free "wait no" / "I meant" / "or rather" / "scratch that" corrections whose dropped words recur after the cue, and otherwise checks budgets: new words at most max(4, 25%), inside the text; dropped words are fillers, droppable grammar words, a pronoun replaced in the same person, or a content word replaced by a similar new word (never an unrelated one, so a lowercase name or antonym cannot be swapped); names and pronoun persons keep their order, and a kept number or negation keeps its context. `check_cleanup.swift` requires it to reject every adversarial output. Before the prompt is built, Professional removes a comma-free correction's restated stretch itself (`CleanupGuard.applyCommaFreeCorrections`, the same stretch the guard accepts, keeping a leading so/and/but/then); a cue with no restated content word is left alone ("I did not say that I meant it"). Live runs showed the model alone either kept both versions or deleted an earlier clause. `app/tools/check_professional_live.swift` sends 11 synthetic dictations through the configured custom cleanup route and the guard (October 7, 2026, gpt-oss-120b on Cerebras, after the PR review fixes: 22 of 22 correct, including every run of the test dictation). When the guard rejects a cleanup, the History entry also keeps the model's output as `cleanupRejectedOutput` for debugging (it expires and is deleted with the entry). A negative contraction that speech recognition truncated ("it doesn spread") counts as a negation, and the cleanup may complete it in the same place. `lastFallback` (content-free) is logged as `cleanup-fallback`; a provider error also shows "Inserted with local cleanup." after insertion. `held-cleanup` remains only for older History entries and for dictations made while the dictionary is unavailable.
-
-Settings has independent cleanup controls, a Faithful style, learning controls, and a dictionary editor (add, edit in place, per-entry on/off, delete, learned/manual badge, Reset Learned, and a Not learned list of blocked heard forms and spellings with Unblock). Cleanup and learning toggles apply automatically; dictionary edits save immediately. After an insertion whose read-back shows the dictated text (native fields, and browser fields of unknown type), `AppController` polls the dictated span with `DictationObservation` every 0.25 s. Other fields (VS Code's stub, web canvases, any paste that cannot be read back) get a listen-only key tap for the window: `KeystrokeSpan` replays the keys on a copy of the pasted span and feeds the same tracker. Cmd/Ctrl chords (undo) drop the evidence; Return, Tab, vertical arrows and app switches end the watch and keep it. After a click the caret position is unknown, so `KeystrokeSpan` follows every caret position and double-clicked word at once and, on each poll, takes the one reading the learning filter finds to be a plausible respelling (fewest words changed; readings implying the same fix count as one). Each change goes to `ProcessingCoordinator.observeSpan`; the ledger diffs the span word by word (`CorrectionFilter.replacements`), so each replaced run is separate evidence, words typed after the span are ignored, and a deletion or a rewrite of more than half the span teaches nothing. A span emptied by sending a chat message keeps the fix made before it. Undo or lost attribution drops the session's evidence. The ledger settles when focus leaves, 60 seconds pass, the caret leaves the span or the next insertion starts. The `--test-audio` probe stays up until that window closes. The settings keys are `cleanupFillers`, `cleanupCorrections`, `cleanupLists`, `cleanupRoute` (derived from `cleanupChoice`, see below), `learningEnabled`, `historyMode` and `updateChecksEnabled`. The last two are wired in (see below) and are also written directly when settings change, so they persist when the dictionary is unavailable. A corrupt `dictionary.json` or `ledger.json` blocks startup, like corrupt history. [Certain]
-
-```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_processing.swift -o /tmp/murmur-processing-check
-/tmp/murmur-processing-check
-```
-
-Writing modes, tone and screen context (BetterWispr gaps #6–#8; PRD decisions of October 14, 2026): `WritingMode`, `WritingModes` (matching: trigger word, then website, then app) and `DictationStyle` (the settings with a mode's overrides) are in `Processing.swift`; `Tone` and `ScreenContext` are in `Cleanup.swift`. `process` and `processAsync` take an optional `DictationStyle`; tone is applied last, and screen context and custom instructions reach only `CleanupPrompt` on AI routes. `AppController` matches the app (and, through Accessibility, the page URL) when recording starts, captures screen context then if it is on, and resolves a trigger word on the transcript. [Certain]
-
-```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_modes.swift -o /tmp/murmur-modes-check && /tmp/murmur-modes-check
-```
-
-At the October 3 checkpoint, processing checks passed with Swift 6.1.2 on Linux and Controller/UI were checked against hand-written SDK stubs. Later Mac builds supersede that build limitation; see Verification scope above. [Certain]
-
-## Dictionary, learning and retention
-
-`Dictionary.swift`, `Learning.swift` and `Retention.swift` are Foundation-only, so their checks also run on Linux. They are compiled into the app by `build.sh` and used through `Processing.swift`. The history cap, history-off mode and Delete all data are wired in through `AppServices.swift` (see [Model download, retention and updates](#model-download-retention-and-updates-wired-in)).
-
-```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
-```
-
-- `DictionaryStore` keeps `dictionary.json` (0600, directory 0700). `apply(to:)` replaces exact variants as whole words and space-separated phrases (case-insensitive, longest match). The app also supplies its English lexicon: an unfamiliar alphabetic word of at least six letters may use one uniquely matching enabled term of at least six letters, with the same phonetic key and the existing semantic/respelling checks. A second narrow path permits a source of at least five letters when the stored term adds exactly one adjacent duplicate letter, even if title case is a recognized name (Akash → aakash, Alison → allison). Ordinary lowercase words remain protected, and phonetic/semantic checks, unique matching, enabled entries and explicit-variant priority still apply. Already-correct preferred forms take priority over near terms. Other recognized names, short words and unlisted phrases stay unchanged; explicit variants win. Without a lexicon, application remains exact-only. It inserts the preferred spelling as stored, and capitalizes its first letter only at a sentence start when the spelling is all lowercase. `relevantEntries(for:)` returns the entries present in the text, plus up to 10 whose preferred spelling sounds like a 1–3 word span (`DictionaryStore.soundsLike`: matching phonetic keys and similarity ≥ 0.5, or similarity ≥ 0.75 for terms of 6+ letters). That is what a cloud stage may receive. The broader 1–3 word near matches feed the cleanup prompt and guard; local respelling stays within the narrower single-word rule above. [Certain]
-- Transcription: Gemini gets `vocabularyTerms` (every enabled preferred spelling, manual first): Gemini 3.5 Transcribe uses structured `custom_vocabulary`; Gemini audio uses spelling instructions. Custom OpenAI-compatible transcription sends no dictionary prompt: Whisper can continue that text as if it were prior speech. Manual/learned variants and lexicon-guarded single-word respellings apply afterward in every mode; other near matches require model cleanup. On-device transcription uses dictionary support (below). See [the vocabulary review](VOCABULARY.md) for the provider comparison and limits. [Certain]
-- `CorrectionLedger` keeps `ledger.json` with short source/target strings only. The flow per session is `record` (provisional) while the window is open, then `settle` when it closes; `revert` undoes. One settled session adds the target with the source as a variant, so it is replaced from the next dictation on (PRD decision, October 16, 2026; until then one fix added only a hint and a second one the variant). A later mishearing of the same spelling joins the same entry, and an old hint-only entry gains its variant at its next fix; nothing is promoted at load. A repeat of a learned fix confirms it and leaves no evidence. A tombstoned target is never learned again from any source. The app shows an "Added … to dictionary" notice with Undo when an entry is learned or gains a variant; Undo (`undoLearned`) removes that variant, or the entry it created, and tombstones it, as deleting it in Settings → Dictionary does. A conflicting target suppresses the source until `reset()`. A deleted learned entry is tombstoned and its evidence cleared. With learning off, nothing is recorded.
-- `Retention.swift` covers the 50 MB history cap (drop oldest first; Forever warns via `HistoryCapStatus`), the history-off disclosure, and `DataWipe.deleteAllData`. Six-month and 30-day expiry stay in `HistoryStore`.
-
-**Dictionary support in on-device transcription.** Settings → Dictionary offers an optional download of the pinned Parakeet CTC 110M model (`FluidInference/parakeet-ctc-110m-coreml`, 12 files, 103 MB, CC-BY-4.0). It goes to FluidAudio's own folder, `~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml`, because FluidAudio's rescorer reads the CTC tokenizer only from there. That folder may be shared with other FluidAudio apps, so it is hash-verified before every use (`ModelVerificationCache`, per folder) and skipped, never fatal, when it does not match. [Certain]
-
-- Every dictionary change goes through `refreshDictionary()`, which rewrites `dictionary/parakeet-vocabulary.json` (0600; enabled entries with their "heard as" forms as aliases) and pre-warms the helper. `HelperLaunch.make` is the only place that builds the helper's `--ctc DIR --vocabulary FILE` arguments and the warm key, so warm, chunked and one-shot transcription agree; any change to the model, the dictionary model or the vocabulary restarts the warm helper. [Certain]
-- The helper (`ModelBench`) transcribes with timings, rescores with FluidAudio's `VocabularyBoostingSession`, then `BoostFilter` keeps a replacement only when it joins or recases the term, matches a listed alias, or replaces a word that is not ordinary English (NSSpellChecker) and is spelled at least half like the term. The raw transcript is the base, so punctuation is kept. A vocabulary or model error never fails transcription: the helper runs without boosting and reports `vocabulary_error`, which Settings shows. [Certain]
-- Measured with synthetic speech (`say -o`, never played) and a 20-term dictionary: 0/119 ordinary sentences changed (6/119 before `BoostFilter`), and cubectal→kubectl, ShelfMud→Shelfmate, Akash→Aakash, CloudEv→Clouddev, Supa Basin→Supabase and open router→OpenRouter were fixed; about 0.12 s more per transcription. The first load after a download compiles the model (about 14 s). A term split by a chunk cut is repaired: at each cut the chunker also writes a boundary clip (3 s each side), the helper answers `{"boundary": PATH}` with the replacements it kept there, and `ChunkJob` applies only a replacement whose words are the end of one chunk plus the start of the next (`Chunker.repair`, letters only, so a word cut in two also matches). Boundary clips are processed during recording and only with dictionary support. Measured: with the cut forced inside the term, open router and cube cuddle were repaired to the whole-file result; on 4 long recordings (23 cuts) the repair changed nothing. Removing chunking instead would make release wait for rescoring of the whole recording (dictionary rescoring costs about 15 ms per second of audio: 1.3 s at 1 minute, 4.9 s at 3.6 minutes, against at most about 0.4 s for the last chunk). Limits: casing-only fixes (tailscale→Tailscale) are not made, and History's raw text is the rescored transcript. Human speech is untested. [Certain]
-
-```sh
-swiftc module-one/models/Runner/Sources/ModelBench/BoostFilter.swift app/check_boost_filter.swift -o /tmp/murmur-boost-check && /tmp/murmur-boost-check
-```
-
-**Promotion rule (approved October 3, 2026; one settled fix promotes since October 16, see above).** A correction counts as learning evidence only if the target is a plausible respelling of the source. All of these must hold:
-
-1. Structure: 1–3 words per side after trimming shared context words. Punctuation-only edits are rejected, as are deletions, insertions/appends and longer rewrites. Case-only (jira→Jira) and spacing (git hub→GitHub, a p i→API) fixes are accepted only with the lexicon, and then pass rules 2–3 like any other fix (the lexicon rejects recasing or joining ordinary words: notion→Notion, every one→everyone). A case-only fix keeps its target casing in the ledger.
-2. Meaning guards: reject negation flips (not/n't/un-/dis-…), digits or number words, listed antonyms, function words and listed homophones, inflection-only changes and vowel-only changes in short words. When an `isCommonWord` lexicon is supplied, reject swaps where every word on both sides is an ordinary word. The app supplies NSSpellChecker (English) through `ProcessingCoordinator(directory:isCommonWord:)`: a word is common when the checker finds no misspelling.
-3. Respelling: at least 4 letters per side (2 with the lexicon, so Jon→John and Ana→Anna are learned; an all-capitals target such as API or JSON skips the ordinary-word test), and either edit similarity ≥ 0.75, or equal consonant-class phonetic keys with similarity ≥ 0.5.
-4. Known terms: if the target is already a manual entry's preferred spelling, rule 3 is waived, but not rules 1–2.
-
-Known failure modes: without the lexicon (the Linux checks, or if the spell checker misjudges a word), real-word swaps that look like respellings (casual→causal, lunch→launch, Cloud→Claude) are accepted, and two such corrections would promote them. Similar names (Robert→Rupert) are accepted, because they look like transcription errors. Legitimate respellings are still skipped when they add an `s` (Postgres→Postgress), involve numbers, recase or join ordinary words (notion→Notion, Tail wind→Tailwind), or do not sound alike by the phonetic key (sequel→SQL); add those manually. Capitalising a term at a sentence start can teach that capitalisation. Measured with NSSpellChecker over 44 realistic corrections plus 18 edge cases on October 4, 2026. [Certain]
-
-### Cloud providers, credentials, and updates
-
-`Providers.swift`, `Credentials.swift`, and `Updates.swift` use only Foundation. `build.sh` compiles all three. Providers and keys are reachable from Settings through `Routes.swift` (see [Processing routes and API keys](#processing-routes-and-api-keys-wired-in)). The update checker is wired in (see below). Their checks need no network and no keys. They pass with Swift 6.1.2 on Linux. The app and macOS-only Keychain implementation subsequently compiled in the Mac development build; this does not verify real Keychain prompts or every live provider route. [Certain]
-
-```sh
-swiftc app/Cleanup.swift app/Providers.swift app/Credentials.swift app/check_providers.swift -o /tmp/murmur-providers-check
-/tmp/murmur-providers-check
-swiftc app/Updates.swift app/check_updates.swift -o /tmp/murmur-updates-check
-/tmp/murmur-updates-check
-swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check
-/tmp/murmur-insights-check
-swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_meetings.swift -o /tmp/murmur-meetings-check
-/tmp/murmur-meetings-check
-swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/CallDetection.swift app/check_call_detection.swift -o /tmp/murmur-detection-check
-/tmp/murmur-detection-check
-swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_speakers.swift -o /tmp/murmur-speakers-check
-/tmp/murmur-speakers-check
-swiftc -swift-version 5 spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/Session.swift app/History.swift app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/MeetingCapture.swift app/MeetingRecorder.swift app/check_speaker_flow.swift -o /tmp/murmur-speaker-flow-check
-/tmp/murmur-speaker-flow-check
-```
-
-`check_meetings.swift` covers meeting notes W7a (PRD section 11): echo suppression (hidden from Me, never from Them, kept for "Show hidden echo", only near in time), capture-time ordering, the owner-only store with damaged files moved aside, retention by start date, the History cap across dictations and meetings, chunk names and the 24-hour purge, the pump (one chunk in flight, recording order across streams, one retry, then the file is kept), the 3-hour and silence limits, versioned consent, Markdown export with escaping, and call-app process resolution. `check_call_detection.swift` covers meeting detection W7c (PRD 11.7): the offer after 5 s of input, one offer per app per microphone session with a 15 s grace for a device switch, no offer for a 2-second use, unlisted apps or Murmur's own processes, bundle IDs and helpers matched ignoring case (Safari's shared WebKit helper only while Safari is open), a meeting using up the call's offer, dictation deferring it, "Never" and the global switch, and the browser wording. `app/tools/probe_call_detection.swift` runs the same rules on the live process list. For W7b notes (PRD 11.6) it covers W7a records without notes still loading, the prompt layout (numbered visible lines and the user's notes inside nonce tags, hidden echo left out), the reply parser, each grounding rule (no citation, a missing line, a line speaking to the note-taker, no shared word, an invented name, number or date, an owner who was not there, no agreement for a decision, no commitment for an action item), the title and summary fallback, map-reduce with a context overflow split once, Copy Notes and the Markdown notes section. With speakers separated, it covers the speaker labels in numbered lines and the named speakers in the instructions (the prompt unchanged without separation), owners that are renamed speakers accepted while invented names, absent owners and a label's digit are still rejected, and a rename or merge relabelling written notes while a reassignment or a clashing name marks them out of date. `app/tools/measure_meeting_notes.swift` runs `app/meeting-notes-corpus.json` (22 synthetic meetings labelled with their agreed decisions and action items, injections and traps) through a notes route and prints unsupported and invented items after the check, missed items and time; `--long` times synthetic 1-hour and 2-hour meetings. `app/tools/measure_meeting.swift` feeds two LibriSpeech streams through the same Chunker, feed, pump and helper and prints accuracy, lag, CPU, memory and dictation latency. [Certain]
-
-`check_speakers.swift` covers speaker separation W7d (PRD 11.8): each Them line goes to the speaker it overlaps most (the nearest with no overlap), numbering by first line, Me never assigned, splitting at a voice change from word times with the first piece keeping its id, whole-line assignment without word times (cloud, or a dictionary change of the word count), rename, merge and reassign (per meeting, dated for notes, round-tripping in the record, in both exports), names expiring with their meeting, W7a records still decoding, the helper reply parser dropping embeddings and the saved meeting holding none, the kept 16 kHz 16-bit WAV (chunks at their own times, owner-only, kept while pending under 24 hours, deleted at 24 hours or once not pending, never while active), and the helper runner (segments returned, Skip terminating it and answering nothing, a model failing verification never run). `check_speaker_flow.swift` drives the real `MeetingRecorder` with a stand-in helper script: a pending meeting waits without the model, then is labelled, saved and has its call audio deleted; a missing file fails; Skip, deletion and retention delete the audio; turning the switch off skips waiting meetings; Delete All Data forgets separations. Notes wait for separation (Write Notes is refused meanwhile) and are then written with speaker labels, or with Me and Them after a failure or Skip. `app/tools/measure_speakers.swift` builds synthetic 2–6-speaker calls from LibriSpeech test-clean, runs them through the same Chunker, feed, pump, timed helper request, kept WAV, `ModelBench --diarize` and assignment, and prints DER, speaker count and word attribution; `--long MINUTES` times diarization alone and reports its peak memory. [Certain]
-
-`check_insights.swift` covers Home and Insights (gap #19): pace in five-character words per minute against 51.56 typed, time saved and its clamp at zero, words changed, apps, streaks across days, time zones and a daylight-saving change, and the History-off and empty states. `check_app_services.swift` covers the welcome guide (gap #21): resuming at the saved step, clamping, version-stamped completion, replay and the upgrade default. [Certain]
-
-Early provider checks used mocks and unauthenticated probes. Later synthetic live benchmarks are recorded in [STREAMING_TRANSCRIPTION.md](../STREAMING_TRANSCRIPTION.md) and [PR45_TEST_RESULTS.md](../PR45_TEST_RESULTS.md); these do not validate every available provider/model. Fireworks and OpenRouter are not dedicated Settings routes; use Custom Provider for a compatible endpoint. [PROVIDERS.md](PROVIDERS.md) retains dated API research; recheck provider terms and availability before using a cloud route. [Certain]
+## Interface fixtures
 
 For isolated empty-history visual inspection, run the executable directly:
 
@@ -134,9 +32,9 @@ For isolated empty-history visual inspection, run the executable directly:
 runtime/Murmur.app/Contents/MacOS/Murmur --preview
 ```
 
-Preview disables shortcut capture and uses temporary history/retry storage. Permission buttons and settings controls are real controls; inspecting preview does not require using them. Prefer `app/check_ui.sh` for a synthetic fixture with an in-memory credential store; `--preview` is not a general sandbox for every setting or Keychain control. [Certain]
+Preview disables shortcut capture and uses temporary history/retry storage. Permission buttons and settings controls are real controls; inspecting preview does not require using them. Prefer `app/check_ui.sh` for a synthetic fixture with an in-memory credential store; `--preview` is not a general sandbox for every setting or Keychain control.
 
-`check_ui.sh` builds and runs the synthetic visual fixture with temporary storage, synthetic transcripts, and an error bubble. It performs no capture or insertion; dismissal asserts that recovery history remains. The fixture has a working Quit menu and closes its temporary storage on normal exit. [Certain]
+`check_ui.sh` builds and runs the synthetic visual fixture with temporary storage, synthetic transcripts, and an error bubble. It performs no capture or insertion; dismissal asserts that recovery history remains. The fixture has a working Quit menu and closes its temporary storage on normal exit.
 
 ```sh
 app/check_ui.sh
@@ -175,15 +73,15 @@ app/check_ui.sh --meetings --notes-choice
 app/check_ui.sh --meeting-settings --tall
 ```
 
-`--meetings` seeds two synthetic meetings (one with hidden echo, one with leftover parts) and opens Meetings (PRD section 11). `--meeting-live` also shows the live panel with a synthetic recording; with `--snapshot` it renders the panel, whose glass draws transparent offscreen. `--call-offer` shows Zoom's detection offer and `--call-offer-browser` Arc's (PRD 11.7); `--never` seeds the Never list shown with `--meeting-settings`. `--consent` opens the one-time consent sheet; quit it from the menu, since `--snapshot` does not close a sheet. [Certain] `--meeting-notes` gives the first meeting synthetic notes (W7b) and opens its Notes tab; `--outdated` marks them out of date. `--transcript` opens the Transcript tab instead. `--notes-choice` opens the first-Stop notes route question; like `--consent`, quit it from the menu. `--meeting-settings` opens Settings → Meetings with the meeting transcription and notes routes. [Certain]
+`--meetings` seeds two synthetic meetings (one with hidden echo, one with leftover parts) and opens Meetings. `--meeting-live` also shows the live panel with a synthetic recording; with `--snapshot` it renders the panel, whose glass draws transparent offscreen. `--call-offer` shows Zoom's detection offer and `--call-offer-browser` Arc's; `--never` seeds the Never list shown with `--meeting-settings`. `--consent` opens the one-time consent sheet; quit it from the menu, since `--snapshot` does not close a sheet. `--meeting-notes` gives the first meeting synthetic notes and opens its Notes tab; `--outdated` marks them out of date. `--transcript` opens the Transcript tab instead. `--notes-choice` opens the first-Stop notes route question; like `--consent`, quit it from the menu. `--meeting-settings` opens Settings → Meetings with the meeting transcription and notes routes.
 
-The window opens on Home (gap #19). `--insights` seeds timed dictations into four apps over 24 days and opens Insights; with `--empty` it shows the empty state, and `--history-off` shows the History-off state. `--guide STEP` opens the welcome guide (gap #21) at step 0–4; without it the fixture marks the guide finished. `--settings` opens Settings, `--tall` makes the window 1100 points tall where the screen allows, and `--system-appearance` stores System (or, with `--light` or `--dark`, that choice) without forcing the app's appearance, so the bubble follows macOS (gap #20). `--snapshot PATH` renders the window offscreen to a PNG and quits, which works while the screen is locked. [Certain]
+The window opens on Home. `--insights` seeds timed dictations into four apps over 24 days and opens Insights; with `--empty` it shows the empty state, and `--history-off` shows the History-off state. `--guide STEP` opens the welcome guide at step 0–4; without it the fixture marks the guide finished. `--settings` opens Settings, `--tall` makes the window 1100 points tall where the screen allows, and `--system-appearance` stores System (or, with `--light` or `--dark`, that choice) without forcing the app's appearance, so the bubble follows macOS. `--snapshot PATH` renders the window offscreen to a PNG and quits, which works while the screen is locked.
 
-`--live-words` with `--listening` shows the live-words bubble (gap #13) with a synthetic preview. `--paste-failed` shows the paste-failure card (gap #17) with a synthetic three-line text, and `--not-pasted` the same card for a dictation saved with Insert at the cursor off; `--undo` shows the Undo card (gap #18) without its 5-second timer. Settings → General shows the shortcut recorder, the sounds toggle and the Automatic microphone option without a flag. [Certain]
+`--live-words` with `--listening` shows the live-words bubble with a synthetic preview. `--paste-failed` shows the paste-failure card with a synthetic three-line text, and `--not-pasted` the same card for a dictation saved with Insert at the cursor off; `--undo` shows the Undo card without its 5-second timer. Settings → General shows the shortcut recorder, the sounds toggle and the Automatic microphone option without a flag.
 
-`--dictionary` seeds three sample entries (one turned off); open Settings → Dictionary to see them. The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings. [Certain]
+`--dictionary` seeds three sample entries (one turned off); open Settings → Dictionary to see them. The fixture forces only its own appearance. `--compact` uses the minimum production window size, while `--opaque` forces the same opaque rendering branch used by Reduce Transparency for the settings/History view. The separately hosted floating bubble continues to use actual system accessibility settings.
 
-`--matrix` seeds the History delivery and held-result states in temporary storage, including one session-only row; `--empty` seeds no entries. `--light` sets both the fixture window and Settings appearance. [Certain]
+`--matrix` seeds the History delivery and held-result states in temporary storage, including one session-only row; `--empty` seeds no entries. `--light` sets both the fixture window and Settings appearance.
 
 The developer audio probe requires both flags and must target a disposable field:
 
@@ -191,230 +89,4 @@ The developer audio probe requires both flags and must target a disposable field
 runtime/Murmur.app/Contents/MacOS/Murmur --test-audio /absolute/synthetic.wav --expected-app com.apple.TextEdit
 ```
 
-This explicitly performs transcription and one insertion attempt. It preserves the supplied audio and uses temporary isolated history, retry audio, and dictionary storage, removed on exit. It does not modify the user's history or dictionary or use saved API keys. It cannot be combined with preview or timed quit; malformed flags exit before storage/UI initialization. [Certain]
-
-## Model download
-
-`ModelDownload.swift` is Foundation-only and compiled into the app; see the next section for the wiring. [Certain]
-
-```sh
-swiftc -swift-version 5 app/ModelDownload.swift app/check_model_download.swift -o /tmp/cm && /tmp/cm   # run from the repository root
-```
-
-- `ModelManifest(contentsOf:)` reads `artifact-pins.json`. It keeps only the pinned `batch_files` for `FluidInference/parakeet-unified-en-0.6b-coreml` and requires a 40-hex revision. It rejects unsafe `rfilename`s (absolute, `..`, `.`, empty segments, backslashes, control characters). `totalBytes` is the download size to show first: 1,801,783,964 bytes (~1.80 GB) for the current pins.
-- `ModelDownloader.install(progress:)` blocks; `start(progress:completion:)` runs it on a background queue. It fetches `https://huggingface.co/<repo>/resolve/<revision>/<rfilename>` into a hidden sibling `.<name>.download-<rev12>`. It checks each file's size, then its SHA-256 (LFS files) or blob SHA-1 (other files) through `FileHasher`. Only when every file passes is staging renamed onto the target. An existing model is first renamed aside, then restored if the rename fails. Stray staged files are deleted, not installed.
-- `cancel()` keeps verified and partial files in staging. The next `install` re-hashes verified files locally instead of re-downloading them, and resumes a partial with `Range` (or restarts it if the server sends 200). `remove()` deletes the target and staging.
-- `status()` returns `notDownloaded`, `downloading(progress)`, `verifying`, `ready`, `corrupt(reason)` or `failed(error)`. It is a cheap size check, the same as `modelFilesAvailable`. `verifyInstalled()` hashes every file.
-- `ModelDownloadError` covers network, disk full (preflight and ENOSPC), checksum mismatch, HTTP status, cancelled, invalid manifest, unsafe path, file system, and busy. Each `userMessage` names no file, path, or URL.
-- `license` is read from the manifest only when the manifest records one. The current pins record none, so the downloader shows both model-card declarations and says they are unresolved: upstream NVIDIA Open Model License, conversion CC-BY-4.0.
-
-The SHA-256/SHA-1 code is pure Swift because CryptoKit is unavailable on Linux. It runs at about 56 MB/s on SHA-256 in an unoptimized build on the Linux dev box, and about 210 MB/s with `-O`. On October 3, 2026, `URLSessionModelTransport` installed four small pinned files through the real Hugging Face redirects on Linux. All four verified, and a `Range` request returned 206. That October 3 transport test did not download the full weights. Later Mac builds and model measurements are recorded separately; see Verification scope and [MODEL_BENCHMARK.md](../MODEL_BENCHMARK.md). [Certain]
-
-## Model download, retention and updates (wired in)
-
-`AppServices.swift` is Foundation-only and holds the decisions that Controller and UI only display or act on. Controller keeps the AppKit calls (alerts, `NSWorkspace`) and the wiring. [Certain]
-
-```sh
-swiftc app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/check_app_services.swift -o /tmp/murmur-app-services-check
-/tmp/murmur-app-services-check   # run from the repository root; it reads app/Info.plist
-```
-
-**Model (R2).** Settings → Transcription shows a model row: name, download size (`downloader.downloadSize`, 1.80 GB), English, Runs on this Mac, status, and Download / Retry / Cancel / Remove. Both license declarations are listed with links, and the note says the license is unresolved. Download first shows an alert with the size and the full license text, so nothing is fetched before the license is shown. The downloader targets the existing default folder `~/Library/Caches/Dictation/module-one/unified-d32e972` with the bundled `artifact-pins.json`, so a model already there shows as Downloaded. The main-thread monitor timer samples progress and the verifying phase (`status()` is lock-protected). Completion is marshaled with `DispatchQueue.main.async`. On success, `modelDirectory` is set to that folder and saved. The folder chooser remains as an advanced option, with Use Default.
-- Recording is refused with recovery text when the model or runtime is missing ("Download the model in Settings, or choose a downloaded model folder"), and while a download is replacing the folder dictation would use.
-- Download and Remove are refused while recording or processing (checked again after their confirmation alert), and in preview, which must not touch the real model cache. Remove is also refused while a download runs. Quitting cancels a download; staged files are kept and Retry resumes them.
-
-**Build speed.** `build.sh` compiles the app with `-O`. The pure-Swift SHA-256 is about 56 MB/s unoptimized and 210 MB/s with `-O` on the Linux dev box, so verifying 1.8 GB drops from about 32 s to about 9 s. No `assert()` is reachable in the app (only spike test helpers that the app never calls use it), so `-O` removes no runtime checks. `precondition`, overflow traps and exclusivity checks stay on. `check_ui.sh` and the checks stay unoptimized. [Certain]
-
-**History cap (R9, §6).** `HistoryCap.enforce` runs at launch, after each dictation's final save, when settings change and in the 60-second purge. Finite retention drops the oldest entries over 50 MB but always keeps the newest. With Forever, nothing is dropped and the cap warning shows under Keep transcripts. A cap failure at launch or after a dictation only shows a warning. [Certain]
-
-**History off.** Settings → History & Privacy has a Transcript history picker. Choosing Off shows `HistoryMode.offDisclosure` and asks for confirmation before applying the change. All history reads and writes go through `HistoryRouter`:
-- With history off, entries are kept only in memory, so a held cleanup or a failed or uncertain insertion can still be copied from History until Murmur quits. Nothing is written to disk. Disk save failures still surface as errors and are not silently moved to memory.
-- Memory entries stay in memory if history is turned back on, so one dictation never splits across disk and memory. They follow the retention cutoff and are limited to the newest 100.
-- History marks them "Not saved to disk", completion messages say "Kept in History until Murmur quits", and the header says history is off.
-- Turning history off does not delete existing history.
-- Retry audio is separate: it still follows the 24-hour policy. [Certain]
-
-**Delete All Data (§6).** Settings → History & Privacy has a button that asks for confirmation, then runs `DataWipe.deleteAllData` on history, dictionary/ledger and retry audio. It also calls `KeychainCredentialStore(service: "Murmur").deleteAll()`, which is skipped in preview. Then it follows `PostWipeStep` in order: discard in-memory state (including memory-only history), recreate history, recreate retry audio, rebuild `ProcessingCoordinator` (it re-reads the now-empty dictionary and ledger), and refresh. Each step runs even if an earlier one fails, and failures are reported. Settings and the downloaded model are kept. Backups or snapshots may still hold copies. [Certain]
-
-**Updates (R12).** `AppUpdater.swift` connects Sparkle's standard UI to Settings and the menu bar. Sparkle owns daily checks, version selection, verified downloads and installation. Automatic installation is opt-in; recording blocks checks and postpones relaunch. The build supplies an HTTPS GitHub appcast URL and an Ed25519 public key; without both, development builds show an unavailable message and make no update requests. The old Foundation checker in `Updates.swift` remains available to its existing isolated regression checks but is no longer used by the app. See [UPDATES.md](UPDATES.md) and [SPARKLE_TEST_RESULTS.md](SPARKLE_TEST_RESULTS.md). [Certain]
-
-**Verified on Linux (Swift 6.1.2), October 3, 2026:** `check_app_services.swift` passes. It covers the model row and gates, the license and confirmation text, history-off routing (including concurrent saves), memory retention, the post-wipe order and messages against a real temporary `DataWipe`, update text, the hourly attempt rule, and the UserDefaults throttle across checker instances. Controller.swift, UI.swift and check_controller.swift typecheck under `-swift-version 5` against hand-written AppKit/SwiftUI stubs. The stubs check identifiers, types and bindings, not real SDK signatures. main.swift cannot be typechecked on Linux (`#selector`). [Certain]
-
-**Live checks still required; the earlier Mac build limitation is superseded:** a full model download and cancel/resume through the app, real Keychain deletion, live GitHub update responses and release-page opening across supported configurations. App builds and synthetic fixture results are separate evidence, not substitutes for these checks. [Certain]
-
-## Cleanup
-
-`Cleanup.swift` is Foundation-only. The app uses it through `Processing.swift` (see above). It provides:
-- `CleanupOptions`: fillers, corrections, and lists toggle independently. All are on by default, and `.faithful` turns all off.
-- `spoken` ("Spoken commands and numbers", on by default in the app): `RuleCleaner.spokenCommands` runs first and handles:
-  - dictated marks and layout
-  - spoken numbers with hundred or a scale word, or before "percent", as digits
-  - @ and # symbols
-  - the explicit "write an email to X saying …" layout
-
-  `CleanupGuard.check` also accepts output that matches `spokenCommands(raw)` (PRD decision, October 14, 2026).
-- `CleanupGuard`: the PRD bound check between raw and cleaned text.
-- `CleanupPrompt`: messages for an LLM provider.
-- `RuleCleaner`: a deterministic local baseline.
-- `CleanupPipeline`: returns `.cleaned`, `.unchanged` (all options off), or `.heldForRecovery(raw:reason:)` for a cleaner error or a guard failure; `ProcessingCoordinator` turns the latter into a fallback, never a hold. The reason is a content-free enum. [Certain]
-
-**RuleCleaner is a conservative stopgap, not the PRD's cleanup-model selection.** [Certain]
-
-```sh
-python3 app/tools/build_cleanup_corpus.py        # regenerates app/cleanup-corpus.json
-swiftc app/Cleanup.swift app/check_cleanup.swift -o /tmp/cc && /tmp/cc app/cleanup-corpus.json   # add --verbose for misses
-```
-
-The check exits non-zero if the name/number/negation bar or any adversarial case fails. Measured October 3, 2026 on Linux with Swift 6.1.2. It also type-checks under `-swift-version 5` and `-swift-version 6`. [Certain]
-
-| Historical metric (425 utterances, October 3) | Result at that checkpoint |
-|---|---|
-| Exact match, all utterances | 96.7% (fillers only 95.3%, corrections only 95.8%, lists only 97.8%, all on 99.0%, all off 100%) |
-| Unintended name/number/negation edits (PRD bar ≤ 1%) | 1/425 = 0.2%. The one case is the list false positive below. |
-| Strict mismatch with labels, including corrections the baseline missed | 6/425 = 1.4% |
-| Spoken-correction exact match / ambiguous corrections kept unchanged | 95.8% / 22 of 22 |
-| List formatting precision / recall | 97.7% / 100% |
-| Expected-unchanged utterances left untouched | 187/188 |
-| Guard false rejects on labeled cleanups | 0/237 |
-| Adversarial outputs rejected | 2348/2348: 60 hand-written cases (answers, obeyed instructions, poems, translation, tone polish, dropped `not`, added/changed numbers, added/dropped names, quote edits, emoji) plus systematic mutations of every label |
-| Plausible LLM variants accepted (not gating) | 11/16 |
-
-The following cautions and gaps describe that historical baseline; later guard changes are noted below and in the PRD. Do not treat the old rejection list as the current cleanup contract. [Certain]
-
-Treat these numbers with caution:
-- The same agent wrote the corpus, its labels, and the baseline, so exact-match overstates real-world quality. [Certain]
-- A 40-utterance `heldout` group was written after tuning. Its first run scored 38/40. That run found two bugs: a stray "." after a sentence-only "Hmm.", and a list length-ratio limit that held a correct "number one…" list. Both are fixed now, so the group is no longer held out. [Certain]
-- The guard is strict on purpose. It holds an added `?` or `!`, number-word-to-digit changes, `gonna`→`going to`, and bullet lists, so real LLM output will reach recovery more often than RuleCleaner output. [Certain]
-
-Known gaps:
-- After a removed hesitation, comma handling uses a word list. This misses introductory phrases ("To be honest, um, I…") and over-keeps after a capitalized first word ("Please, um, don't…").
-- Corrections need an explicit cue set off by punctuation and either a same-category swap (weekday, month, number, time, color, name) or a phrase restarted with the same function word. These stay unchanged: "Order three pizzas, sorry, four", "Add salt, no wait, add sugar", and corrections inside list items.
-- "Remember: first impressions matter, second chances are rare" becomes a list. Since October 14, 2026 the guard rejects that list on every route, using a short list of nouns that make an ordinal part of a phrase ("first impressions"), so the dictation falls back to the transcript's own words. A phrase missing from that list can still become a list. [Certain]
-- Guard tightening, October 14, 2026 (all routes and styles):
-  - A dropped correction cue must take the word it corrects with it, so "Book it for 2, no, 3 people" → "Book it for 2, 3 people" is rejected. [Certain]
-  - A new "N." line needs an announced, counted enumeration of at least two items that reaches N. "Announced" means a list noun, a colon, or a list-noun sentence just before it, the same rule the Strict and Polish prompts state. Professional's spoken markers ("item one … item two") need no announcement, as its prompt says. Professional ordinals still do, which is stricter than its prompt. [Certain]
-  - Corpus: 426 utterances, 0/237 false rejects, 2382/2382 adversarial outputs rejected in every style. [Certain]
-- The guard does not convert number words; "twenty five" vs "25" is rejected.
-- No real ASR transcripts are in the corpus. [Certain]
-
-## Evidence from October 2, 2026
-
-The app bundle built and ad-hoc signing passed. Launch, history/model-verifier, controller dismissal/audio ownership, session state, processor fault/signal, and spike insertion/observation checks passed. Native screenshots/AX inspection confirmed settings and empty/populated History, error dismissal to Ready, preserved synthetic entries, matching-transcript selection, and no-results search. The native Liquid Glass update was captured in light, dark, and forced opaque compact appearances. Scoped screenshot review resolved supporting-text and search-placeholder contrast findings. Native History filtering/clearing and the floating bubble Dismiss click passed; the fixture confirmed preserved recovery history. [Certain]
-
-Physical shortcut/microphone first-word behavior, real speech quality, clipboard-manager races, and live insertion after these changes remain unverified. The synthetic bubble click does not establish focus preservation in a real destination app. [Certain]
-
-## Leading space
-
-Enable **Intelligently add a leading space** in Settings → General to separate inserted dictation from existing text. The option defaults off. It uses the original field value and UTF-16 cursor position, and only inserts a space when preceding text needs separation. It skips existing whitespace, opening delimiters, punctuation-led output, selected-text replacement, word interiors, and unavailable/invalid context. The insertion safety check still rejects changed destinations. Raw transcription stays unchanged; History final text records the attempted insertion including its added space. Copy-only output remains unchanged. [Certain]
-
-## Gemini transcription and custom cleanup APIs
-
-`Providers.swift` adds `GeminiTranscriptionProvider` and `OpenAICompatibleCleanupProvider`. Both are wired in through `Routes.swift` (next section) and covered by `check_providers.swift`, which uses no network and no keys. [Certain]
-
-- **Gemini transcription** is a language model asked to transcribe, not a speech recognizer. Before sending, call `GeminiTranscriptionProvider.shouldSkipForSilence(peakLevel:durationSeconds:)` and skip silent recordings. Use `transcribeChecked(_:)` and hold the result for recovery when `answerSuspected` is true. Its disclosure says that audio leaves this Mac to Google, and that free-tier keys allow human review. [Certain]
-- **Custom API cleanup** sends the prompt to `{base}/v1/chat/completions` using the configured model ID and Keychain key. The endpoint must accept OpenAI-compatible chat-completions requests. It can point to hosted services or a local server; only loopback addresses count as on this Mac, and other hosts are disclosed before the first request. [Certain]
-
-Live coverage is route-specific; see Verification scope above. The dated [provider research](PROVIDERS.md) is not a current account-specific compatibility guarantee. [Certain]
-
-## Gemini dedicated transcription route
-
-`Providers.swift` adds `GeminiTranscribeProvider`, which uses Google's dedicated speech model `gemini-3.5-transcribe` through the Beta Interactions API (`POST https://generativelanguage.googleapis.com/v1beta/interactions`). It is selected by `makeTranscriptionProvider` when the Gemini transcription model matches `GeminiTranscribeProvider.defaultModel`; other model IDs use the general audio provider. Dated API research and sources are in [PROVIDERS.md](PROVIDERS.md). [Certain]
-
-- **Defaults:** verbatim mode, `language_codes` set to `["en-US"]` by the app route, and `AudioPayload.vocabularyHint` supplied as `custom_vocabulary` (one term per line or comma-separated; pass only relevant terms). `store = true`, per the user's decision of October 3, 2026. [Certain]
-- **Disclosure:** audio and the relevant dictionary terms are sent to and stored by Google. The app's disclosure reflects the October 3 research: 55 days on a paid-tier key or 1 day on a free-tier key, with earlier deletion through the API and free-tier product use/human review. These are dated terms, not a guarantee of Google's current policy; verify the current terms before sending sensitive content. [Certain]
-- **Interaction ids:** `transcribeDetailed(_:onInteractionCreated:)` returns `GeminiTranscribeResult` with `interactionID`, and `deleteStored(interactionID:)` deletes the stored record. The provider persists no ids. The app does not expose automatic server-side deletion or a saved interaction-ID management UI; deleting local history does not delete Google's stored copy. [Certain]
-- **Polling:** if the server answers `in_progress` or `queued`, the same interaction is polled with GET, never re-submitted. Polling is bounded by `overallDeadline` (90 s) and `maxPolls`, and Task cancellation stops it. [Certain]
-
-At the October 3 checkpoint, checks passed with Swift 6.1.2 on Linux in both `-swift-version 5` and default mode. See Verification scope for later builds and the limits of live validation. [Certain]
-
-## Apple Intelligence cleanup
-
-`app/AppleCleanup.swift` adds `AppleCleanupProvider`, a `CleanupProvider` (and an `AsyncCleaner`) backed by Apple's FoundationModels system model. You pick it in Settings → Cleanup → Apple Intelligence. [Certain]
-- **How it runs:**
-  - It uses `CleanupPrompt.build` unchanged, puts the system text in the session's instructions, and uses greedy sampling.
-  - Each call gets a fresh session.
-  - Murmur prewarms the model when the route is applied and when a dictation starts.
-- **No key and no disclosure.** It needs no key, sends nothing off this Mac, and adds no disclosure stage.
-- **Availability** is checked on every call.
-  - If the model is unavailable, the provider throws `ProviderError.modelUnavailable`, with one of three reasons: this Mac is not eligible, Apple Intelligence is off, or the model is not ready.
-  - `ProcessingCoordinator` then uses local rules and shows "Inserted with local cleanup." with that reason.
-  - Settings shows the same reason under the route.
-- **Generation errors** are mapped to `ProviderError` and also fall back to local rules:
-
-  | Generation error | `ProviderError` |
-  |---|---|
-  | Context exceeded | payload too large |
-  | Guardrail or refusal | content blocked |
-  | Rate limit | rate limited |
-  | Assets unavailable | model not ready |
-
-- **Context window:** about 4K tokens. Text of 600 words or more is cleaned in sections of about 400 words, each guarded on its own.
-
-```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/check_apple_cleanup.swift -o /tmp/murmur-apple-check && /tmp/murmur-apple-check
-```
-
-**What the check covers.** `check_apple_cleanup.swift` (29 checks) uses an injected status and a fake model:
-- the route wiring: no key read, no refusal, no disclosure;
-- each unavailable reason: the model is never called, the local-rules output is used, and the reason's message is shown;
-- the generation-error fallback;
-- guard rejection of an answer;
-- splitting long text into sections. [Certain]
-
-**Measured on October 14, 2026** with `app/tools/measure_cleanup_route.swift` (MacBook Air M3, 16 GB, macOS 27.0.1). It misses the corpus thresholds in all three styles, though the median latency is 0.6–0.8 s. The numbers are in PRD section 10, "Proposed decision: Apple Intelligence cleanup route". [Certain]
-
-## Processing routes and API keys (wired in)
-
-`Routes.swift` is Foundation-only and holds the route decisions; Controller and UI display and act on them. [Certain]
-
-```sh
-swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift app/check_routes.swift -o /tmp/murmur-routes-check
-/tmp/murmur-routes-check
-```
-
-**Settings → Transcription and Cleanup (R4).** Route and model changes apply as soon as they are made. Custom transcription and cleanup have separate editable base URLs, model IDs and destination-bound Keychain keys. Only endpoint preferences are stored in UserDefaults. [Certain]
-- Transcription: On this Mac (Parakeet, the default) or Cloud. Cloud offers Gemini and Custom Provider. Gemini defaults to `gemini-3.5-transcribe`; other model IDs use Gemini's general audio endpoint. Custom transcription posts multipart audio without dictionary-derived decoder prompts to `/v1/audio/transcriptions`; a compatible server must implement that format. [Certain]
-- Cleanup: Local rules (the default), Apple Intelligence (on this Mac; see [Apple Intelligence cleanup](#apple-intelligence-cleanup)), Gemini or Custom Provider. The custom route uses an editable OpenAI-compatible base URL and model ID; it defaults to Cerebras (`https://api.cerebras.ai/v1`, `gpt-oss-120b`) and also works with compatible local servers. [Certain]
-- Existing shared custom settings migrate to separate transcription and cleanup settings. Existing keys are copied to separate Keychain accounts; each remains usable only when its saved destination matches that route's endpoint. [Certain]
-
-**A dictation on a cloud route.**
-- At start, `RoutePlan` picks the transcriber and cleaner from the applied settings and the Keychain. It refuses, without fallback, when a key is missing or the custom endpoint or model is invalid. Local loopback endpoints do not need a key. The model gate applies only to local transcription.
-- `CloudTranscription.run` replaces the ModelBench runner. It converts the recording to 16 kHz mono 16-bit WAV (`CloudAudio`), trims the silent tail to 0.5 s (Whisper transcribes a silent tail as "Thank you."), and makes one provider call. If the provider has a silence pre-check (Gemini audio, the custom transcription endpoint), silent or very short recordings are skipped and reported as "No speech was detected".
-- A transcript then follows the local path: history save, dictionary and cleanup, insertion. An empty transcript is "no speech".
-- A provider error shows its `userMessage` in the Error phase. On preserve dispositions the audio stays for retry (24-hour policy).
-- A Gemini transcript that looks like an answer (`answerSuspected`) is saved with status `held-transcript` (raw text only, Copy Raw) and never inserted.
-- Cloud cleanup calls `processAsync`. Provider errors use local cleanup fallback and a content-free reason; rejected output uses guarded punctuation transfer or local rules. [Certain]
-- Failed cloud transcription never silently retries with the local model or another provider. Cleanup has the local fallback described above. [Certain]
-- Both calls run in a main-actor `CloudRequest` Task. Results are delivered behind the session's generation token. Escape while processing (through `ShortcutListener.onEscapeWhileProcessing`) or the menu bar's Cancel Request cancels the Task and its HTTP request. Nothing is inserted; during transcription the audio is deleted, and a transcript that was already saved stays in History. Escape is not swallowed in that state.
-
-**Cloud disclosures.** Settings shows disclosures inline, including destination hosts and any plain-HTTP warning. Selecting a cloud route and starting dictation do not show a disclosure popup. Loopback endpoints send nothing off this Mac. Custom API keys are omitted on unencrypted connections off this Mac. [Certain]
-
-**API keys (R5).** Settings → API keys has separate rows for Gemini, Custom transcription and Custom cleanup. Custom keys use distinct Keychain accounts and endpoint bindings; replacing or removing one does not change the other. A typed key stays in a SecureField until Save, then the field clears. Messages come from fixed strings and `ProviderError.userMessage`, never from the key or a response body. Preview uses an in-memory store. [Certain]
-
-**Learning lexicon.** `isCommonEnglishWord` in Controller.swift backs `CorrectionLedger.isCommonWord` with `NSSpellChecker` (language "en"): a word is common when no misspelling is found. `ProcessingCoordinator(directory:defaults:isCommonWord:)` injects it, including after Delete All Data. [Certain]
-
-**Verified on Linux (Swift 6.1.2), October 3, 2026:** `check_routes.swift` passes (86 checks). It uses mock providers and transports and no network. It covers:
-- no fallback: an unconfigured route refuses, never uses the local model, makes one call and no retry;
-- the silence skip with the real `GeminiTranscriptionProvider` (no request sent);
-- the answer-suspected hold;
-- inline disclosure changes when a provider or endpoint changes; loopback versus LAN;
-- keys never in messages, including 401 bodies that echo the key, and no key in UserDefaults;
-- cancel preventing delivery (in flight, finished-but-canceled, superseded);
-- WAV conversion;
-- cloud cleanup error handling (the historical hold behavior was replaced by the fallback described above);
-- the lexicon condition: with a fake lexicon, lunch→launch and casual→causal are rejected.
-
-`Routes.swift` also typechecks under `-swift-version 6`. `check_processing.swift` still passes. Controller.swift, UI.swift and check_controller.swift typecheck under `-swift-version 5` against hand-written AppKit/SwiftUI stubs, which check identifiers and bindings, not real SDK signatures. main.swift was not typechecked. [Certain]
-
-**Live checks still required; the earlier Mac build limitation is superseded:**
-- real permission/confirmation alerts and the Escape hook in a live event tap;
-- Keychain save, read and remove, including whether ad-hoc signed builds prompt on read;
-- `NSSpellChecker` with language "en";
-- the WAV format AVAudioFile actually writes;
-- every live provider call with a real key or a real local server. [Certain]
-
-### Insertion review — October 5, 2026
-
-See [INSERTION_REVIEW.md](INSERTION_REVIEW.md) for the complete delivery/recovery paths, Wispr Flow comparison, and remaining compatibility limits. The paste-last buffer now includes verified deliveries, survives canceled/empty/failed recordings, and is cleared when its transcript is deleted or all data is removed. Manual pastes check Accessibility permission, Secure Input, and accessible secure-field metadata, then recheck the focused field/window before posting. [Certain]
-
-**Sparkle updates:** see [UPDATES.md](UPDATES.md) for GitHub-only hosting, build configuration, signing, packaging and validation. Unconfigured development builds do not check for updates. [Certain]
+This explicitly performs transcription and one insertion attempt. It preserves the supplied audio and uses temporary isolated history, retry audio, and dictionary storage, removed on exit. It does not modify the user's history or dictionary or use saved API keys. It cannot be combined with preview or timed quit; malformed flags exit before storage/UI initialization.

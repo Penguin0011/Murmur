@@ -1,23 +1,25 @@
 # Contributing to Murmur
 
-Murmur is pre-release. Use the [documentation guide](DOCUMENTATION.md) to distinguish current instructions, requirements and dated development evidence. Read [PRD.md](PRD.md) for requirements; [HANDOFF.md](HANDOFF.md) preserves earlier checkpoints rather than a current task list. [Certain]
+Murmur is pre-release. Use the root [README](README.md) for visitor setup and privacy information.
 
 ## Requirements
 
-- An Apple Silicon Mac running macOS 26, with the Swift toolchain (the development host uses Swift 6.3.3). [Certain]
-- Python 3 for the corpus and model scripts. [Certain]
-- Foundation-only modules and their checks also build on Linux; they were last checked with Swift 6.1.2. [Certain]
+- An Apple Silicon Mac running macOS 26 or later, with Xcode Command Line Tools or Xcode and Swift 6.0 or later for the pinned helper package. The app compiles in Swift 5 language mode.
+- Python 3 for the corpus and model scripts.
+- Foundation-only modules and their checks also build on Linux; they were last checked with Swift 6.1.2.
 
 ## Build
+
+Run commands from the repository root. The first build needs internet access to fetch the pinned FluidAudio package and Sparkle archive. It does not download speech model weights.
 
 ```sh
 app/build.sh
 open runtime/Murmur.app
 ```
 
-`build.sh` builds the pinned `ModelBench` helper (incrementally, every run), compiles the app with `-swift-version 5`, and signs both executables with Hardened Runtime. Development builds use `clouddev Development` if present, otherwise ad hoc; the app has only the audio-input entitlement. Set `MURMUR_SIGN_IDENTITY` to use another identity; a stable identity keeps macOS permissions across rebuilds. [Certain]
+`build.sh` builds the pinned `ModelBench` helper (incrementally, every run), compiles the app with `-swift-version 5`, and signs both executables with Hardened Runtime. Development builds use `clouddev Development` if present, otherwise ad hoc; release builds use the audio-input entitlement, while development builds also disable library validation so the local signing identity can load Sparkle. Set `MURMUR_SIGN_IDENTITY` to use another identity; a stable identity keeps macOS permissions across rebuilds.
 
-For distribution, `MURMUR_RELEASE=1` requires a valid Developer ID Application identity and an existing notarytool Keychain profile. It signs with secure timestamps, submits for notarization, staples and validates the ticket, and runs Gatekeeper assessment; any failed step stops the build. [Certain]
+For distribution, first configure the update feed and public key described in [update packaging](app/UPDATES.md). `MURMUR_RELEASE=1` also requires a valid Developer ID Application identity and an existing notarytool Keychain profile. It signs with secure timestamps, submits for notarization, staples and validates the ticket, and runs Gatekeeper assessment; any failed step stops the build.
 
 ```sh
 MURMUR_RELEASE=1 \
@@ -25,15 +27,19 @@ MURMUR_RELEASE=1 \
   MURMUR_NOTARY_PROFILE='your-existing-notary-profile' app/build.sh
 ```
 
-`runtime/` and `spike/.build/` are ignored by Git. Do not commit audio, transcripts, model files or API keys. [Certain]
+`runtime/` and `spike/.build/` are ignored by Git. Do not commit audio, transcripts, model files or API keys.
+
+## Documentation
+
+Keep tracked documentation useful to users or contributors: setup, privacy, security reporting, licensing, maintained tool instructions and reproducible measurements with limitations. Keep conversation logs, agent handoffs, local installation evidence and private audits outside the repository. Moving a tracked file or adding it to `.gitignore` does not make it private; deleted files remain in Git history.
 
 ## Publication checks
 
-Run the redacted secret scans in [SECURITY.md](SECURITY.md) before sharing a branch or making a release. Review all fetched branches and PR refs, and hosted content separately before changing repository visibility. Keep private audit evidence outside this tree. [Certain]
+Run the redacted secret scans in [SECURITY.md](SECURITY.md) before sharing a branch or making a release. Review all fetched branches and PR refs, and hosted content separately before changing repository visibility. Keep private audit evidence outside this tree.
 
 ## Checks
 
-The commands in this section use offline or loopback synthetic checks; they do not record audio, insert text or inject keys. Run the ones that cover your change, and all of them before a release. Commands below run from the repository root. When using Command Line Tools with its macOS 27 SDK, select its macOS 26 SDK if available, as the build scripts do: [Certain]
+The commands in this section use offline or loopback synthetic checks; they do not record audio, insert text or inject keys. Run the ones that cover your change, and all of them before a release. Commands below run from the repository root. When using Command Line Tools with its macOS 27 SDK, select its macOS 26 SDK if available, as the build scripts do:
 
 ```sh
 # In the same shell used for the swiftc checks below.
@@ -56,6 +62,7 @@ Foundation-only modules (macOS or Linux):
 
 ```sh
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_processing.swift -o /tmp/murmur-processing-check && /tmp/murmur-processing-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_modes.swift -o /tmp/murmur-modes-check && /tmp/murmur-modes-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/check_apple_cleanup.swift -o /tmp/murmur-apple-check && /tmp/murmur-apple-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift app/check_routes.swift -o /tmp/murmur-routes-check && /tmp/murmur-routes-check
@@ -66,6 +73,8 @@ swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check
 swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_meetings.swift -o /tmp/murmur-meetings-check && /tmp/murmur-meetings-check
 swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/CallDetection.swift app/check_call_detection.swift -o /tmp/murmur-detection-check && /tmp/murmur-detection-check
 swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_speakers.swift -o /tmp/murmur-speakers-check && /tmp/murmur-speakers-check
+swiftc -swift-version 5 app/ModelDownload.swift app/check_model_download.swift -o /tmp/murmur-model-check && /tmp/murmur-model-check
+python3 app/tools/check_update_config.py
 swiftc app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/check_app_services.swift -o /tmp/murmur-app-services-check && /tmp/murmur-app-services-check
 swiftc module-one/models/Runner/Sources/ModelBench/BoostFilter.swift app/check_boost_filter.swift -o /tmp/murmur-boost-check && /tmp/murmur-boost-check
 python3 app/tools/build_cleanup_corpus.py
@@ -92,30 +101,30 @@ app/check_ui.sh --meetings --speakers --meeting-notes
 app/check_ui.sh --meetings --separating
 ```
 
-These commands come from [app/README.md](app/README.md), which lists every fixture flag and is the source of truth if they drift. Spike and model checks are in `spike/README.md` and `module-one/*/README.md`. [Certain]
+Additional fixture flags and their side effects are described in [app/README.md](app/README.md). Standalone checks are in the [insertion spike](spike/README.md), [capture probe](module-one/capture/README.md), [capture session](module-one/session/README.md), and [model tooling](module-one/models/README.md) guides. A synthetic fixture is not live capture, insertion, or provider evidence.
 
 ## Conventions
 
-These are the patterns in the existing code and docs. [Likely]
+These are the patterns in the existing code and docs.
 
-- Native Swift with Apple frameworks (Foundation, AppKit, SwiftUI, AVFoundation, Security). No third-party Swift packages besides the pinned FluidAudio runtime. Keep new logic Foundation-only where possible, so its checks run on Linux too.
-- Small concrete types per concern (one file per module, such as `Cleanup.swift` or `Providers.swift`), not a plugin framework (PRD section 7).
-- Checks are standalone executables named `check_<module>.swift`, compiled with `swiftc` next to the files they test. They exit non-zero on failure and need no external network, real keys or microphone; `check_http.py` uses a loopback server with synthetic data. [Certain]
+- Native Swift with Apple frameworks (Foundation, AppKit, SwiftUI, AVFoundation, Security). FluidAudio is the pinned Swift package; Sparkle is a separately pinned framework archive. Keep new logic Foundation-only where possible, so its checks run on Linux too.
+- Small concrete types per concern (one file per module, such as `Cleanup.swift` or `Providers.swift`), not a plugin framework.
+- Checks are standalone executables named `check_<module>.swift`, compiled with `swiftc` next to the files they test. They exit non-zero on failure and need no external network, real keys or microphone; `check_http.py` uses a loopback server with synthetic data.
 - Code must compile under `-swift-version 5`, which `build.sh` uses.
 - Treat dictated text as untrusted data. Never log transcript text, API keys or response bodies; error reasons are content-free enums.
 - Store API keys only in the Keychain. Never send transcripts, audio, dictionary entries or keys in update checks.
-- No silent cloud fallback and no silent model or provider substitution.
-- Document claims with evidence. In Markdown docs, end each factual claim with [Certain], [Likely] or [Guessing], and keep prose plain and short. Report device results only for the configuration actually measured.
+- Keep transcription routes fixed on failure. Preserve the Gemini cleanup failover and guarded local fallback described in [provider integration](app/PROVIDERS.md); do not add model or provider substitutions without an explicit product decision.
+- Document claims with evidence. In Markdown docs, distinguish measured results from assumptions and keep prose plain and short. Report device results only for the configuration actually measured.
 
 ## Commits
 
-- Make small logical commits after each working checkpoint. [Certain]
-- Use Conventional Commit subjects: `type(scope): summary`, imperative and lowercase, such as `feat(cleanup): add …`, `fix(ui): …`, `docs(providers): …`, `test: …`, `refactor(app): …`. The scope is optional. [Certain]
-- Merge commits describe what is merged in plain words, such as "Merge cloud providers, Keychain credentials and GitHub update checker". [Certain]
+- Make small logical commits after each working checkpoint.
+- Use Conventional Commit subjects: `type(scope): summary`, imperative and lowercase, such as `feat(cleanup): add …`, `fix(ui): …`, `docs(providers): …`, `test: …`, `refactor(app): …`. The scope is optional.
+- Merge commits describe what is merged in plain words, such as "Merge cloud providers, Keychain credentials and GitHub update checker".
 - Write commit messages as a human and do not add Codex co-author trailers.
 
 ## Licensing
 
-Murmur's source is MIT licensed ([LICENSE](LICENSE)); contributions are accepted under the same license. Add any new dependency or model to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) after checking its license at the pinned version. [Certain]
+Murmur's source is MIT licensed ([LICENSE](LICENSE)); contributions are accepted under the same license. Add any new dependency or model to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) after checking its license at the pinned version.
 
-Sparkle builds and release asset preparation are documented in [app/UPDATES.md](app/UPDATES.md). Development builds require no Apple enrollment; public update delivery still needs an accessible GitHub feed and a production Sparkle key. [Certain]
+Sparkle builds and release asset preparation are documented in [app/UPDATES.md](app/UPDATES.md). Public updates need an accessible GitHub feed and the existing production signing key; Developer ID signing and notarization are separate release steps.

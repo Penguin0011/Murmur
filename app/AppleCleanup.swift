@@ -3,7 +3,7 @@ import Foundation
 import FoundationModels
 #endif
 
-// Apple Intelligence cleanup (BETTERWISPR_GAPS.md #1): Apple's on-device system model through
+// Apple's on-device system model through
 // FoundationModels. Nothing to download, no key, and nothing leaves this Mac, so the route has no
 // disclosure. Prompts come from `CleanupPrompt.build` unchanged. ProcessingCoordinator guards the
 // output and falls back to local rules on any error, as for every provider route (PRD section 4).

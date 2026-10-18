@@ -258,7 +258,7 @@ enum MicrophoneChoice {
 /// Splits a recording into chunk files at pauses while it is still being recorded, so local
 /// transcription can run during the recording and only the last chunk waits for release. Owned by
 /// its Capture's queue. The full WAV is still written and stays the fallback.
-/// Measured (STREAMING_TRANSCRIPTION.md): cuts at the quietest 0.2 s near 15 s matched the
+/// In synthetic speech measurements, cuts at the quietest 0.2 s near 15 s matched the
 /// whole-file words; blind cuts did not.
 final class Chunker {
     /// Private per-user folder for chunk files; nil turns chunking off.
