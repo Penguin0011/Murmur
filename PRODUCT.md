@@ -28,7 +28,7 @@ The selected local model is Parakeet Unified. M1 performance validation is defer
 
 ## Evidence on hand
 
-Recorded cross-app insertion/observation matrix in spike/FEASIBILITY.md; real local model and connected synthetic microphone checks in module-one/session/README.md. Synthetic speech evidence does not prove real-user quality or first-word preservation.
+Recorded cross-app insertion/observation checks; real local model and connected synthetic microphone checks in module-one/session/README.md. Synthetic speech evidence does not prove real-user quality or first-word preservation.
 
 ## Accessibility
 

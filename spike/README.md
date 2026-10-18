@@ -52,4 +52,4 @@ Clipboard fallback snapshots all readable pasteboard types and stages a unique o
 
 Insertion and learning accept only AXTextField/AXTextArea roles. A readable AXWebArea or document root is not a supported destination. Unknown browser text-field types remain unverified and excluded from learning.
 
-No persistent recovery store exists in this spike. Do not use real or sensitive dictated content. Production insertion must save output first. See [FEASIBILITY.md](FEASIBILITY.md) for the evidence matrix and outstanding gates.
+No persistent recovery store exists in this spike. Do not use real or sensitive dictated content. Production insertion must save output first.

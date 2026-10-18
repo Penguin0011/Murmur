@@ -10,7 +10,7 @@ The weakest interaction assumption is that an AX write returning success but lea
 
 Reviewed `spike/Insertion.swift`, `spike/Observation.swift`, `spike/Shortcut.swift`, `spike/ShortcutChecks.swift`, `spike/main.swift`, the PRD acceptance criteria, and the recorded feasibility matrix on October 2, 2026. A fresh unoptimized build to `/tmp/dictation-safety-spike` and its `--check` passed on this host. No keyboard, microphone, browser, clipboard-manager, or secure-field live test was performed by this review.
 
-The matrix in `spike/FEASIBILITY.md` is prior recorded evidence. It describes TextEdit and the Codex composer passing insertion plus structural observation scenarios; Arc and VS Code receiving synthetic paste once with unverified delivery and no learning; and default Safari/Google Docs lacking an accessible destination. These observations were not independently repeated in this review.
+Prior app-support observations are historical and were not independently repeated in this review. They should not be treated as a current compatibility matrix.
 
 The recorded host is M3/16 GB, while the earlier PRD baseline was M1/8 GB (now deferred by user decision). Neither historical interaction success nor this deterministic check measures the baseline model pipeline.
 

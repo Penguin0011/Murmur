@@ -10,7 +10,7 @@ Scope: PRD milestone 1. GO for bounded engineering and validation; production/re
 - `models/`: exact artifact/runtime pins and reproducible benchmark tooling. Complete transcription-plus-cleanup measurements on the available Mac remain pending; M1/8 GB performance work is optional and deferred.
 - [SAFETY_REVIEW.md](SAFETY_REVIEW.md): independent review of insertion, clipboard, secure-field, shortcut, and correction attribution limits.
 
-The updated [go/no-go report](../spike/FEASIBILITY.md) preserves historical app results and distinguishes them from checks run during this continuation. The host is M3/16 GB/macOS 26.6.2; M1/8 GB testing is deferred and no longer required.
+This directory contains historical milestone-one validation tooling. Its dated results are not current app release clearance.
 
 ## Open acceptance gates
 

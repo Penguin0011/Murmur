@@ -12,7 +12,7 @@ Hardware scope: Apple Silicon, including M1; Intel support is deferred beyond la
 
 Proposed launch boundary: dictation and recovery, without meeting recording, an AI assistant, billing accounts, or automatic message submission. Amended: meeting recording is in scope (October 14, 2026), as specified in section 11 (approved October 15, 2026).
 
-Decision, October 14, 2026 (user: close the feature gaps with BetterWispr): the gaps listed in [BETTERWISPR_GAPS.md](BETTERWISPR_GAPS.md) are in scope, except #11 (one-fix learned replacement), which awaits a decision. They bring in a meeting notetaker, which replaces the "without meeting recording" boundary above, plus opt-in screen context for AI cleanup and a local Home/Insights page. Multilingual models stay out of scope. Each amended rule (local AI cleanup, tone, screen-context disclosure, meetings) still needs its own documented decision when its workstream lands. The meetings decision is section 11, approved by the user on October 15, 2026.
+Decision, October 14, 2026 (user: close the feature gaps with BetterWispr): the planned scope includes a meeting notetaker, which replaces the "without meeting recording" boundary above, plus opt-in screen context for AI cleanup and a local Home/Insights page. Multilingual models stay out of scope. Each amended rule (local AI cleanup, tone, screen-context disclosure, meetings) still needs its own documented decision when its workstream lands. The meetings decision is section 11, approved by the user on October 15, 2026.
 
 ## 2. Confirmed requirements
 
@@ -295,7 +295,7 @@ Any local candidate or cloud route must meet these thresholds on the same corpus
 
 ### Decision: spoken commands, numbers and the email layout — October 14, 2026
 
-BetterWispr gaps #2–#5 (`BETTERWISPR_GAPS.md`) ship as one cleanup option, "Spoken commands and numbers" (`CleanupOptions.spoken`, key `cleanupSpokenCommands`). It is on by default and off in Faithful. Saved options from before it existed decode with it off. `RuleCleaner.spokenCommands` runs first in local cleanup. It is conservative: when a rule is unsure, the words stay. It handles:
+Spoken commands and numbers ship as one cleanup option, "Spoken commands and numbers" (`CleanupOptions.spoken`, key `cleanupSpokenCommands`). It is on by default and off in Faithful. Saved options from before it existed decode with it off. `RuleCleaner.spokenCommands` runs first in local cleanup. It is conservative: when a rule is unsure, the words stay. It handles:
 - dictated marks and layout ("comma", "period", "new paragraph")
 - spoken numbers that contain hundred or a scale word, or come before "percent" ("250,000", "2,50,000", "2.5 million", "10%")
 - @ and # ("at the rate", "hashtag", "hash forty two")
@@ -319,7 +319,7 @@ Without the frame, an added greeting or sign-off is still rejected. The frame ne
 
 **Status: approved by the user, October 14, 2026: options 1 and 2 below (opt-in, labelled, not the default). Option 3 was declined.** This amends the October 7, 2026 decision in section 4 that local AI cleanup is not a launch target. The default route stays local rules either way.
 
-That decision was about downloaded models: their RAM and compute cost slow other apps. Apple's FoundationModels system model doesn't have that cost. Murmur doesn't download it, macOS manages its memory, and Murmur already requires macOS 26. So BETTERWISPR_GAPS.md #1 adds it as a cleanup route: `CleanupChoice.appleIntelligence`, implemented in `app/AppleCleanup.swift`.
+That decision was about downloaded models: their RAM and compute cost slow other apps. Apple's FoundationModels system model doesn't have that cost. Murmur doesn't download it, macOS manages its memory, and Murmur already requires macOS 26. So Apple Intelligence was added as a cleanup route: `CleanupChoice.appleIntelligence`, implemented in `app/AppleCleanup.swift`.
 - It uses the same `CleanupPrompt` and `CleanupGuard` as the other routes.
 - It uses the October 6 failure policy:
   - When the model is unavailable, it names the reason (this Mac is not eligible, Apple Intelligence is off, or the model is not ready).
@@ -489,7 +489,7 @@ The user removed M1 performance from the required gates. M1/8 GB benchmarking an
 
 **Status: Approved by the user, October 15, 2026** ("I accept all nine W7 recommendations (Q1–Q9)"). It covers BetterWispr gaps #22 (notetaker), #23 (meeting detection) and #24 (speaker separation), brought into scope by the user's decision of October 14, 2026 (section 1). The user's answers to the open questions are recorded in 11.13. The amendments in 11.12 have been applied to the sections they name. Build status is tracked per milestone in 11.11.
 
-BetterWispr's meeting feature (its CHANGELOG, v0.1.0–v0.1.6) was used for scope only: "Me" and "Them" capture, a live transcript, notes, call detection and speaker labels. No code, prompts or numbers are taken from it. Murmur is MIT, and parts of BetterWispr derive from GPL-3.0 VoiceInk (BETTERWISPR_GAPS.md).
+BetterWispr's meeting feature (its CHANGELOG, v0.1.0–v0.1.6) was used for scope only: "Me" and "Them" capture, a live transcript, notes, call detection and speaker labels. No code, prompts or numbers are taken from it. Murmur is MIT, and parts of BetterWispr derive from GPL-3.0 VoiceInk.
 
 ### 11.1 What a meeting is
 
@@ -671,7 +671,7 @@ Every result records machine model, RAM, macOS and app versions and raw numbers,
 
 ### 11.11 Phasing
 
-Each milestone is its own pull request with its own evidence (11.10) and live-test checklist. The size uses the BETTERWISPR_GAPS.md scale.
+Each milestone is its own pull request with its own evidence (11.10) and live-test checklist. Sizes use the scale defined in this plan.
 
 | Milestone | Scope | Depends on | Size |
 |---|---|---|---|
