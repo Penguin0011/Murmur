@@ -1,5 +1,7 @@
 # Local transcription comparison — October 6, 2026
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
 ## Result
 
 On this initial read-speech sample, the current Parakeet Unified model had the lowest word error rate and matched Parakeet V2's inference speed. Keep Unified as the current choice for now; this small clean-speech comparison is not enough to claim it is best for spontaneous dictation. [Certain]

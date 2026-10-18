@@ -1,5 +1,7 @@
 # Module one — milestone 1 validation
 
+**Standalone validation tooling.** The acceptance gates and measurements below describe the milestone-1 checkpoint, not the current app. Use [the main README](../README.md) to build Murmur and [the documentation guide](../DOCUMENTATION.md) for later evidence. [Certain]
+
 Scope: PRD milestone 1. GO for bounded engineering and validation; production/release remains NO-GO. This module contains standalone tools, not an application skeleton. [Certain]
 
 ## Workstreams

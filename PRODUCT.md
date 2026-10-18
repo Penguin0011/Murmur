@@ -4,7 +4,7 @@
 
 ## Platform
 
-Native macOS 26 on Apple Silicon. The skill's platform enum has no macOS value; this app follows macOS conventions. [Certain]
+Native macOS 26 or later on Apple Silicon, following macOS interaction conventions. [Certain]
 
 ## Stack
 
@@ -20,11 +20,11 @@ Local-first inference, model selection, tap/hold shortcuts, no Dock icon, option
 
 ## Capabilities and constraints
 
-The selected local model is Parakeet Unified. M1 performance validation is deferred; publish measured configurations only. Reject known secure fields, retain uncertain output, and never automatically retry uncertain insertion. Cloud, cleanup, dictionary learning, full model management, signing/notarization and releases remain separate work. [Certain]
+The selected local model is Parakeet Unified. M1 performance validation is deferred; publish measured configurations only. Reject known secure fields, retain uncertain output, and never automatically retry uncertain insertion. Cloud routes, cleanup, dictionary learning, model management and meeting notes are implemented development features. Production signing/notarization, binary redistribution review and live release validation remain pending. [Certain]
 
 ## Visual commitment
 
-The user-supplied Murmur Settings Final standalone.html, active balanced variant, defines the main window: near-white paper, dark ink, Instrument Serif headings, DM Sans content, text sidebar navigation, blue underlines, pill actions, and rounded switches. Preserve native macOS interaction and recovery; floating dictation indicators and meeting panels retain their native glass treatment. Meetings content and sheets share the window typography, while its floating recording panel retains system typography. [Certain]
+[DESIGN.md](DESIGN.md) records the implemented main-window design: near-white paper, dark ink, Instrument Serif headings, DM Sans content, text sidebar navigation, blue underlines, pill actions, and rounded switches. Preserve native macOS interaction and recovery; floating dictation indicators and meeting panels retain their native glass treatment. Meetings content and sheets share the window typography, while its floating recording panel retains system typography. [Certain]
 
 ## Evidence on hand
 

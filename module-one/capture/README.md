@@ -1,5 +1,7 @@
 # Milestone one: native capture probe
 
+**Tool scope.** Commands below run from the repository root. This README describes standalone validation tools and dated measurements; missing features in these harnesses do not imply they are missing from the app. See [CONTRIBUTING.md](../../CONTRIBUTING.md) for app checks. [Certain]
+
 This standalone Swift harness uses AVAudioEngine and AVAudioFile; it has no app skeleton or third-party dependencies. [Certain] The weakest remaining claim is first-word capture: installing the tap before engine startup avoids an intentional tap/hold delay, but only a live shortcut-to-audio test can establish whether startup drops speech. [Certain]
 
 Build and run non-recording checks from the repository root:

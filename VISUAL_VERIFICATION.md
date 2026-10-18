@@ -1,5 +1,7 @@
 # Next-agent handoff: insertion and visual verification
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
 ## Assignment and completion
 
 Review the entire insertion/recovery flow, run the visual and behavioral matrix below, fix regressions, and leave measured evidence. **Create a pull request and merge it when the review is complete and required checks pass.** Do not stop after writing a report or opening the PR.

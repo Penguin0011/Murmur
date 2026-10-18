@@ -1,5 +1,7 @@
 # Dictation — product requirements and agent delivery plan
 
+**Requirements and decision log.** This document includes proposals, superseding decisions and acceptance gates, not a list of verified shipped features. Start with [README.md](README.md) for current setup and [DOCUMENTATION.md](DOCUMENTATION.md) for the documentation map. [Certain]
+
 Status: working draft, October 2, 2026. Confirmed requirements reflect the conversation; proposed decisions require review. [Certain]
 
 ## 1. Product goal
