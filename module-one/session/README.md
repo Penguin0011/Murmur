@@ -9,7 +9,7 @@ swiftc spike/Shortcut.swift module-one/capture/Capture.swift module-one/session/
 /tmp/dictation-session --check
 ```
 
-The synthetic check exercises start, tap stop, hold release, processing exclusion, Escape/event-stream-loss deletion, startup failure, queued failed-start recovery and shutdown without accessing the microphone. [Certain]
+The synthetic check exercises start, double-press toggle and stop, hold release, processing exclusion, Escape/event-stream-loss deletion, startup failure, queued failed-start recovery and shutdown without accessing the microphone.
 
 Explicit live capture:
 
@@ -18,7 +18,7 @@ Explicit live capture:
 /tmp/dictation-session --listen --processor "$PWD/module-one/session/process.py" --model-directory /absolute/model/directory
 ```
 
-Press starts capture immediately; a release after at least 250 ms finishes, while a short tap leaves capture listening until the next press. Escape, event stream loss, SIGINT/SIGTERM and listener shutdown cancel active recording and delete audio. Retry audio is purged every minute while the listener runs. [Certain] Capture reaches processing after five minutes (`CaptureSession.recordingLimit`) or on engine/write failure; partial audio is retained when frames exist. Processing blocks new sessions until the processor exits. [Certain]
+Press starts capture immediately. A hold of at least 250 ms finishes on release; two quick presses within the 400 ms double-press window latch a toggle recording, which the next press finishes. A lone short tap is canceled after that window. Escape, event stream loss, SIGINT/SIGTERM and listener shutdown cancel active recording and delete audio. Retry audio is purged every minute while the listener runs. Capture reaches processing after five minutes (`CaptureSession.recordingLimit`) or on engine/write failure; partial audio is retained when frames exist. Processing blocks new sessions until the processor exits. [Certain]
 
 Keyboard callbacks copy and enqueue each event on the main queue; state changes and capture actions execute together to avoid blocking the event tap. A processing child receives termination on shutdown; audio is retained for processing failure or cancellation. No transcription output is relayed to the terminal. Without a processor, completed WAV files are retained for retry with the capture store's 24-hour policy. [Certain]
 

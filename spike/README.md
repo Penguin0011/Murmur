@@ -50,6 +50,6 @@ The observer polls at 100 ms for up to 60 seconds, conservatively stops on chang
 
 Clipboard fallback snapshots all readable pasteboard types and stages a unique ownership token with its text. It verifies focus, token, and change count before posting Command-V and restores only while token and count remain its own. NSPasteboard has no atomic compare-and-post or compare-and-restore; those remaining races need live clipboard-manager testing. The fixed 500 ms paste wait can return unverified in slower apps and never triggers an automatic retry. [Certain]
 
-Insertion and learning accept only AXTextField/AXTextArea roles. A readable AXWebArea or document root is not a supported destination. Unknown browser text-field types remain unverified and excluded from learning. [Certain]
+The readable-field path accepts AXTextField/AXTextArea roles; AXWebArea and document roots do not provide a supported readable destination. The insertion path can still attempt one clipboard paste into an unreadable external app after its permission, secure-input, and focus checks. This standalone observer still excludes browser text fields of unknown type; the app has a separate read-back-based path for them. Cross-app delivery and learning limits are recorded in [FEASIBILITY.md](FEASIBILITY.md).
 
 No persistent recovery store exists in this spike. Do not use real or sensitive dictated content. Production insertion must save output first. See [FEASIBILITY.md](FEASIBILITY.md) for the evidence matrix and outstanding gates. [Certain]

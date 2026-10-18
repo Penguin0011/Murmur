@@ -32,7 +32,7 @@ The first build needs internet access to fetch pinned FluidAudio source and its 
 
 ## First run
 
-Open Settings, download the speech model (review its license first), and grant the permissions shown by the app. Local dictation needs no provider account or API key. Cloud routes are optional and require your own provider configuration. Start with a disposable text field and synthetic speech; the default shortcut is Right Option (hold to record and release to finish, or tap to start and tap again to finish). Review the shortcut and insertion options in Settings → General. [Certain]
+Open Settings, download the speech model (review its license first), and grant the permissions shown by the app. Local dictation needs no provider account or API key. Cloud routes are optional and require your own provider configuration. Start with a disposable text field and synthetic speech; the default shortcut is Right Option: hold for at least 250 ms and release to finish, or double-press to start a toggle recording and press again to finish. A lone short tap is canceled; enabling **Press once to start, again to stop** in Settings → General changes it to tap-to-start/tap-to-stop. Review the shortcut and insertion options in Settings → General.
 
 For an isolated interface preview with synthetic data and no capture or insertion, run: [Certain]
 

@@ -4,11 +4,13 @@ Murmur is pre-release. Use the [documentation guide](DOCUMENTATION.md) to distin
 
 ## Requirements
 
-- An Apple Silicon Mac running macOS 26, with the Swift toolchain (the development host uses Swift 6.3.3). [Certain]
+- An Apple Silicon Mac running macOS 26 or later, with Xcode Command Line Tools or Xcode and Swift 6.0 or later for the pinned helper package. The app compiles in Swift 5 language mode.
 - Python 3 for the corpus and model scripts. [Certain]
 - Foundation-only modules and their checks also build on Linux; they were last checked with Swift 6.1.2. [Certain]
 
 ## Build
+
+Run commands from the repository root. The first helper build needs internet access to resolve the pinned FluidAudio package.
 
 ```sh
 app/build.sh
@@ -56,6 +58,7 @@ Foundation-only modules (macOS or Linux):
 
 ```sh
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_processing.swift -o /tmp/murmur-processing-check && /tmp/murmur-processing-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_modes.swift -o /tmp/murmur-modes-check && /tmp/murmur-modes-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/check_apple_cleanup.swift -o /tmp/murmur-apple-check && /tmp/murmur-apple-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift app/check_routes.swift -o /tmp/murmur-routes-check && /tmp/murmur-routes-check
@@ -66,6 +69,7 @@ swiftc app/Insights.swift app/check_insights.swift -o /tmp/murmur-insights-check
 swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_meetings.swift -o /tmp/murmur-meetings-check && /tmp/murmur-meetings-check
 swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/CallDetection.swift app/check_call_detection.swift -o /tmp/murmur-detection-check && /tmp/murmur-detection-check
 swiftc app/Retention.swift app/Cleanup.swift app/Meetings.swift app/MeetingNotes.swift app/MeetingSpeakers.swift app/check_speakers.swift -o /tmp/murmur-speakers-check && /tmp/murmur-speakers-check
+swiftc -swift-version 5 app/ModelDownload.swift app/check_model_download.swift -o /tmp/murmur-model-check && /tmp/murmur-model-check
 swiftc app/Retention.swift app/ModelDownload.swift app/Updates.swift app/AppServices.swift app/check_app_services.swift -o /tmp/murmur-app-services-check && /tmp/murmur-app-services-check
 swiftc module-one/models/Runner/Sources/ModelBench/BoostFilter.swift app/check_boost_filter.swift -o /tmp/murmur-boost-check && /tmp/murmur-boost-check
 python3 app/tools/build_cleanup_corpus.py
@@ -92,7 +96,7 @@ app/check_ui.sh --meetings --speakers --meeting-notes
 app/check_ui.sh --meetings --separating
 ```
 
-These commands come from [app/README.md](app/README.md), which lists every fixture flag and is the source of truth if they drift. Spike and model checks are in `spike/README.md` and `module-one/*/README.md`. [Certain]
+Additional fixture flags are described in [app/README.md](app/README.md). Standalone checks and their build commands are in the [insertion spike](spike/README.md), [capture probe](module-one/capture/README.md), [capture session](module-one/session/README.md), and [model tooling](module-one/models/README.md) guides. UI fixtures and live capture/insertion probes require separate validation; a fixture is not live dictation evidence.
 
 ## Conventions
 
@@ -105,7 +109,7 @@ These are the patterns in the existing code and docs. [Likely]
 - Treat dictated text as untrusted data. Never log transcript text, API keys or response bodies; error reasons are content-free enums.
 - Store API keys only in the Keychain. Never send transcripts, audio, dictionary entries or keys in update checks.
 - No silent cloud fallback and no silent model or provider substitution.
-- Document claims with evidence. In Markdown docs, end each factual claim with [Certain], [Likely] or [Guessing], and keep prose plain and short. Report device results only for the configuration actually measured.
+- Ground documentation in the implementation or cited evidence, keep prose plain and short, and state validation limits directly. Report device results only for the configuration actually measured; keep dated results distinct from current instructions.
 
 ## Commits
 
