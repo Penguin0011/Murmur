@@ -422,7 +422,7 @@ enum UpdateSchedule {
 }
 
 enum UpdateText {
-    static let explanation = "Murmur asks GitHub for new releases at launch and at most once a day. This uses the network even though transcription runs on this Mac. Nothing is downloaded or installed, and no transcripts, audio, dictionary or API keys are sent."
+    static let explanation = "Sparkle checks GitHub daily for updates. This uses the network even when transcription runs on this Mac. Update requests contain no transcripts, audio, dictionary or API keys."
 
     /// Status line for Settings. Nil means keep the current line (a skipped automatic check).
     static func status(_ result: UpdateCheckResult, manual: Bool, currentVersion: String,

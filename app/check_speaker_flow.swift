@@ -43,6 +43,7 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
         func kept(_ m: Meeting) -> Bool { fm.fileExists(atPath: SpeakerAudio.file(speakerRoot, meeting: m.id).path) }
 
         let recorder = MeetingRecorder(defaults: UserDefaults(suiteName: "murmur-speaker-flow-\(UUID().uuidString)")!)
+        check(!recorder.hasPendingUpdateWork, "idle meetings allow application updates")
         recorder.transcribe = { _, done in done(nil) }
         recorder.verifySpeakerModel = { true }
         // Notes are written by the real writer; the stand-in model records what it was sent.
@@ -67,12 +68,18 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
         // With the model: separation runs, labels apply and saved, the audio is deleted.
         recorder.helper = helper; recorder.speakerModel = models
         recorder.reload()
+        check(recorder.hasPendingUpdateWork, "speaker separation postpones application updates after Stop")
         spin { recorder.meetings.first { $0.id == waiting.id }?.speakers?.state != .pending }
         let done = recorder.meetings.first { $0.id == waiting.id }
         check(done?.speakers?.state == .done && done?.lines.map(\.speaker) == [1, 2], "the helper's segments label the lines")
         check(!kept(waiting), "the call audio is deleted once diarization finishes")
         spin { notes(done!) != nil }
         check(states[waiting.id] == .done && prompts[waiting.id]?.contains("[L1 Speaker 1 0:00] First voice.") == true && prompts[waiting.id]?.contains("[L2 Speaker 2 0:05]") == true && notes(waiting)?.keyPoints.count == 1, "notes are written after separation, with speaker labels")
+        check(!recorder.hasPendingUpdateWork, "application updates resume after separation and notes finish")
+        recorder.writeNotes(waiting.id)
+        check(recorder.hasPendingUpdateWork, "writing notes postpones application updates after Stop")
+        spin { !recorder.hasPendingUpdateWork }
+        check(!recorder.hasPendingUpdateWork && !recorder.notesWriting.contains(waiting.id), "application updates resume after rewritten notes finish")
         check((try store.meetings().first { $0.id == waiting.id })?.lines.map(\.speaker) == [1, 2], "the labels are saved with the meeting")
         recorder.renameSpeaker(2, to: "Priya", in: waiting.id)
         check((try store.meetings().first { $0.id == waiting.id })?.speakers?.names[2] == "Priya", "a rename is saved")
@@ -107,7 +114,23 @@ func check(_ condition: @autoclosure () throws -> Bool, _ name: String) {
         check(recorder.delete(Set<String>()).isEmpty, "empty bulk deletion is harmless")
         let liveCheck = MeetingRecorder()
         liveCheck.showFixture([waiting], live: waiting)
+        check(liveCheck.hasPendingUpdateWork, "live recording postpones application updates")
         check(liveCheck.delete(Set([waiting.id])) == [waiting.id] && liveCheck.live?.id == waiting.id && liveCheck.meetings.count == 1, "bulk deletion refuses a live meeting and returns its ID")
+
+        let recovering = try pending(audio: false)
+        let recoveryFolder = MeetingAudio.folder(audioRoot, meeting: recovering.id)
+        try fm.createDirectory(at: recoveryFolder, withIntermediateDirectories: true)
+        try Data().write(to: recoveryFolder.appendingPathComponent(MeetingAudio.name(.me, start: 0)))
+        let recoveryCheck = MeetingRecorder()
+        recoveryCheck.configure(store: store, audioRoot: audioRoot, persists: true)
+        var finishTranscription: ((String?) -> Void)?
+        recoveryCheck.transcribe = { _, done in finishTranscription = done }
+        recoveryCheck.finishLeftovers(recovering.id)
+        check(recoveryCheck.live == nil && recoveryCheck.hasPendingUpdateWork, "final transcription postpones updates without a live meeting")
+        spin { finishTranscription != nil }
+        finishTranscription?("Recovered final words.")
+        spin { !recoveryCheck.hasPendingUpdateWork }
+        check(!recoveryCheck.hasPendingUpdateWork && recoveryCheck.finishing.isEmpty, "application updates resume after final transcription completes")
 
         // Force the store's identifier validation to refuse deletion without touching user files.
         let refused = Meeting(id: "../invalid", recordedAt: Date(), source: .microphoneOnly)

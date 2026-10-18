@@ -96,6 +96,8 @@ private let meetingLog = Logger(subsystem: "cc.clouddev.dictation", category: "m
     /// `retry-audio/speakers`, beside the chunk folder, so Delete All Data's retry-audio step removes it.
     var speakerRoot: URL? { audioRoot?.deletingLastPathComponent().appendingPathComponent("speakers", isDirectory: true) }
 
+    var hasPendingUpdateWork: Bool { live != nil || !finishing.isEmpty || !notesWriting.isEmpty || !separating.isEmpty }
+
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
 
     /// Points at `history/meetings` and `retry-audio/meetings`; finishes records a crash left open.
