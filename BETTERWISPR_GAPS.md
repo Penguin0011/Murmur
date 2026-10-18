@@ -1,8 +1,8 @@
 # BetterWispr feature gaps: October 14, 2026
 
-**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See [README.md](README.md) for current setup.
 
-This compares Murmur `main` (`0b0af68`) with [BetterWispr](https://github.com/opennookorg/betterwispr) at `d504749` (v0.1.5, Apache-2.0). It lists what BetterWispr has that Murmur lacks and the plan to close each gap. [Certain]
+This compares Murmur `main` (`0b0af68`) with [BetterWispr](https://github.com/opennookorg/betterwispr) at `d504749` (v0.1.5, Apache-2.0). It lists what BetterWispr has that Murmur lacks and the plan to close each gap.
 
 **Scope decision (user, October 14, 2026):**
 - In scope:
@@ -10,9 +10,9 @@ This compares Murmur `main` (`0b0af68`) with [BetterWispr](https://github.com/op
   - screen context for AI cleanup
   - a Home/Insights page
   - a meeting notetaker
-- Out of scope: multilingual models (Parakeet v3, Whisper, a language picker). Murmur stays English-first. [Certain]
+- Out of scope: multilingual models (Parakeet v3, Whisper, a language picker). Murmur stays English-first.
 
-**Licensing:** BetterWispr adapted its correction watcher, its AI correction reviewer, its polish prompt and its live word-agreement preview from VoiceInk, which is GPL-3.0 (see their `docs/oss-reuse.md`). Murmur is MIT. Reimplement ideas only. Do not copy code or prompts from BetterWispr. [Certain]
+**Licensing:** BetterWispr adapted its correction watcher, its AI correction reviewer, its polish prompt and its live word-agreement preview from VoiceInk, which is GPL-3.0 (see their `docs/oss-reuse.md`). Murmur is MIT. Reimplement ideas only. Do not copy code or prompts from BetterWispr.
 
 ## Where Murmur is already ahead
 

@@ -1,12 +1,12 @@
 # Contributing to Murmur
 
-Murmur is pre-release. Use the [documentation guide](DOCUMENTATION.md) to distinguish current instructions, requirements and dated development evidence. Read [PRD.md](PRD.md) for requirements; [HANDOFF.md](HANDOFF.md) preserves earlier checkpoints rather than a current task list. [Certain]
+Murmur is pre-release. Use the root [README](README.md) for visitor setup and privacy information. Read [PRD.md](PRD.md) for requirements.
 
 ## Requirements
 
-- An Apple Silicon Mac running macOS 26, with the Swift toolchain (the development host uses Swift 6.3.3). [Certain]
-- Python 3 for the corpus and model scripts. [Certain]
-- Foundation-only modules and their checks also build on Linux; they were last checked with Swift 6.1.2. [Certain]
+- An Apple Silicon Mac running macOS 26, with the Swift toolchain (the development host uses Swift 6.3.3).
+- Python 3 for the corpus and model scripts.
+- Foundation-only modules and their checks also build on Linux; they were last checked with Swift 6.1.2.
 
 ## Build
 
@@ -15,9 +15,9 @@ app/build.sh
 open runtime/Murmur.app
 ```
 
-`build.sh` builds the pinned `ModelBench` helper (incrementally, every run), compiles the app with `-swift-version 5`, and signs both executables with Hardened Runtime. Development builds use `clouddev Development` if present, otherwise ad hoc; the app has only the audio-input entitlement. Set `MURMUR_SIGN_IDENTITY` to use another identity; a stable identity keeps macOS permissions across rebuilds. [Certain]
+`build.sh` builds the pinned `ModelBench` helper (incrementally, every run), compiles the app with `-swift-version 5`, and signs both executables with Hardened Runtime. Development builds use `clouddev Development` if present, otherwise ad hoc; the app has only the audio-input entitlement. Set `MURMUR_SIGN_IDENTITY` to use another identity; a stable identity keeps macOS permissions across rebuilds.
 
-For distribution, `MURMUR_RELEASE=1` requires a valid Developer ID Application identity and an existing notarytool Keychain profile. It signs with secure timestamps, submits for notarization, staples and validates the ticket, and runs Gatekeeper assessment; any failed step stops the build. [Certain]
+For distribution, `MURMUR_RELEASE=1` requires a valid Developer ID Application identity and an existing notarytool Keychain profile. It signs with secure timestamps, submits for notarization, staples and validates the ticket, and runs Gatekeeper assessment; any failed step stops the build.
 
 ```sh
 MURMUR_RELEASE=1 \
@@ -25,15 +25,15 @@ MURMUR_RELEASE=1 \
   MURMUR_NOTARY_PROFILE='your-existing-notary-profile' app/build.sh
 ```
 
-`runtime/` and `spike/.build/` are ignored by Git. Do not commit audio, transcripts, model files or API keys. [Certain]
+`runtime/` and `spike/.build/` are ignored by Git. Do not commit audio, transcripts, model files or API keys.
 
 ## Publication checks
 
-Run the redacted secret scans in [SECURITY.md](SECURITY.md) before sharing a branch or making a release. Review all fetched branches and PR refs, and hosted content separately before changing repository visibility. Keep private audit evidence outside this tree. [Certain]
+Run the redacted secret scans in [SECURITY.md](SECURITY.md) before sharing a branch or making a release. Review all fetched branches and PR refs, and hosted content separately before changing repository visibility. Keep private audit evidence outside this tree.
 
 ## Checks
 
-The commands in this section use offline or loopback synthetic checks; they do not record audio, insert text or inject keys. Run the ones that cover your change, and all of them before a release. Commands below run from the repository root. When using Command Line Tools with its macOS 27 SDK, select its macOS 26 SDK if available, as the build scripts do: [Certain]
+The commands in this section use offline or loopback synthetic checks; they do not record audio, insert text or inject keys. Run the ones that cover your change, and all of them before a release. Commands below run from the repository root. When using Command Line Tools with its macOS 27 SDK, select its macOS 26 SDK if available, as the build scripts do:
 
 ```sh
 # In the same shell used for the swiftc checks below.
@@ -92,28 +92,28 @@ app/check_ui.sh --meetings --speakers --meeting-notes
 app/check_ui.sh --meetings --separating
 ```
 
-These commands come from [app/README.md](app/README.md), which lists every fixture flag and is the source of truth if they drift. Spike and model checks are in `spike/README.md` and `module-one/*/README.md`. [Certain]
+These commands come from [app/README.md](app/README.md), which lists every fixture flag and is the source of truth if they drift. Spike and model checks are in `spike/README.md` and `module-one/*/README.md`.
 
 ## Conventions
 
-These are the patterns in the existing code and docs. [Likely]
+These are the patterns in the existing code and docs.
 
 - Native Swift with Apple frameworks (Foundation, AppKit, SwiftUI, AVFoundation, Security). No third-party Swift packages besides the pinned FluidAudio runtime. Keep new logic Foundation-only where possible, so its checks run on Linux too.
 - Small concrete types per concern (one file per module, such as `Cleanup.swift` or `Providers.swift`), not a plugin framework (PRD section 7).
-- Checks are standalone executables named `check_<module>.swift`, compiled with `swiftc` next to the files they test. They exit non-zero on failure and need no external network, real keys or microphone; `check_http.py` uses a loopback server with synthetic data. [Certain]
+- Checks are standalone executables named `check_<module>.swift`, compiled with `swiftc` next to the files they test. They exit non-zero on failure and need no external network, real keys or microphone; `check_http.py` uses a loopback server with synthetic data.
 - Code must compile under `-swift-version 5`, which `build.sh` uses.
 - Treat dictated text as untrusted data. Never log transcript text, API keys or response bodies; error reasons are content-free enums.
 - Store API keys only in the Keychain. Never send transcripts, audio, dictionary entries or keys in update checks.
 - No silent cloud fallback and no silent model or provider substitution.
-- Document claims with evidence. In Markdown docs, end each factual claim with [Certain], [Likely] or [Guessing], and keep prose plain and short. Report device results only for the configuration actually measured.
+- Document claims with evidence. In Markdown docs, distinguish measured results from assumptions and keep prose plain and short. Report device results only for the configuration actually measured.
 
 ## Commits
 
-- Make small logical commits after each working checkpoint. [Certain]
-- Use Conventional Commit subjects: `type(scope): summary`, imperative and lowercase, such as `feat(cleanup): add …`, `fix(ui): …`, `docs(providers): …`, `test: …`, `refactor(app): …`. The scope is optional. [Certain]
-- Merge commits describe what is merged in plain words, such as "Merge cloud providers, Keychain credentials and GitHub update checker". [Certain]
+- Make small logical commits after each working checkpoint.
+- Use Conventional Commit subjects: `type(scope): summary`, imperative and lowercase, such as `feat(cleanup): add …`, `fix(ui): …`, `docs(providers): …`, `test: …`, `refactor(app): …`. The scope is optional.
+- Merge commits describe what is merged in plain words, such as "Merge cloud providers, Keychain credentials and GitHub update checker".
 - Write commit messages as a human and do not add Codex co-author trailers.
 
 ## Licensing
 
-Murmur's source is MIT licensed ([LICENSE](LICENSE)); contributions are accepted under the same license. Add any new dependency or model to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) after checking its license at the pinned version. [Certain]
+Murmur's source is MIT licensed ([LICENSE](LICENSE)); contributions are accepted under the same license. Add any new dependency or model to [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) after checking its license at the pinned version.
