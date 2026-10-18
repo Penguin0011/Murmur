@@ -1,5 +1,7 @@
 # Milestone 0 feasibility report
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](../DOCUMENTATION.md) for current entry points. [Certain]
+
 Decision, updated October 2, 2026: **GO for milestone 1 validation work; NO-GO for production readiness or release**. Recorded live evidence establishes Right Option tap/hold and attributable observation in TextEdit and the Codex composer; it permits continued engineering, not a claim of complete acceptance. [Certain]
 
 The weakest unresolved gate is safe, recoverable end-to-end delivery on the available Mac. M1/8 GB performance is deferred by user decision and is not a development or release blocker. Microphone first-word capture, permission revocation, clipboard-manager races, delayed AX-write duplicate delivery, and semantic eligibility for learned replacements also remain unproved. [Certain]

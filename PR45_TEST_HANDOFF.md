@@ -1,10 +1,12 @@
 # PR #45 test handoff
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
 ## Assignment and deliverable
 
 Test the current PR #45 behavior, assess whether removing custom-provider dictionary prompts reduces vocabulary echoes while retaining useful spelling corrections, and fill in [PR45_TEST_RESULTS.md](PR45_TEST_RESULTS.md). Do not merge PR #45, change production behavior, restore the removed prompt/filter, or run another agent. Return the completed results file and local evidence paths to the user; the user will bring the results back to the originating agent.
 
-This handoff is a test plan, not a completed test report. The results template starts at NOT RUN. [Certain]
+This handoff is a test plan, not a completed test report. The linked results file now contains completed follow-ups; the original assignment below is retained for provenance. [Certain]
 
 ## Context to preserve
 

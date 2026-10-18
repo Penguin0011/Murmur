@@ -1,5 +1,7 @@
 # Murmur security and privacy audit
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
 Audit date: October 5, 2026, America/Los_Angeles. [Certain]
 
 ## Remediation — October 5, 2026

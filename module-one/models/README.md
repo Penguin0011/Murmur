@@ -1,6 +1,8 @@
 # Module one: model validation checkpoint
 
-The complete transcription + cleanup pipeline on the available Mac remains unverified. M1/8 GB performance work is deferred by user decision and does not block development or release. [Certain]
+**Tool scope.** Commands below run from the repository root. This README describes standalone validation tools and dated measurements; missing features in these harnesses do not imply they are missing from the app. See [CONTRIBUTING.md](../../CONTRIBUTING.md) for app checks. [Certain]
+
+At the October 2 checkpoint below, the complete transcription + cleanup benchmark on the available Mac remained unverified. Later measurements are recorded in [MODEL_BENCHMARK.md](../../MODEL_BENCHMARK.md) and [STREAMING_TRANSCRIPTION.md](../../STREAMING_TRANSCRIPTION.md). M1/8 GB performance work is deferred by user decision and does not block development or release. [Certain]
 
 ## Exact artifacts and API
 
@@ -10,7 +12,7 @@ FluidAudio is pinned to `0b1f46289fe27d95b5e66ad8be46e64f5ee02ae7`. Its batch Un
 
 The manager computes mel features in Swift, defaults to INT8, constrains the INT8 encoder to CPU+ANE when configured `.all`, and throws on INT8 load failure; FP16 requires an explicit configuration change. [Certain] The selected batch manifest therefore contains both encoders plus decoder, single-step joint, vocab, metadata/config; their total is **1,801,783,964 bytes** (~1.80 GB decimal), compared with **11,249,362,739 bytes** for the complete multi-variant conversion repository. [Certain] These are transfer-file totals, not measured installed/working memory. [Certain] [Pinned loader](https://github.com/FluidInference/FluidAudio/blob/0b1f46289fe27d95b5e66ad8be46e64f5ee02ae7/Sources/FluidAudio/ASR/Parakeet/Unified/UnifiedAsrManager.swift)
 
-The manifest also snapshots V2 (`ee09c569f73759e6d44c9bd16766f477b2b36d39`, complete repository 2,575,138,422 bytes) and WhisperKit's `openai_whisper-large-v3_turbo` subset (`0f63a7800b00dd0226abd051b906c246e1907482`, 3,195,115,988 bytes). [Certain] V2 includes legacy/alternative bundles; this total is not its eventual selected download footprint. [Certain] Neither comparator has an executable adapter here yet. [Certain] [V2 source](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39), [WhisperKit source](https://huggingface.co/argmaxinc/whisperkit-coreml/tree/0f63a7800b00dd0226abd051b906c246e1907482/openai_whisper-large-v3_turbo)
+The manifest also snapshots V2 (`ee09c569f73759e6d44c9bd16766f477b2b36d39`, complete repository 2,575,138,422 bytes) and WhisperKit's `openai_whisper-large-v3_turbo` subset (`0f63a7800b00dd0226abd051b906c246e1907482`, 3,195,115,988 bytes). [Certain] V2 includes legacy/alternative bundles; this total is not its eventual selected download footprint. [Certain] The bundled runner selects Unified rather than these comparators; later comparison results from separate benchmark tooling are in [MODEL_BENCHMARK.md](../../MODEL_BENCHMARK.md). [Certain] [V2 source](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/tree/ee09c569f73759e6d44c9bd16766f477b2b36d39), [WhisperKit source](https://huggingface.co/argmaxinc/whisperkit-coreml/tree/0f63a7800b00dd0226abd051b906c246e1907482/openai_whisper-large-v3_turbo)
 
 Upstream Unified metadata lists NVIDIA Open Model License, while FluidInference conversion metadata lists CC-BY-4.0. [Certain] This checkpoint does not resolve the discrepancy or authorize redistribution; release stays gated on correct license/notices. [Certain] [Upstream](https://huggingface.co/nvidia/parakeet-unified-en-0.6b), [conversion](https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml)
 
@@ -42,7 +44,7 @@ The child RSS metric excludes external Core ML/ANE service memory and is not tot
 
 Begin with deterministic/no-model cleanup as the quality/control baseline, then a small instruct-model candidate only after its exact quantized artifact/runtime and corpus are pinned; no local LLM has passed quality/memory acceptance here. [Certain]
 
-Fireworks documents hosted Whisper speech transcription, including `whisper-v3-turbo` through its audio endpoint. [Certain] [Official guide](https://docs.fireworks.ai/guides/querying-asr-models)
+The October 2 research considered Fireworks hosted Whisper transcription. That service is no longer a dedicated Murmur route, and the old audio-guide URL returned 404 during the October 17 documentation review. Use the current app route reference instead of this historical candidate list. [Certain]
 
 OpenRouter now documents a dedicated `POST /api/v1/audio/transcriptions`, in addition to audio chat input; its provider-specific privacy/retention still needs route-by-route review. [Certain] This corrects the prior assumption that OpenRouter would only be a cleanup route. [Certain] [Official transcription tutorial](https://openrouter.ai/blog/tutorials/transcription-on-openrouter/), [privacy](https://openrouter.ai/privacy)
 

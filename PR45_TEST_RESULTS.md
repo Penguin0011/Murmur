@@ -1,6 +1,8 @@
 # PR #45 test results
 
-**Current status: PASS for preferred-only regression checks, saved-response replay, and the user-confirmed live alias-free name test.** The user's live miss and the original provider benchmark are preserved below. PR #45 remains unmerged. [Certain]
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
+**Current status: PASS for preferred-only regression checks, saved-response replay, and the user-confirmed live alias-free name test.** The user's live miss and the original provider benchmark are preserved below. PR #45 was unmerged at this checkpoint; it was subsequently merged on October 15, 2026. [Certain]
 
 ## Preferred-only names follow-up — `38c7b73`
 
@@ -26,7 +28,7 @@ Evidence: `~/.codex/worktrees/833a/Murmur/runtime/pr45-preferred-only/` contains
 
 **Live alias-free retest: PASS (user reported).** On the installed revised build, the user dictated `Please ask Aakash to review the report.` and supplied that exact output. They confirmed Faithful was enabled, the `Akash` heard-as workaround was removed, and the preferred entry had been capitalized from `aakash` to `Aakash` because it is a name. The output therefore matches the updated preferred spelling exactly and contains no extra vocabulary. This supersedes the pending live check, not the historical miss above. [Certain]
 
-**Limits:** this is one user-confirmed end-to-end sentence, not a captured raw-ASR/final-output pair or a broader live benchmark. It demonstrates the requested output without the alias; it does not establish whether ASR itself produced the correct spelling in this recording. The implementation only generalizes the measured miss to single-letter doubling, and a genuinely intended alternate name such as Alison can still be replaced by stored allison. Other ambiguous/short forms or phrases may need aliases or optional cleanup. Existing learning can add a preferred spelling after one qualifying settled correction and a heard-as variant after two consistent sessions; its meaning and field-observation guards still apply, so not every new name is guaranteed to be learned. PR #45 remains unmerged. [Certain]
+**Limits:** this is one user-confirmed end-to-end sentence, not a captured raw-ASR/final-output pair or a broader live benchmark. It demonstrates the requested output without the alias; it does not establish whether ASR itself produced the correct spelling in this recording. The implementation only generalizes the measured miss to single-letter doubling, and a genuinely intended alternate name such as Alison can still be replaced by stored allison. Other ambiguous/short forms or phrases may need aliases or optional cleanup. Existing learning can add a preferred spelling after one qualifying settled correction and a heard-as variant after two consistent sessions; its meaning and field-observation guards still apply, so not every new name is guaranteed to be learned. PR #45 was unmerged at this checkpoint; it was subsequently merged on October 15, 2026. [Certain]
 
 ## Faithful spelling follow-up — `cc5326e`
 
@@ -49,7 +51,7 @@ Follow-up evidence directory: `~/.codex/worktrees/833a/Murmur/runtime/pr45-spell
 
 **Limits:** this is reprocessing of the saved synthetic-audio outputs, not a new human-speech or live UI experiment. Without an English lexicon, correction stays exact-only. Short terms, known words/names and unlisted phrases still need explicit variants or optional model cleanup. An unfamiliar real name can still be mistaken for a uniquely matching dictionary term; the native lexicon and ambiguity checks reduce that risk but cannot prove intent. [Certain]
 
-PR #45 remains unmerged. The installed/running app was not replaced by this follow-up; the freshly built development bundle is `runtime/Murmur.app`. [Certain]
+PR #45 was unmerged at this checkpoint; it was subsequently merged on October 15, 2026. The installed/running app was not replaced by this follow-up; the freshly built development bundle is `runtime/Murmur.app`. [Certain]
 
 ## Historical pre-fix provider benchmark
 
