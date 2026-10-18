@@ -30,11 +30,11 @@ app/build.sh
 app/tools/package_update.sh
 ```
 
-`MURMUR_BUILD_VERSION` must increase for every release. Packaging names the release tag `v<CFBundleVersion>` (the example uses `v2`), independently of the displayed `0.2.0` version. The script creates `runtime/update/Murmur-2.zip` and `runtime/update/appcast.xml`, checks the app signature, and uses Sparkle's tools to sign and verify the archive. Choose a fresh output directory for every release by passing it as the second argument. [Certain]
+`MURMUR_BUILD_VERSION` must increase for every release. Packaging names the release tag `v<CFBundleShortVersionString>` (`v0.2.0` here), so older builds' GitHub version checker displays the correct product version; archives use the monotonic build number. The script creates `runtime/update/Murmur-2.zip` and `runtime/update/appcast.xml`, checks the app signature, and uses Sparkle's tools to sign and verify the archive. Choose a fresh output directory for every release by passing it as the second argument. [Certain]
 
 Optionally set `MURMUR_RELEASE_NOTES` to a Markdown file before packaging. Notes are embedded in the appcast, so only the ZIP and XML need uploading. For isolated testing or CI, `MURMUR_SPARKLE_KEY_FILE` can name a private key file instead of Keychain; otherwise the `Murmur` Keychain account is used (overridable with `MURMUR_SPARKLE_KEY_ACCOUNT`). [Certain]
 
-Create a draft GitHub Release tagged `v2`, upload both generated assets, then publish it as the latest stable release. Do not mark beta/prerelease releases as latest. The appcast's ZIP link contains the exact tag; only the feed follows `/latest/`. No publishing is performed by the build/package scripts. [Certain]
+Create a draft GitHub Release tagged `v0.2.0`, upload both generated assets, then publish it as the latest stable release. Do not mark beta/prerelease releases as latest. The appcast's ZIP link contains the exact tag; only the feed follows `/latest/`. No publishing is performed by the build/package scripts. [Certain]
 
 Keep archives immutable after signing. Every published latest release must include `appcast.xml`. With a one-entry feed, clients older than the latest build must be able to update directly to it. Upgrade to a cumulative feed if staged migrations or multiple supported macOS branches become necessary. [Certain]
 

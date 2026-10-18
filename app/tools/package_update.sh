@@ -9,6 +9,7 @@ plist="$app_path/Contents/Info.plist"
 feed="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$plist")"
 /usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$plist" >/dev/null
 version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$plist")"
+release_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
 # Use the exact version tag in archive links; the appcast alone follows latest.
 repository="${feed%/releases/latest/download/appcast.xml}"
 [[ "$repository" != "$feed" && "$repository" == https://github.com/*/* ]] || { echo 'Invalid GitHub update feed.' >&2; exit 1; }
@@ -19,7 +20,7 @@ archive="$output/Murmur-$version.zip"
 ditto -c -k --keepParent "$app_path" "$archive"
 key_args=(--account "${MURMUR_SPARKLE_KEY_ACCOUNT:-Murmur}")
 if [[ -n "${MURMUR_SPARKLE_KEY_FILE:-}" ]]; then key_args=(--ed-key-file "$MURMUR_SPARKLE_KEY_FILE"); fi
-args=(--download-url-prefix "$repository/releases/download/v$version/" --maximum-deltas 0 --embed-release-notes)
+args=(--download-url-prefix "$repository/releases/download/v$release_version/" --maximum-deltas 0 --embed-release-notes)
 if [[ -n "${MURMUR_RELEASE_NOTES:-}" ]]; then cp "$MURMUR_RELEASE_NOTES" "$output/Murmur-$version.md"; fi
 "$sparkle_path/bin/generate_appcast" "${args[@]}" "${key_args[@]}" "$output"
 # generate_appcast checks the embedded key; explicitly verify the signature too.
@@ -34,4 +35,4 @@ print(signature)
 PY
 )"
 "$sparkle_path/bin/sign_update" "${key_args[@]}" --verify "$archive" "$signature"
-echo "Upload $archive and $output/appcast.xml to a draft release tagged v$version, then publish it as latest."
+echo "Upload $archive and $output/appcast.xml to a draft release tagged v$release_version, then publish it as latest."
