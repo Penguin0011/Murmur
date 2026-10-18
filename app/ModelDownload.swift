@@ -272,7 +272,7 @@ struct ModelLicenseInfo: Equatable {
     let declarations: [ModelLicenseDeclaration]
     let note: String
 
-    /// Facts from MODEL_RESEARCH.md and the Hugging Face model APIs (checked 2026-10-03):
+    /// Facts from the Hugging Face model APIs (checked 2026-10-03):
     /// nvidia/parakeet-unified-en-0.6b declares `license: other`, `license_name: nvidia-open-model-license`
     /// with the link below; the pinned conversion repository declares `license: cc-by-4.0`.
     static let parakeetUnifiedUnpinned = ModelLicenseInfo(

@@ -1,8 +1,8 @@
 spike/.build/
 runtime/
 
-# Local synthetic UI review captures.
-.impeccable/review/
+# Local design-tool working records.
+.impeccable/
 
 # Local credentials and signing material (keep examples credential-free).
 .env
