@@ -54,4 +54,4 @@ swiftc -swift-version 5 -parse-as-library -F runtime/Sparkle-2.10.0 -framework S
 /tmp/murmur-sparkle-check
 ```
 
-Use two disposable app versions, an ephemeral signing key and a localhost feed for installation tests. Never target the user's installed Murmur or its data. A public GitHub-hosted smoke test remains necessary after the production repository/feed are selected. [Certain]
+Use two disposable app versions, an ephemeral signing key and a localhost feed for installation tests. Never target the user's installed Murmur or its data. An isolated public GitHub-hosted download/install/relaunch smoke test passed on October 17, 2026; see [SPARKLE_TEST_RESULTS.md](SPARKLE_TEST_RESULTS.md). A real stable-build release test remains necessary after configuring the permanent production key/feed. [Certain]
