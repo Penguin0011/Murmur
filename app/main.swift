@@ -78,7 +78,7 @@ import SwiftUI
             addMeetingSource(.microphoneOnly, title: "Only my microphone", to: sources)
             start.submenu = sources; menu.addItem(start)
         }
-        menu.addItem(withTitle: UpdateText.menuTitle(controller.availableRelease), action: #selector(checkForUpdates), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "").target = self
         if controller.phase == "Listening" {
             menu.addItem(withTitle: "Finish Dictation", action: #selector(finish), keyEquivalent: "").target = self
             menu.addItem(withTitle: "Cancel Recording", action: #selector(cancel), keyEquivalent: "").target = self
@@ -92,8 +92,8 @@ import SwiftUI
     @objc func openSettings() { showWindow() }
     /// Replays the welcome guide from its first step (gap #21).
     @objc func openGuide() { controller.screenRequest = "guide"; showWindow() }
-    /// Results appear quietly in Settings; a known release is shown there with its page link.
-    @objc func checkForUpdates() { if controller.availableRelease == nil { controller.checkForUpdates() }; showWindow() }
+    /// Keep configuration/recording errors visible even when Sparkle cannot open its dialog.
+    @objc func checkForUpdates() { showWindow(); controller.checkForUpdates() }
     @objc func finish() { controller.stopRecording() }
     private func addMeetingSource(_ source: MeetingSource, title: String, to menu: NSMenu) {
         let item = menu.addItem(withTitle: title, action: #selector(startMeeting(_:)), keyEquivalent: "")

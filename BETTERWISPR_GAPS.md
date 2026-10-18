@@ -89,7 +89,7 @@ Size: S = days, M = about a week, L = several weeks. Workstreams (W1–W7) group
 
 ### Distribution (no change; recorded for completeness)
 
-- **Signed Sparkle auto-updates:** BetterWispr has them. Murmur defers them because the user postponed Apple Developer enrollment (PRD). Unchanged.
+- **Signed Sparkle auto-updates:** Sparkle integration approved October 17, 2026; GitHub-hosted feeds and Ed25519-signed archives are implemented separately from Developer ID enrollment. Public feed/key setup and release publication remain outstanding. [Certain]
 - **In-app model download:** in progress in `app/ModelDownload.swift`. Finish it as planned.
 
 ## Order of work

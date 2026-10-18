@@ -14,7 +14,7 @@ swiftc -swift-version 5 -target arm64-apple-macos26.0 \
   "$project_root/app/History.swift" "$project_root/app/Insights.swift" "$project_root/app/Controller.swift" \
   "$project_root/app/Cleanup.swift" "$project_root/app/Dictionary.swift" "$project_root/app/Learning.swift" \
   "$project_root/app/Retention.swift" "$project_root/app/Providers.swift" "$project_root/app/Credentials.swift" \
-  "$project_root/app/Processing.swift" "$project_root/app/ModelDownload.swift" "$project_root/app/Updates.swift" \
+  "$project_root/app/Processing.swift" "$project_root/app/ModelDownload.swift" "$project_root/app/Updates.swift" "$project_root/app/AppUpdater.swift" \
   "$project_root/app/AppServices.swift" "$project_root/app/Routes.swift" "$project_root/app/AppleCleanup.swift" \
   "$project_root/app/UI.swift" "$project_root/app/Meetings.swift" "$project_root/app/MeetingNotes.swift" "$project_root/app/MeetingSpeakers.swift" "$project_root/app/MeetingCapture.swift" "$project_root/app/MeetingRecorder.swift" "$project_root/app/MeetingsUI.swift" "$project_root/app/check_ui.swift" \
   "$project_root/app/CallDetection.swift" "$project_root/app/CallOfferUI.swift" \
