@@ -1,5 +1,7 @@
 # Murmur security and privacy audit
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
 Audit date: October 5, 2026, America/Los_Angeles. [Certain]
 
 ## Remediation — October 5, 2026
@@ -34,7 +36,7 @@ Recommendation: fix destination binding, deletion, temporary transcript storage,
 ## Scope and evidence
 
 - Reviewed checkout `0490fb2`, including Swift application code, capture/session/helper code, provider clients, settings, learning, local storage, model verification/downloads, updates, and build/signing configuration. [Certain]
-- Inspected the installed bundle at `/Users/aakash/Applications/Murmur.app`; its executable SHA-256 is `dfddb3dbe7c4c903399db7e6de799441077d4c222fcf1739864373bbc86f1422`, matching the installation recorded in `HANDOFF.md:7`. [Certain] This establishes consistency with that recorded build, rather than proving a reproducible source-to-binary build. [Certain]
+- Inspected the installed bundle at `~/Applications/Murmur.app`; its executable SHA-256 is `dfddb3dbe7c4c903399db7e6de799441077d4c222fcf1739864373bbc86f1422`, matching the installation recorded in `HANDOFF.md:7`. [Certain] This establishes consistency with that recorded build, rather than proving a reproducible source-to-binary build. [Certain]
 - Deep/strict signature verification passed; the installed signature is `clouddev Development`, with code-signing flags `0x0`, without Hardened Runtime. [Certain]
 - Read only selected preferences and filesystem metadata for live app data; observed directories were `0700`, and observed regular history, retry-audio, and dictionary files were `0600`. [Certain] No live transcript contents or Keychain secrets were read for this audit. [Certain]
 - Existing checks passed: providers (581 assertions), routes (103), dictionary/learning/retention (170), processing (115), model downloader (158), updates (91), native history, and app services. [Certain]

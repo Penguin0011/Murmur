@@ -1,5 +1,7 @@
 # Shortcut capture session
 
+**Tool scope.** Commands below run from the repository root. This README describes standalone validation tools and dated measurements; missing features in these harnesses do not imply they are missing from the app. See [CONTRIBUTING.md](../../CONTRIBUTING.md) for app checks. [Certain]
+
 Build from the repository root:
 
 ```sh

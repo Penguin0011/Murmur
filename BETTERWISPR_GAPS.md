@@ -1,5 +1,7 @@
 # BetterWispr feature gaps: October 14, 2026
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
 This compares Murmur `main` (`0b0af68`) with [BetterWispr](https://github.com/opennookorg/betterwispr) at `d504749` (v0.1.5, Apache-2.0). It lists what BetterWispr has that Murmur lacks and the plan to close each gap. [Certain]
 
 **Scope decision (user, October 14, 2026):**

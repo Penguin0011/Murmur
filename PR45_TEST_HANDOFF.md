@@ -1,10 +1,12 @@
 # PR #45 test handoff
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
 ## Assignment and deliverable
 
 Test the current PR #45 behavior, assess whether removing custom-provider dictionary prompts reduces vocabulary echoes while retaining useful spelling corrections, and fill in [PR45_TEST_RESULTS.md](PR45_TEST_RESULTS.md). Do not merge PR #45, change production behavior, restore the removed prompt/filter, or run another agent. Return the completed results file and local evidence paths to the user; the user will bring the results back to the originating agent.
 
-This handoff is a test plan, not a completed test report. The results template starts at NOT RUN. [Certain]
+This handoff is a test plan, not a completed test report. The linked results file now contains completed follow-ups; the original assignment below is retained for provenance. [Certain]
 
 ## Context to preserve
 
@@ -13,7 +15,7 @@ This handoff is a test plan, not a completed test report. The results template s
 - Spelling follow-up: `cc5326e` recovers long unfamiliar single words through the production English lexicon and a unique phonetic/semantic dictionary match, without restoring prompts. The saved-response regression now scores 18/18 in Faithful mode; see the current results for the separate original benchmark and follow-up replay. [Certain]
 - Baseline: `b19124b3dbded1d74407ebc1afc529a780f6afa0`, the original PR #45 implementation with the labeled vocabulary prompt and output filter. [Certain]
 - The new implementation **removes** dictionary-derived custom transcription prompts and the entire vocabulary echo filter. It does not add a new filter. Gemini's vocabulary inputs, local Parakeet vocabulary support, post-transcription dictionary correction, silence checks/trimming, and LLM answer detection remain. [Certain]
-- The built candidate was installed at `/Users/aakash/Applications/Murmur.app` and launched. The user subsequently reported, “That seems to work far better.” This is qualitative user testing; no provider/model or controlled audio measurements accompanied that report. [Certain]
+- The built candidate was installed at `~/Applications/Murmur.app` and launched. The user subsequently reported, “That seems to work far better.” This is qualitative user testing; no provider/model or controlled audio measurements accompanied that report. [Certain]
 - Read [app/AGENTS.md](app/AGENTS.md) and [app/VOCABULARY.md](app/VOCABULARY.md) before testing. The user explicitly requested preservation of this behavior across overlapping PR merges. [Certain]
 
 ## Required follow-up: preferred-only names

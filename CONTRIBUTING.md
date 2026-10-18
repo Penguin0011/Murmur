@@ -1,6 +1,6 @@
 # Contributing to Murmur
 
-Murmur is pre-release. Read [PRD.md](PRD.md) for requirements and [HANDOFF.md](HANDOFF.md) for current state and open issues before starting. [Certain]
+Murmur is pre-release. Use the [documentation guide](DOCUMENTATION.md) to distinguish current instructions, requirements and dated development evidence. Read [PRD.md](PRD.md) for requirements; [HANDOFF.md](HANDOFF.md) preserves earlier checkpoints rather than a current task list. [Certain]
 
 ## Requirements
 
@@ -27,9 +27,19 @@ MURMUR_RELEASE=1 \
 
 `runtime/` and `spike/.build/` are ignored by Git. Do not commit audio, transcripts, model files or API keys. [Certain]
 
+## Publication checks
+
+Run the redacted secret scans in [SECURITY.md](SECURITY.md) before sharing a branch or making a release. Review all fetched branches and PR refs, and hosted content separately before changing repository visibility. Keep private audit evidence outside this tree. [Certain]
+
 ## Checks
 
-None of these record audio, insert text or inject keys. Run the ones that cover your change, and all of them before a release. [Certain]
+The commands in this section use offline or loopback synthetic checks; they do not record audio, insert text or inject keys. Run the ones that cover your change, and all of them before a release. Commands below run from the repository root. When using Command Line Tools with its macOS 27 SDK, select its macOS 26 SDK if available, as the build scripts do: [Certain]
+
+```sh
+# In the same shell used for the swiftc checks below.
+murmur_sdk26="$(dirname "$(xcrun --show-sdk-path)")/MacOSX26.sdk"
+if [ -z "${SDKROOT:-}" ] && [ -d "$murmur_sdk26" ]; then export SDKROOT="$murmur_sdk26"; fi
+```
 
 App, history and controller (macOS):
 
@@ -102,7 +112,7 @@ These are the patterns in the existing code and docs. [Likely]
 - Make small logical commits after each working checkpoint. [Certain]
 - Use Conventional Commit subjects: `type(scope): summary`, imperative and lowercase, such as `feat(cleanup): add …`, `fix(ui): …`, `docs(providers): …`, `test: …`, `refactor(app): …`. The scope is optional. [Certain]
 - Merge commits describe what is merged in plain words, such as "Merge cloud providers, Keychain credentials and GitHub update checker". [Certain]
-- If an agent wrote the change, end the message with its `Co-Authored-By:` trailer. [Certain]
+- Write commit messages as a human and do not add Codex co-author trailers.
 
 ## Licensing
 

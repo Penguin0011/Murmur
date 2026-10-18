@@ -1,6 +1,8 @@
 # Cloud provider verification
 
-Verified on **2026-10-03** from official documentation, fetched that day. Tags: [Certain] means stated in the cited official page that day; [Likely] means strong indirect evidence (an archived official page, a third-party report, or an unauthenticated probe); [Guessing] means an inference that has not been checked. No call has been made with a real API key. The only live requests were unauthenticated probes (no key header), which record public error shapes. [Certain]
+**Dated API research, not current provider terms or a setup guide.** Prices, model availability, retention policies and unauthenticated response observations below describe the dates stated, with later removals noted. Recheck the linked official documentation before configuring a provider. Current route selection is documented in [README.md](README.md#processing-routes-and-api-keys-wired-in); local deletion does not delete provider-held copies. [Certain]
+
+Verified on **2026-10-03** from official documentation, fetched that day. Tags: [Certain] means stated in the cited official page that day; [Likely] means strong indirect evidence (an archived official page, a third-party report, or an unauthenticated probe); [Guessing] means an inference that has not been checked. This initial research used unauthenticated probes (no key header), which record public error shapes; it does not summarize later live benchmark coverage. [Certain]
 
 ## Summary and recommendation
 
@@ -149,7 +151,7 @@ Facts and choices:
   - On-device: only `localhost`, strict dotted-decimal 127.0.0.0/8, and IPv6 `::1` in any spelling, with or without brackets.
   - Everything else is disclosed as "the transcript leaves this Mac to <host>". This includes LAN, `.local` and private IPs, as well as spellings that may reach loopback (`127.1`, `2130706433`, `localhost.`, `::ffff:127.0.0.1`). Over-disclosure is the safe direction.
   - Rejected: `0.0.0.0` and `::` (listen addresses, not destinations), schemes other than http and https, user info, queries, fragments and percent-encoded hosts.
-  - Plain http to a non-loopback host adds a warning that the connection is unencrypted. The warning also mentions the API key when one is set.
+  - Plain HTTP to a non-loopback host adds an unencrypted-connection warning. The current client omits custom API keys on such connections, while audio/transcript content remains exposed to the network path. [Certain]
 - **Redirects:** local servers' redirects are not followed; a 3xx becomes `rejected`. A server therefore cannot forward the transcript to a host the disclosure did not name. This was checked live on Linux against a local test server. [Certain] It has not been checked on macOS. [Guessing that it behaves the same]
 - **Connection refused:** `URLError.cannotConnectToHost` becomes `serverNotRunning(address:)`, for example "No local model server is running at localhost:11434". The address comes from the configured URL and never includes the path, key or transcript. This was checked live on Linux. [Certain]
 - **Timeout:** 120 s by default, because a cold model load can be slow, clamped to 1–300 s. [Guessing at the right default]

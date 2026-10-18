@@ -181,7 +181,8 @@ struct MeetingStore {
         var found: [Meeting] = []
         for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey]) where url.pathExtension == "json" {
             guard (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { continue }
-            if let meeting = try? JSONDecoder().decode(Meeting.self, from: Data(contentsOf: url)), url.lastPathComponent == meeting.id + ".json" {
+            if let meeting = try? JSONDecoder().decode(Meeting.self, from: Data(contentsOf: url)),
+               UUID(uuidString: meeting.id) != nil, url.lastPathComponent == meeting.id + ".json" {
                 found.append(meeting); continue
             }
             try FileManager.default.createDirectory(at: unreadable, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

@@ -1,5 +1,7 @@
 # Module one interaction safety review
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](../DOCUMENTATION.md) for current entry points. [Certain]
+
 Decision: **GO for bounded milestone-1 investigation; NO-GO for declaring the complete feasibility or release gate passed.** Current source and recorded evidence support continuing work, but do not prove duplicate-free insertion, secure-field handling across applications, microphone capture, or production automatic correction promotion. [Certain]
 
 The weakest interaction assumption is that an AX write returning success but leaving a field unchanged for 300 ms proves that delivery will never occur. It does not: a delayed application write can arrive after fallback Command-V, creating a duplicate. [Certain]

@@ -1,5 +1,7 @@
 # Transcription model selection
 
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
 Research date: October 2, 2026. This is desk research, not a benchmark run on our minimum hardware. [Certain]
 
 ## Selected default

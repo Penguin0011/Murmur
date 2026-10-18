@@ -3,3 +3,24 @@ runtime/
 
 # Local synthetic UI review captures.
 .impeccable/review/
+
+# Local credentials and signing material (keep examples credential-free).
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+
+# Capture/recovery data and build leftovers.
+*.wav
+*.m4a
+*.caf
+*.pcm
+*.log
+*.dSYM/
+.build*/
+.DS_Store
+__pycache__/

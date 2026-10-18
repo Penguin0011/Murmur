@@ -1,6 +1,8 @@
 # Streaming transcription: handoff note
 
-The user asked whether Murmur can transcribe while the user is still recording, so long messages don't wait for the whole clip after release. This note records what was measured and found on October 3, 2026. Nothing is implemented yet. [Certain]
+**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See the [documentation guide](DOCUMENTATION.md) for current entry points. [Certain]
+
+The user asked whether Murmur can transcribe while the user is still recording, so long messages don't wait for the whole clip after release. This note records what was measured and found on October 3, 2026. That initial investigation preceded the implemented chunked and live-preview paths recorded in the later sections below. [Certain]
 
 ## Where the time goes today
 
