@@ -1,6 +1,6 @@
 # Local transcription comparison — October 6, 2026
 
-**Dated development record.** Statements, task instructions and validation limits below apply to their recorded checkpoints. They are not current release clearance or authorization to merge or change settings. See [README.md](README.md) for current setup.
+This October 6, 2026 comparison measures clean read speech on one device. It does not establish app release readiness. See [README.md](README.md) for setup.
 
 ## Result
 
@@ -33,6 +33,6 @@ First process load times were 13.93 s for Unified, 0.27 s for V2, and 208.79 s f
 
 This first pass favors Unified on WER without a measurable inference-time penalty against V2 on the sample. It does not validate live mic capture, accents beyond this dataset's speakers, noise, names/numbers in realistic dictation, short user commands, or Murmur's end-to-end path.
 
-License review was completed October 6, 2026: the NVIDIA upstream model terms and FluidInference's CC-BY-4.0 conversion terms are treated as layered obligations for the derivative. See the app's pre-download disclosure and the licensing note in PRD.md. Any future redistribution must include NVIDIA's agreement and required attribution notice.
+Model weights are downloaded separately. See the app’s pre-download disclosure and [third-party notices](THIRD_PARTY_NOTICES.md) for the differing license declarations before downloading or redistributing weights.
 
 The runner additions are benchmark-only; the installed app and its default model were not changed.

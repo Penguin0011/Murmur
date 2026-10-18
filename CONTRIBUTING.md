@@ -1,6 +1,6 @@
 # Contributing to Murmur
 
-Murmur is pre-release. Use the root [README](README.md) for visitor setup and privacy information. Read [PRD.md](PRD.md) for requirements.
+Murmur is pre-release. Use the root [README](README.md) for visitor setup and privacy information.
 
 ## Requirements
 
@@ -26,6 +26,10 @@ MURMUR_RELEASE=1 \
 ```
 
 `runtime/` and `spike/.build/` are ignored by Git. Do not commit audio, transcripts, model files or API keys.
+
+## Documentation
+
+Keep tracked documentation useful to users or contributors: setup, privacy, security reporting, licensing, maintained tool instructions and reproducible measurements with limitations. Keep conversation logs, agent handoffs, local installation evidence and private audits outside the repository. Moving a tracked file or adding it to `.gitignore` does not make it private; deleted files remain in Git history.
 
 ## Publication checks
 
@@ -56,6 +60,7 @@ Foundation-only modules (macOS or Linux):
 
 ```sh
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/check_dictionary.swift -o /tmp/cd && /tmp/cd
+swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_processing.swift -o /tmp/murmur-processing-check && /tmp/murmur-processing-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift spike/Observation.swift app/check_modes.swift -o /tmp/murmur-modes-check && /tmp/murmur-modes-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift spike/Observation.swift app/check_apple_cleanup.swift -o /tmp/murmur-apple-check && /tmp/murmur-apple-check
 swiftc app/Cleanup.swift app/Dictionary.swift app/Learning.swift app/Retention.swift app/Providers.swift app/Credentials.swift app/Processing.swift app/Routes.swift app/AppleCleanup.swift app/check_routes.swift -o /tmp/murmur-routes-check && /tmp/murmur-routes-check
@@ -92,14 +97,14 @@ app/check_ui.sh --meetings --speakers --meeting-notes
 app/check_ui.sh --meetings --separating
 ```
 
-These commands come from [app/README.md](app/README.md), which lists every fixture flag and is the source of truth if they drift. Spike and model checks are in `spike/README.md` and `module-one/*/README.md`.
+These commands come from [app/README.md](app/README.md), which describes the fixture commands and their side effects. Spike and model checks are in `spike/README.md` and `module-one/*/README.md`.
 
 ## Conventions
 
 These are the patterns in the existing code and docs.
 
 - Native Swift with Apple frameworks (Foundation, AppKit, SwiftUI, AVFoundation, Security). No third-party Swift packages besides the pinned FluidAudio runtime. Keep new logic Foundation-only where possible, so its checks run on Linux too.
-- Small concrete types per concern (one file per module, such as `Cleanup.swift` or `Providers.swift`), not a plugin framework (PRD section 7).
+- Small concrete types per concern (one file per module, such as `Cleanup.swift` or `Providers.swift`), not a plugin framework.
 - Checks are standalone executables named `check_<module>.swift`, compiled with `swiftc` next to the files they test. They exit non-zero on failure and need no external network, real keys or microphone; `check_http.py` uses a loopback server with synthetic data.
 - Code must compile under `-swift-version 5`, which `build.sh` uses.
 - Treat dictated text as untrusted data. Never log transcript text, API keys or response bodies; error reasons are content-free enums.

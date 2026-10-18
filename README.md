@@ -28,7 +28,7 @@ app/build.sh
 open runtime/Murmur.app
 ```
 
-The first build needs internet access to fetch pinned FluidAudio source and its checksummed binary dependency. It does not download speech model weights. See [CONTRIBUTING.md](CONTRIBUTING.md) for checks and fixture commands.
+The first build needs internet access to fetch pinned FluidAudio source and its checksummed binary dependency. It does not download speech model weights.
 
 For contributors, the [development guide](CONTRIBUTING.md) covers checks and fixtures.
 

@@ -44,9 +44,9 @@ The model weights are not in the repository or the app bundle. They are download
   - Section 3 requires anyone who distributes the model or a derivative to include a "Notice" text file with: "Licensed by NVIDIA Corporation under the NVIDIA Open Model License".
 - Converted model used by the app: `FluidInference/parakeet-unified-en-0.6b-coreml`, revision `d32e972dd4315f1dc3f6be28fb2aab0ab3e80358`, https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml
   - Its card is tagged `cc-by-4.0`, says "Released under the CC-BY-4.0 license", and names `base_model: nvidia/parakeet-unified-en-0.6b`. It makes no statement about the upstream NVIDIA license.
-  - The conversion's CC-BY-4.0 label does not relicense NVIDIA's weights; treat the NVIDIA Open Model License as governing. This mismatch is unresolved, as MODEL_RESEARCH.md notes.
+  - The conversion's CC-BY-4.0 label does not relicense NVIDIA's weights; treat the NVIDIA Open Model License as governing. The differing declarations remain unresolved; review both model cards before redistribution.
 
-Because Murmur downloads the weights rather than redistributing them, the NVIDIA notice duty may not apply to the app itself. The PRD still requires the app to show the model license before download, and this notice is reproduced here:
+Because Murmur downloads the weights rather than redistributing them, the NVIDIA notice duty may not apply to the app itself. The app shows the model license before download, and this notice is reproduced here:
 
 > Licensed by NVIDIA Corporation under the NVIDIA Open Model License
 
@@ -61,7 +61,7 @@ Optional download from Settings → Dictionary. It rescores on-device transcript
 
 ### Speaker diarization, pyannote community-1 (speaker separation)
 
-Optional download from Settings → Meetings → "Separate speakers after a meeting" (PRD 11.8, W7d). It is not bundled; Murmur downloads the pinned files to `~/Library/Caches/Dictation/module-one/speaker-diarization-df2625a` and verifies their checksums. The helper loads them directly; FluidAudio's own downloader is never used for them.
+Optional download from Settings → Meetings → "Separate speakers after a meeting". It is not bundled; Murmur downloads the pinned files to `~/Library/Caches/Dictation/module-one/speaker-diarization-df2625a` and verifies their checksums. The helper loads them directly; FluidAudio's own downloader is never used for them.
 
 - Converted models used by the app: `FluidInference/speaker-diarization-coreml`, revision `df2625ac79a7ac6b65ad868fee6d80f320da4232` (the revision FluidAudio `0b1f462` pins in `ModelNames.swift`), https://huggingface.co/FluidInference/speaker-diarization-coreml. Files: `Segmentation.mlmodelc`, `FBank.mlmodelc`, `Embedding.mlmodelc`, `PldaRho.mlmodelc` and `plda-parameters.json`, 21 files, 21,599,417 bytes. The legacy online files (`pyannote_segmentation`, `wespeaker*`) and `PLDA.mlmodelc` are not downloaded.
 - License: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/. The repository's `NOTICE.md` at that revision scopes CC-BY-4.0 to exactly these Community-1-derived files, and its `LICENSE` is the CC-BY-4.0 text. Checked October 16, 2026.
@@ -75,7 +75,7 @@ Optional download from Settings → Meetings → "Separate speakers after a meet
 
 ## Cloud services
 
-Gemini API and any custom OpenAI-compatible endpoint the user configures are optional services reached with the user's own API keys. No provider code or SDK is bundled; Murmur sends plain HTTPS requests. Their terms apply to the user's account, not to redistribution. See `app/PROVIDERS.md` for data-use terms.
+Gemini API and any custom OpenAI-compatible endpoint the user configures are optional services reached with the user's own API keys. No provider code or SDK is bundled; Murmur sends plain HTTPS requests. Their terms apply to the user's account, not to redistribution. See [provider integration](app/PROVIDERS.md) for data flows, and review the selected provider’s current terms.
 
 ## Bundled fonts and retained dependency notices
 

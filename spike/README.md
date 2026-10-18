@@ -1,6 +1,6 @@
 # Standalone macOS feasibility spike
 
-This is PRD milestone 0, not the dictation application. It uses native Swift, AppKit, ApplicationServices, and CoreGraphics without third-party dependencies.
+This standalone harness tests shortcuts, insertion and correction observation; it is not the dictation application. It uses native Swift, AppKit, ApplicationServices, and CoreGraphics without third-party dependencies.
 
 Build from the repository root on macOS with the Swift command-line tools:
 
