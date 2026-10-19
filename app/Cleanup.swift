@@ -701,7 +701,8 @@ enum CleanupGuard {
         guard result != .pass, options.spoken else { return result }
         let spoken = RuleCleaner.spokenCommands(raw)
         guard spoken != raw else { return result }
-        return checkWords(raw: spoken, cleaned: cleaned, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike) == .pass ? .pass : result
+        var spokenOptions = options; spokenOptions.spoken = false
+        return check(raw: spoken, cleaned: cleaned, options: spokenOptions, allowedTerms: allowedTerms, soundsLike: soundsLike) == .pass ? .pass : result
     }
 
     private static func checkWords(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String],

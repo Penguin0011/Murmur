@@ -320,6 +320,10 @@ struct EchoAsyncCleaner: AsyncCleaner {
             expect(CleanupGuard.check(raw: "Serve pasta and pizza instead.", cleaned: "Serve pizza.", options: options) != .pass, "both intended nouns survive AI deletion")
             expect(CleanupGuard.check(raw: "Discuss Monday and Tuesday. Thursday instead.", cleaned: "Discuss Thursday.", options: options) != .pass, "multiple targets rejected")
         }
+        for options in [CleanupOptions(polish: true, spoken: true), CleanupOptions(professional: true, spoken: true)] {
+            expect(CleanupGuard.check(raw: "Meet on Monday period Thursday instead period", cleaned: "Meet on Thursday.", options: options) == .pass, "spoken punctuation and instead repairs compose in AI guard")
+            expect(CleanupGuard.check(raw: "Meet on Monday period Thursday instead period", cleaned: "Meet on Thursday. Add 9.", options: options) != .pass, "combined repair still rejects invented numbers")
+        }
         for options in [CleanupOptions.faithful, CleanupOptions(), CleanupOptions(corrections: false, polish: true), CleanupOptions(corrections: false, professional: true)] {
             for (input, output) in alternatives {
                 expect((try? RuleCleaner().clean(input, options: options)) == input, "faithful strict and corrections-off preserve instead fragments")
