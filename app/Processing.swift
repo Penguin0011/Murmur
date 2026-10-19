@@ -279,7 +279,8 @@ final class ProcessingCoordinator {
     /// Local rules, guarded; the dictionary-applied text itself if they fail the guard.
     private func localClean(_ text: String, terms: [String], options: CleanupOptions) -> String {
         var options = options
-        options.polish = false // Local rules do not implement Polish or Professional edits, including on cloud fallback.
+        let text = options.corrections && options.polish ? RuleCleaner.applyInsteadCorrections(text) : text
+        options.polish = false // Broader AI grammar and phrasing edits have no local fallback.
         options.professional = false
         switch CleanupPipeline.process(raw: text, options: options, cleaner: localCleaner, allowedTerms: terms) {
         case .cleaned(let cleaned), .unchanged(let cleaned): return cleaned
@@ -373,7 +374,7 @@ final class ProcessingCoordinator {
         // model edit does not restore the words the speaker explicitly replaced.
         var fallback = section
         if options.corrections,
-           case .cleaned(let corrected) = CleanupPipeline.process(raw: section, options: CleanupOptions(fillers: false, corrections: true, lists: false), cleaner: RuleCleaner(), allowedTerms: terms) {
+           case .cleaned(let corrected) = CleanupPipeline.process(raw: section, options: CleanupOptions(fillers: false, corrections: true, lists: false, polish: options.polish), cleaner: RuleCleaner(), allowedTerms: terms) {
             fallback = corrected
         }
         if options.punctuation, let words = CleanupPipeline.punctuated(raw: fallback, cleaned: output, terms: terms),
