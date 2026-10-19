@@ -276,9 +276,59 @@ struct EchoAsyncCleaner: AsyncCleaner {
         // Speech models split the cue into its own sentence; corrections still apply and pass the guard.
         for (split, want) in [("Let's meet on Tuesday. No wait. Wednesday at noon.", "Let's meet on Wednesday at noon."),
                               ("Call me tomorrow. No wait. Tonight.", "Call me tonight."),
+                              ("Call me tomorrow. Actually, tonight.", "Call me tonight."),
                               ("Send it to Sam. Sorry, Alex.", "Send it to Alex."),
-                              ("Meet at the office. I mean, at home.", "Meet at home.")] {
+                              ("Meet at the office. I mean, at home.", "Meet at home."),
+                              ("Let's make pasta. Scratch that, let's make pizza.", "Let's make pizza.")] {
             expect(CleanupPipeline.process(raw: split, options: .standard, cleaner: RuleCleaner()) == .cleaned(want), "split cue: \(split)")
+        }
+        let fragment = "Move the appointment to Monday. Actually, Thursday. Send the agenda afterward."
+        expect(CleanupPipeline.process(raw: fragment, options: .standard, cleaner: RuleCleaner()) == .cleaned("Move the appointment to Thursday. Send the agenda afterward."), "standalone actually fragment repairs the previous sentence")
+        expect(CleanupGuard.check(raw: fragment, cleaned: "Move the appointment to Thursday. Send the agenda afterward.", options: .standard) == .pass, "AI and local guard share split actually recognition")
+        expect(CleanupPipeline.process(raw: fragment, options: .faithful, cleaner: RuleCleaner()) == .unchanged(fragment), "faithful keeps correction fragments")
+        let noCorrections = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
+        expect(CleanupPipeline.process(raw: fragment, options: noCorrections, cleaner: RuleCleaner()) == .cleaned(fragment), "corrections off keeps both versions")
+        for ordinary in ["Meet Monday. Actually, Thursday works better for Alice.",
+                         "Call Sam. Actually, Alex sent the report.",
+                         "It is ready. Actually, maybe.",
+                         "She said \"Monday. Actually, Thursday. Bring notes\"."] {
+            expect(RuleCleaner.applyCorrections(ordinary) == ordinary, "actually declarations, ambiguity and quotes stay intact")
+        }
+        expect(CleanupPipeline.process(raw: "Um, she said \"Monday. Actually, Thursday. Bring notes\".", options: .standard, cleaner: RuleCleaner()) == .cleaned("She said \"Monday. Actually, Thursday. Bring notes\"."), "split actually inside a quote does not reject unrelated filler removal")
+        expect(CleanupGuard.check(raw: "It is ready. Actually, maybe.", cleaned: "It is maybe.", options: .standard) != .pass, "unrecognized actually fragment never widens guard deletions")
+        // Synthetic alternatives: a known single slot is repairable; generic nouns lack safe scope.
+        let alternatives = [("Meet on Monday. Thursday instead.", "Meet on Thursday."),
+                            ("Paint it red. Blue instead.", "Paint it blue."),
+                            ("Book it in March. June instead.", "Book it in June."),
+                            ("Call tomorrow. Tonight instead. Bring notes.", "Call tonight. Bring notes.")]
+        for options in [CleanupOptions(polish: true), CleanupOptions(professional: true)] {
+            for (input, output) in alternatives {
+                expect((try? RuleCleaner().clean(input, options: options)) == output, "single-slot instead fragment repaired")
+                expect(CleanupGuard.check(raw: input, cleaned: output, options: options) == .pass, "instead repair passes shared guard")
+                expect(CleanupGuard.check(raw: input, cleaned: input, options: options) == .pass, "unchanged alternative remains valid")
+                expect(CleanupGuard.check(raw: input, cleaned: output + " Add 9.", options: options) != .pass, "repair cannot pay for invented facts")
+            }
+            for input in ["Let's make pasta. Pizza instead.", "Serve pasta and pizza instead.",
+                          "Make pasta. Pizza for lunch instead.", "Discuss Monday and Tuesday. Thursday instead.",
+                          "Do not meet Monday. Thursday instead.", "If we meet Monday. Thursday instead.",
+                          "Paint it red. Blue instead of green.", "Meet Monday. Thursday works instead.",
+                          "She said \"Meet Monday. Thursday instead.\".", "Meet Monday. Blue instead.",
+                          "Meet Monday. Monday instead.", "Order 2. 3 instead.", "Choose blue-green. Red instead.", "Meet mid-Monday. Thursday instead."] {
+                expect((try? RuleCleaner().clean(input, options: options)) == input, "ambiguous alternative preserved")
+            }
+            expect(CleanupGuard.check(raw: "Let's make pasta. Pizza instead.", cleaned: "Let's make pizza.", options: options) != .pass, "generic noun replacement rejected")
+            expect(CleanupGuard.check(raw: "Serve pasta and pizza instead.", cleaned: "Serve pizza.", options: options) != .pass, "both intended nouns survive AI deletion")
+            expect(CleanupGuard.check(raw: "Discuss Monday and Tuesday. Thursday instead.", cleaned: "Discuss Thursday.", options: options) != .pass, "multiple targets rejected")
+        }
+        for options in [CleanupOptions(polish: true, spoken: true), CleanupOptions(professional: true, spoken: true)] {
+            expect(CleanupGuard.check(raw: "Meet on Monday period Thursday instead period", cleaned: "Meet on Thursday.", options: options) == .pass, "spoken punctuation and instead repairs compose in AI guard")
+            expect(CleanupGuard.check(raw: "Meet on Monday period Thursday instead period", cleaned: "Meet on Thursday. Add 9.", options: options) != .pass, "combined repair still rejects invented numbers")
+        }
+        for options in [CleanupOptions.faithful, CleanupOptions(), CleanupOptions(corrections: false, polish: true), CleanupOptions(corrections: false, professional: true)] {
+            for (input, output) in alternatives {
+                expect((try? RuleCleaner().clean(input, options: options)) == input, "faithful strict and corrections-off preserve instead fragments")
+                expect(CleanupGuard.check(raw: input, cleaned: output, options: options) != .pass, "instead guard permission is mode gated")
+            }
         }
         expect(CleanupPipeline.process(raw: "Um.", options: .standard, cleaner: RuleCleaner()) == .cleaned(""), "filler-only transcript cleans to nothing")
         // Punctuation added after a dictated "sure" is not an answer phrase.
@@ -513,7 +563,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "The final reason that. The final reason that shaped the style was pride.", cleaned: "Shaped the style was pride.", options: .standard) != .pass, "both copies of a repeated phrase cannot go")
         expect(CleanupGuard.check(raw: "We shipped the first build and the second build on time.", cleaned: "We shipped the second build on time.", options: .standard) != .pass, "a non-repeated phrase cannot go")
         expect(CleanupPipeline.process(raw: "Hello.", options: .standard, cleaner: EmptyCleaner()) == .heldForRecovery(raw: "Hello.", reason: .emptyOutput), "a cleaner emptying real words still holds")
-        for keep in ["I'm late. Sorry, traffic was bad.", "We shipped it. No problems so far.", "Call me tomorrow. Actually, tonight."] {
+        for keep in ["I'm late. Sorry, traffic was bad.", "We shipped it. No problems so far.", "Call me tomorrow. Actually, tonight is busy."] {
             expect(CleanupPipeline.process(raw: keep, options: .standard, cleaner: RuleCleaner()) == .cleaned(keep), "split cue left alone: \(keep)")
         }
 

@@ -781,7 +781,7 @@ struct SettingsView: View {
                  ? "Rewrites into clear, professional writing. May reword and change tone; names, numbers and “not” stay."
                  : controller.cleanupPolish
                  ? "Keeps your voice and fixes small slips: fillers, false starts, grammar. Names, numbers and “not” stay."
-                 : "Only the edits below. Your wording never changes.")
+                 : "Keeps your wording except for the enabled edits, including clear spoken corrections.")
                 .padding(.top, 8)
         }
     }
@@ -791,11 +791,11 @@ struct SettingsView: View {
             cleanupChoices
             rule.padding(.top, 20)
             toggleRow("Remove filler words", "Takes out “um”, “uh” and similar.", isOn: $controller.cleanupFillers)
-            toggleRow("Apply spoken corrections", "“Friday, no wait, Monday” becomes “Monday”.", isOn: $controller.cleanupCorrections)
+            toggleRow("Apply spoken corrections", "Uses your final wording for clear corrections, including “Monday. Actually, Thursday.” Ambiguous corrections stay.", isOn: $controller.cleanupCorrections)
             toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: $controller.cleanupLists)
             toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: $controller.cleanupPunctuation)
             toggleRow("Spoken commands and numbers", "“comma”, “new paragraph”, “two hundred thousand” → 200,000, “at the rate” → @, and “write an email to…” layout.", isOn: $controller.cleanupSpoken)
-            help("If cleanup goes too far, Murmur inserts your own words. The raw transcript stays in History.").padding(.top, 16)
+            help("If an AI rewrite is rejected, clear spoken corrections can still apply. The raw transcript stays in History.").padding(.top, 16)
 
             if controller.cleanupChoice == .appleIntelligence, let reason = AppleSystemModel.status() {
                 help(reason.userMessage + " Until then, local rules clean dictations.").padding(.top, 8)
@@ -934,7 +934,7 @@ struct SettingsView: View {
             segmented([(-1, "Same as Cleanup"), (0, "Faithful"), (1, "Strict"), (2, "Polish"), (3, "Professional")], modeStyle(mode), size: 13).padding(.top, 8)
             if let o = m.options, o.anyEnabled {
                 toggleRow("Remove filler words", "Takes out “um”, “uh” and similar.", isOn: modeFlag(mode, \.fillers))
-                toggleRow("Apply spoken corrections", "“Friday, no wait, Monday” becomes “Monday”.", isOn: modeFlag(mode, \.corrections))
+                toggleRow("Apply spoken corrections", "Uses your final wording for clear corrections, including “Monday. Actually, Thursday.” Ambiguous corrections stay.", isOn: modeFlag(mode, \.corrections))
                 toggleRow("Format spoken lists", "Turns “one, two, three” into a numbered list.", isOn: modeFlag(mode, \.lists))
                 toggleRow("Fix punctuation and capitalization", "Adds commas, periods and capitals.", isOn: modeFlag(mode, \.punctuation))
                 toggleRow("Spoken commands and numbers", "“comma”, “new paragraph”, numbers as digits, “at the rate” → @.", isOn: modeFlag(mode, \.spoken))

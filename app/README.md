@@ -18,7 +18,16 @@ Save recoverable text before attempting insertion. Never automatically retry an 
 
 Toggles and route choices apply automatically. Provider URL and model fields apply on Return or focus loss; API keys require Save. Route choices, model IDs, endpoint URLs and custom-key destination bindings use UserDefaults; keys stay in the Keychain. Changing a custom endpoint requires saving its key for the new destination.
 
-Settings → Cleanup offers Faithful and Strict for local rules, plus Polish and Professional on AI routes. Faithful disables cleanup, while dictionary spelling corrections still apply. If an AI rewrite fails its guard, processing tries guarded punctuation transfer onto the transcript's words, then local rules, then the dictionary-applied transcript. Cleanup rejection or a provider error alone does not hold the dictation.
+Settings → Cleanup offers Faithful and Strict for local rules, plus Polish and Professional on AI routes:
+
+- **Faithful** disables cleanup; dictionary spelling corrections still apply.
+- **Strict** applies only the enabled operations. With **Apply spoken corrections** on, local rules handle clear replacements such as “Monday, no wait, Thursday” and a short repair fragment such as “Monday. Actually, Thursday.” Full sentences beginning with “Actually” and ambiguous replacements stay unchanged by this rule.
+- **Polish** opts into removing false starts and small grammar fixes while keeping the speaker's voice.
+- **Professional** opts into broader grammar and phrasing changes, including restated corrections without punctuation. Guards still check names, numbers, negations and unexplained deletions; they may reject a useful rewrite when its intent cannot be established.
+
+With spoken corrections on, Polish and Professional also resolve a single-word “instead” fragment in one weekday, month, time or color slot: “Meet on Monday. Thursday instead.” becomes “Meet on Thursday.” This requires a period and the alternative immediately after the previous sentence's final word. Quotes, negated clauses or clauses joined with “and” or “or”, multiple targets, and generic noun alternatives such as “Let's make pasta. Pizza instead.” stay unchanged by local rules. The latter may express a correction, but text alone does not reliably establish its scope; use an explicit restatement when needed. Faithful, Strict and corrections-off do not apply this rule. Synthetic checks cover these boundaries; live speech recognition may punctuate them differently. [Certain]
+
+If an AI rewrite fails its guard, processing first resolves independently guarded local spoken corrections when enabled, then tries guarded punctuation transfer onto those words. If transfer fails, it tries local rules, then the dictionary-applied transcript. Cleanup rejection or a provider error alone does not hold the dictation. The raw transcript stays in History when history is enabled; existing entries are not rewritten.
 
 If the dictionary or learning ledger cannot be read, dictation can still produce a transcript, but it is held in History for review until the data is repaired. Failed or interrupted insertion also leaves recoverable text; check the destination before explicitly pasting again to avoid duplication. Dismissing an error does not delete recovery data.
 

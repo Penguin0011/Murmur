@@ -694,10 +694,15 @@ enum CleanupGuard {
     static func check(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String] = [],
                       soundsLike: (String, String) -> Bool = { _, _ in false }) -> CleanupGuardResult {
         let result = checkWords(raw: raw, cleaned: cleaned, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike)
+        if result != .pass, options.corrections, options.polish {
+            let repaired = RuleCleaner.applyInsteadCorrections(raw)
+            if repaired != raw, checkWords(raw: repaired, cleaned: cleaned, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike) == .pass { return .pass }
+        }
         guard result != .pass, options.spoken else { return result }
         let spoken = RuleCleaner.spokenCommands(raw)
         guard spoken != raw else { return result }
-        return checkWords(raw: spoken, cleaned: cleaned, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike) == .pass ? .pass : result
+        var spokenOptions = options; spokenOptions.spoken = false
+        return check(raw: spoken, cleaned: cleaned, options: spokenOptions, allowedTerms: allowedTerms, soundsLike: soundsLike) == .pass ? .pass : result
     }
 
     private static func checkWords(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String],
@@ -1241,6 +1246,9 @@ enum CleanupPrompt {
         } else if options.corrections {
             ops.append("- Apply explicit spoken self-corrections only when the replaced words are unambiguous, e.g. \"Tuesday, sorry, Thursday\" becomes \"Thursday\". An apology such as \"sorry\" on its own is not a correction. If the scope of a correction is unclear, keep the original wording.")
         }
+        if options.corrections && options.polish {
+            ops.append("- A standalone single-word alternative ending in instead may replace the immediately preceding final word only for one unambiguous weekday, month, time or color slot. Keep generic noun alternatives and multiple possible targets unchanged; never guess which object to replace.")
+        }
         if options.punctuation {
             ops.append("- Fix sentence punctuation and capitalization: end sentences with a period, or a question mark for a question; add commas only where the speech clearly separates clauses; capitalize sentence starts and the word \"I\". In a longer dictation, start a new paragraph (a blank line) between sentences where the topic shifts. " + (options.polish ? "Punctuation itself never changes words" : "Never add, remove, reorder, or respell words") + ", and never add exclamation marks" + (options.spoken ? " unless the speaker said \"exclamation mark\"." : "."))
         }
@@ -1441,7 +1449,10 @@ struct RuleCleaner: Cleaner {
     func clean(_ raw: String, options: CleanupOptions) throws -> String {
         var text = options.spoken ? RuleCleaner.spokenCommands(raw) : raw
         if options.fillers { text = RuleCleaner.removeFillers(text) }
-        if options.corrections { text = RuleCleaner.applyCorrections(text) }
+        if options.corrections {
+            if options.polish { text = RuleCleaner.applyInsteadCorrections(text) }
+            text = RuleCleaner.applyCorrections(text)
+        }
         if options.lists { text = RuleCleaner.formatList(text) }
         if options.punctuation { text = RuleCleaner.capitalizeSentences(text) }
         return text
@@ -1611,6 +1622,31 @@ struct RuleCleaner: Cleaner {
         t[i].kind == .word && CleanupText.ordinals[t[i].lower] == nil && CleanupText.numberValue(t[i].lower) != nil
     }
 
+    static let insteadFragment = try! NSRegularExpression(pattern: #"(?<![\p{L}\p{N}’'\-])([\p{L}]+)\. +([\p{L}]+) instead\.(?=\s|$)"#, options: .caseInsensitive)
+
+    /// shortcut: only one known date/time/color slot, expand only with evidence for safe scope.
+    static func applyInsteadCorrections(_ text: String) -> String {
+        let ns = text as NSString
+        var out = text
+        let mask = CleanupText.quotedMask(CleanupText.tokenize(text))
+        for match in insteadFragment.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+            let prefix = CleanupText.tokenize(ns.substring(to: match.range(at: 1).location))
+            let tokens = CleanupText.tokenize(ns.substring(with: match.range))
+            let offset = prefix.count
+            guard offset + 3 < mask.count, !mask[offset], !mask[offset + 3],
+                  let category = Self.category(tokens, 0), ["weekday", "month", "time", "color"].contains(category),
+                  category == Self.category(tokens, 3), tokens[0].lower != tokens[3].lower else { continue }
+            let sentence = Array(prefix.reversed().prefix { !$0.isTerminal })
+            // Multiple alternatives, negations and subordinate clauses leave replacement scope unclear.
+            guard !sentence.contains(where: { $0.kind == .word &&
+                (Self.category([$0], 0) == category || CleanupText.isNegation($0.lower) ||
+                 ["and", "or", "but", "if", "unless", "because", "while", "instead"].contains($0.lower)) }) else { continue }
+            let replacement = category == "color" || category == "time" ? tokens[3].lower : tokens[3].text
+            out = (out as NSString).replacingCharacters(in: match.range, with: replacement + ".")
+        }
+        return out
+    }
+
     /// Speech models often end a sentence around a cue ("Tuesday. No wait. Wednesday."). Rejoin it
     /// into the comma form the rules expect, and keep the rejoined text only if a correction applies.
     static func applyCorrections(_ text: String) -> String {
@@ -1622,9 +1658,9 @@ struct RuleCleaner: Cleaner {
         return applyCommaCorrections(text)
     }
 
-    // "Actually" and "scratch that" are left out: the first often starts a real sentence, the
-    // second already accepts a preceding period.
-    static let splitCue = try! NSRegularExpression(pattern: #"(?<=[\p{L}\p{N}])\. (?:(Oh|Ah),? )?(No wait|Wait,? no|I mean|I meant|Or rather|Sorry|No)[.,] +(\p{L}+|\p{N}+)"#, options: .caseInsensitive)
+    // "Actually" crosses a period only for a one-word repair fragment; a full sentence may
+    // introduce a new fact. "Scratch that" already accepts a preceding period.
+    static let splitCue = try! NSRegularExpression(pattern: #"(?<=[\p{L}\p{N}])\. (?:(Oh|Ah),? )?(No wait|Wait,? no|I mean|I meant|Or rather|Sorry|No|Actually(?=[.,] +[\p{L}\p{N}]+[.!?](?:\s|$)))[.,] +(\p{L}+|\p{N}+)"#, options: .caseInsensitive)
 
     static func mergeSplitCues(_ text: String) -> String {
         let ns = text as NSString
@@ -1638,7 +1674,14 @@ struct RuleCleaner: Cleaner {
             let lower = word.lowercased()
             if relativeTimes.contains(lower) || colors.contains(lower) || anchors.contains(lower)
                 || CleanupText.ordinals[lower] != nil || CleanupText.numberValue(lower) != nil { word = lower }
-            out = (out as NSString).replacingCharacters(in: m.range, with: ", \(lead)\(cue), \(word)")
+            let replacement = ", \(lead)\(cue), \(word)"
+            if cue == "actually" {
+                let prefix = CleanupText.tokenize(ns.substring(to: m.range.location))
+                guard let previous = prefix.last, CleanupText.quotedMask(prefix).last != true else { continue }
+                let fragment = previous.text + replacement
+                guard applyCommaCorrections(fragment) != fragment else { continue }
+            }
+            out = (out as NSString).replacingCharacters(in: m.range, with: replacement)
         }
         return out
     }
