@@ -279,7 +279,7 @@ final class ProcessingCoordinator {
     /// Local rules, guarded; the dictionary-applied text itself if they fail the guard.
     private func localClean(_ text: String, terms: [String], options: CleanupOptions) -> String {
         var options = options
-        let text = options.corrections && options.polish ? RuleCleaner.applyInsteadCorrections(text) : text
+        let text = options.corrections && options.polish ? RuleCleaner.applyInsteadCorrections(options.spoken ? RuleCleaner.spokenCommands(text) : text) : text
         options.polish = false // Broader AI grammar and phrasing edits have no local fallback.
         options.professional = false
         switch CleanupPipeline.process(raw: text, options: options, cleaner: localCleaner, allowedTerms: terms) {
