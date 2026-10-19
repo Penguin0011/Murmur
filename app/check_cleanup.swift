@@ -276,10 +276,25 @@ struct EchoAsyncCleaner: AsyncCleaner {
         // Speech models split the cue into its own sentence; corrections still apply and pass the guard.
         for (split, want) in [("Let's meet on Tuesday. No wait. Wednesday at noon.", "Let's meet on Wednesday at noon."),
                               ("Call me tomorrow. No wait. Tonight.", "Call me tonight."),
+                              ("Call me tomorrow. Actually, tonight.", "Call me tonight."),
                               ("Send it to Sam. Sorry, Alex.", "Send it to Alex."),
                               ("Meet at the office. I mean, at home.", "Meet at home.")] {
             expect(CleanupPipeline.process(raw: split, options: .standard, cleaner: RuleCleaner()) == .cleaned(want), "split cue: \(split)")
         }
+        let fragment = "Move the appointment to Monday. Actually, Thursday. Send the agenda afterward."
+        expect(CleanupPipeline.process(raw: fragment, options: .standard, cleaner: RuleCleaner()) == .cleaned("Move the appointment to Thursday. Send the agenda afterward."), "standalone actually fragment repairs the previous sentence")
+        expect(CleanupGuard.check(raw: fragment, cleaned: "Move the appointment to Thursday. Send the agenda afterward.", options: .standard) == .pass, "AI and local guard share split actually recognition")
+        expect(CleanupPipeline.process(raw: fragment, options: .faithful, cleaner: RuleCleaner()) == .unchanged(fragment), "faithful keeps correction fragments")
+        let noCorrections = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
+        expect(CleanupPipeline.process(raw: fragment, options: noCorrections, cleaner: RuleCleaner()) == .cleaned(fragment), "corrections off keeps both versions")
+        for ordinary in ["Meet Monday. Actually, Thursday works better for Alice.",
+                         "Call Sam. Actually, Alex sent the report.",
+                         "It is ready. Actually, maybe.",
+                         "She said \"Monday. Actually, Thursday. Bring notes\"."] {
+            expect(RuleCleaner.applyCorrections(ordinary) == ordinary, "actually declarations, ambiguity and quotes stay intact")
+        }
+        expect(CleanupPipeline.process(raw: "Um, she said \"Monday. Actually, Thursday. Bring notes\".", options: .standard, cleaner: RuleCleaner()) == .cleaned("She said \"Monday. Actually, Thursday. Bring notes\"."), "split actually inside a quote does not reject unrelated filler removal")
+        expect(CleanupGuard.check(raw: "It is ready. Actually, maybe.", cleaned: "It is maybe.", options: .standard) != .pass, "unrecognized actually fragment never widens guard deletions")
         expect(CleanupPipeline.process(raw: "Um.", options: .standard, cleaner: RuleCleaner()) == .cleaned(""), "filler-only transcript cleans to nothing")
         // Punctuation added after a dictated "sure" is not an answer phrase.
         expect(CleanupGuard.check(raw: "let's make sure", cleaned: "Let's make sure.", options: .standard) == .pass, "period after dictated sure passes")
@@ -513,7 +528,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "The final reason that. The final reason that shaped the style was pride.", cleaned: "Shaped the style was pride.", options: .standard) != .pass, "both copies of a repeated phrase cannot go")
         expect(CleanupGuard.check(raw: "We shipped the first build and the second build on time.", cleaned: "We shipped the second build on time.", options: .standard) != .pass, "a non-repeated phrase cannot go")
         expect(CleanupPipeline.process(raw: "Hello.", options: .standard, cleaner: EmptyCleaner()) == .heldForRecovery(raw: "Hello.", reason: .emptyOutput), "a cleaner emptying real words still holds")
-        for keep in ["I'm late. Sorry, traffic was bad.", "We shipped it. No problems so far.", "Call me tomorrow. Actually, tonight."] {
+        for keep in ["I'm late. Sorry, traffic was bad.", "We shipped it. No problems so far.", "Call me tomorrow. Actually, tonight is busy."] {
             expect(CleanupPipeline.process(raw: keep, options: .standard, cleaner: RuleCleaner()) == .cleaned(keep), "split cue left alone: \(keep)")
         }
 

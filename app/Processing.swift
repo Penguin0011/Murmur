@@ -9,8 +9,9 @@ import Foundation
 //
 // Failure policy (user decision, October 6, 2026: behave like Wispr Flow): a dictation is never held.
 // When the guard rejects the cleaned words, the transcript's own words go in with the model's
-// punctuation (`CleanupPipeline.punctuated`). A provider error, or a transfer that also fails the
-// guard, falls back to local rules, and failing those, to the dictionary-applied transcript. Every
+// punctuation (`CleanupPipeline.punctuated`), retaining guarded rule-based spoken corrections.
+// A provider error, or a transfer that also fails the guard, falls back to local rules, and failing
+// those, to the dictionary-applied transcript. Every
 // text inserted has passed the guard or is the user's own words. Reasons stay content-free.
 
 /// Where cleanup runs. `.local` is the RuleCleaner. `.cloud` means "through a `CleanupProvider`":
@@ -368,8 +369,15 @@ final class ProcessingCoordinator {
         case .cleaned(let text), .unchanged(let text): return CloudAttempt(text: text, reason: nil, error: nil)
         case .heldForRecovery(_, let why): reason = why
         }
-        if options.punctuation, let words = CleanupPipeline.punctuated(raw: section, cleaned: output, terms: terms),
-           case .cleaned(let text) = CleanupPipeline.judge(raw: section, cleaned: words, options: punctuationOnly, allowedTerms: terms) {
+        // Resolve safe corrections before transferring punctuation, so rejection of an unrelated
+        // model edit does not restore the words the speaker explicitly replaced.
+        var fallback = section
+        if options.corrections,
+           case .cleaned(let corrected) = CleanupPipeline.process(raw: section, options: CleanupOptions(fillers: false, corrections: true, lists: false), cleaner: RuleCleaner(), allowedTerms: terms) {
+            fallback = corrected
+        }
+        if options.punctuation, let words = CleanupPipeline.punctuated(raw: fallback, cleaned: output, terms: terms),
+           case .cleaned(let text) = CleanupPipeline.judge(raw: fallback, cleaned: words, options: punctuationOnly, allowedTerms: terms) {
             return CloudAttempt(text: text, reason: reason, error: nil, rejected: output)
         }
         return CloudAttempt(text: nil, reason: reason, error: nil, rejected: output)

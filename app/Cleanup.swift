@@ -1622,9 +1622,9 @@ struct RuleCleaner: Cleaner {
         return applyCommaCorrections(text)
     }
 
-    // "Actually" and "scratch that" are left out: the first often starts a real sentence, the
-    // second already accepts a preceding period.
-    static let splitCue = try! NSRegularExpression(pattern: #"(?<=[\p{L}\p{N}])\. (?:(Oh|Ah),? )?(No wait|Wait,? no|I mean|I meant|Or rather|Sorry|No)[.,] +(\p{L}+|\p{N}+)"#, options: .caseInsensitive)
+    // "Actually" crosses a period only for a one-word repair fragment; a full sentence may
+    // introduce a new fact. "Scratch that" already accepts a preceding period.
+    static let splitCue = try! NSRegularExpression(pattern: #"(?<=[\p{L}\p{N}])\. (?:(Oh|Ah),? )?(No wait|Wait,? no|I mean|I meant|Or rather|Sorry|No|Actually(?=[.,] +[\p{L}\p{N}]+[.!?](?:\s|$)))[.,] +(\p{L}+|\p{N}+)"#, options: .caseInsensitive)
 
     static func mergeSplitCues(_ text: String) -> String {
         let ns = text as NSString
@@ -1638,7 +1638,14 @@ struct RuleCleaner: Cleaner {
             let lower = word.lowercased()
             if relativeTimes.contains(lower) || colors.contains(lower) || anchors.contains(lower)
                 || CleanupText.ordinals[lower] != nil || CleanupText.numberValue(lower) != nil { word = lower }
-            out = (out as NSString).replacingCharacters(in: m.range, with: ", \(lead)\(cue), \(word)")
+            let replacement = ", \(lead)\(cue), \(word)"
+            if cue == "actually" {
+                let prefix = CleanupText.tokenize(ns.substring(to: m.range.location))
+                guard let previous = prefix.last, CleanupText.quotedMask(prefix).last != true else { continue }
+                let fragment = previous.text + replacement
+                guard applyCommaCorrections(fragment) != fragment else { continue }
+            }
+            out = (out as NSString).replacingCharacters(in: m.range, with: replacement)
         }
         return out
     }
