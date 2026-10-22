@@ -5,7 +5,7 @@
 set -euo pipefail
 window="${1:-24h}"
 log show --last "$window" --style compact \
-  --predicate 'subsystem == "cc.clouddev.dictation" AND category == "timing"' |
+  --predicate 'subsystem == "cc.clouddev.dictation" AND category == "timing" AND process == "Murmur"' |
 awk '
   match($0, / (cloud-transcribe|cleanup|insert|warm-runner|dictation) /) {
     stage = substr($0, RSTART + 1, RLENGTH - 2)

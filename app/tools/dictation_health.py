@@ -50,8 +50,9 @@ def history(hours, directory=HISTORY, now=None):
 
 def log_counts(hours, lines=None):
     if lines is None:
+        # The app process only: check executables log under the same subsystem.
         out = subprocess.run(["log", "show", "--last", f"{hours}h", "--style", "compact", "--predicate",
-                              'subsystem == "cc.clouddev.dictation"'], capture_output=True, text=True).stdout
+                              'subsystem == "cc.clouddev.dictation" AND process == "Murmur"'], capture_output=True, text=True).stdout
         lines = out.splitlines()
     counts, reasons, errors = collections.Counter(), collections.Counter(), 0
     for line in lines:
