@@ -107,6 +107,8 @@ private final class MockCloudCleaner: CleanupProvider, @unchecked Sendable {
         let override = DictationStyle(mode: WritingMode(options: .faithful, tone: .casual, screenContext: false, instructions: String(repeating: "x", count: 2_500)), settings: settings, context: ctx)
         check(override.options == .faithful && override.tone == .casual && override.context == nil, "set overrides replace the settings, and context off drops it")
         check(override.instructions.count == WritingModeLimits.instructions, "instructions are capped at 2,000 characters")
+        var trusting = settings; trusting.options.trustModel = true
+        check(DictationStyle(mode: WritingMode(options: .faithful), settings: trusting).options.trustModel, "trusting AI rewrites carries into a mode's options")
         settings.screenContext = false
         check(DictationStyle(mode: nil, settings: settings, context: ctx).context == nil, "global context off and no mode: no context")
         check(DictationStyle(mode: WritingMode(screenContext: true), settings: settings, context: ctx).context == ctx, "a mode turns context on over the global setting")

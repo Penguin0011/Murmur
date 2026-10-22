@@ -23,8 +23,11 @@ struct CleanupOptions: Codable, Equatable, Hashable, Sendable {
     /// "at the rate", "hashtag", "ten percent", and the explicit "write an email to X saying" layout
     /// (see `RuleCleaner.spokenCommands`).
     var spoken: Bool
+    /// Opt-in: accept the model's edits without `CleanupGuard.check`; `CleanupPipeline.judge` still
+    /// rejects an empty output, an answer, or a runaway length.
+    var trustModel: Bool
 
-    init(fillers: Bool = true, corrections: Bool = true, lists: Bool = true, punctuation: Bool = false, polish: Bool = false, professional: Bool = false, spoken: Bool = false) {
+    init(fillers: Bool = true, corrections: Bool = true, lists: Bool = true, punctuation: Bool = false, polish: Bool = false, professional: Bool = false, spoken: Bool = false, trustModel: Bool = false) {
         self.fillers = fillers
         self.corrections = corrections
         self.lists = lists
@@ -32,6 +35,7 @@ struct CleanupOptions: Codable, Equatable, Hashable, Sendable {
         self.polish = polish || professional
         self.professional = professional
         self.spoken = spoken
+        self.trustModel = trustModel
     }
 
     /// Saved options from before punctuation or spoken commands existed decode with them off.
@@ -41,7 +45,8 @@ struct CleanupOptions: Codable, Equatable, Hashable, Sendable {
                   lists: try c.decode(Bool.self, forKey: .lists), punctuation: try c.decodeIfPresent(Bool.self, forKey: .punctuation) ?? false,
                   polish: try c.decodeIfPresent(Bool.self, forKey: .polish) ?? false,
                   professional: try c.decodeIfPresent(Bool.self, forKey: .professional) ?? false,
-                  spoken: try c.decodeIfPresent(Bool.self, forKey: .spoken) ?? false)
+                  spoken: try c.decodeIfPresent(Bool.self, forKey: .spoken) ?? false,
+                  trustModel: try c.decodeIfPresent(Bool.self, forKey: .trustModel) ?? false)
     }
 
     /// Approved default: every comfort on.
@@ -417,6 +422,15 @@ enum CleanupGuard {
         "cleaned transcript", "transcript:", "<transcript", "</transcript",
     ]
 
+    /// The output contains an answer phrase the speaker did not say. Compared without punctuation on
+    /// the raw side: added punctuation alone ("let's make sure" -> "Let's make sure.") is not an answer.
+    static func answers(raw: String, cleaned: String) -> Bool {
+        func bare(_ s: String) -> String { String(s.map { $0.isWhitespace ? " " : $0 }).filter { $0.isLetter || $0.isNumber || $0 == "'" || $0 == " " } }
+        let rawBare = bare(raw.lowercased().replacingOccurrences(of: "\u{2019}", with: "'"))
+        let outLower = cleaned.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
+        return answerPhrases.contains { outLower.contains($0) && !rawBare.contains(bare($0)) }
+    }
+
     /// Nouns that make a preceding ordinal part of a phrase, not a list marker ("first impressions", "second nature").
     static let ordinalPhraseNouns: Set<String> = ["impression", "impressions", "chance", "chances", "nature", "thought", "thoughts", "opinion", "aid"]
     /// Discourse fillers polish may remove without commas, with the fillers option. "like" is one
@@ -729,16 +743,7 @@ enum CleanupGuard {
             return out.isEmpty || out == raw.trimmingCharacters(in: .whitespacesAndNewlines) ? .pass : .fail(.insertedWords)
         }
         if outWords.isEmpty { return .fail(.emptyOutput) }
-
-        let rawLower = raw.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
-        let outLower = cleaned.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
-        // Compared without punctuation on the raw side: added punctuation alone ("let's make sure" ->
-        // "Let's make sure.") is not an answer. Inserted words are still caught below.
-        func bare(_ s: String) -> String { String(s.map { $0.isWhitespace ? " " : $0 }).filter { $0.isLetter || $0.isNumber || $0 == "'" || $0 == " " } }
-        let rawBare = bare(rawLower)
-        for phrase in answerPhrases where outLower.contains(phrase) && !rawBare.contains(bare(phrase)) {
-            return .fail(.answerPattern)
-        }
+        if answers(raw: raw, cleaned: cleaned) { return .fail(.answerPattern) } // Inserted words are caught below.
         for marker in ["**", "##", "```", "\n- ", "\n* ", "\u{2022}"] where cleaned.contains(marker) && !raw.contains(marker) {
             return .fail(.structureAdded)
         }
@@ -1452,6 +1457,13 @@ enum CleanupPipeline {
         if output.isEmpty, options.fillers,
            (try? RuleCleaner().clean(raw, options: CleanupOptions(fillers: true, corrections: false, lists: false)))?
                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { return .cleaned("") }
+        // Trusted: only a malfunction is held, not an edit.
+        if options.trustModel {
+            let reason: CleanupFailureReason? = CleanupGuard.words(output).isEmpty ? .emptyOutput
+                : CleanupGuard.answers(raw: raw, cleaned: output) ? .answerPattern
+                : Double(output.count) > Double(raw.count) * 2 + 10 ? .lengthRatio : nil
+            return reason.map { .heldForRecovery(raw: raw, reason: $0) } ?? .cleaned(output)
+        }
         switch CleanupGuard.check(raw: raw, cleaned: output, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike) {
         case .pass: return .cleaned(output)
         case .fail(let reason): return .heldForRecovery(raw: raw, reason: reason)

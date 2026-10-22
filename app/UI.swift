@@ -783,6 +783,8 @@ struct SettingsView: View {
                  ? "Keeps your voice and fixes small slips: fillers, false starts, grammar. Names, numbers and “not” stay."
                  : "Keeps your wording except for the enabled edits, including clear spoken corrections.")
                 .padding(.top, 8)
+            toggleRow("Trust AI rewrites", "Accept the AI's edits without checking names, numbers and wording against what you said. Faster polish, but it can change meaning.", isOn: $controller.cleanupTrustModel)
+                .padding(.top, 12).disabled(controller.cleanupChoice == .localRules)
         }
     }
 
@@ -2049,6 +2051,7 @@ private struct AutoApplyRoutes: ViewModifier {
             .onChange(of: controller.cleanupSpoken) { controller.settingsChanged() }
             .onChange(of: controller.cleanupPolish) { controller.settingsChanged() }
             .onChange(of: controller.cleanupProfessional) { controller.settingsChanged() }
+            .onChange(of: controller.cleanupTrustModel) { controller.settingsChanged() }
             .onChange(of: controller.screenContext) { controller.settingsChanged() }
             .onChange(of: controller.learningEnabled) { controller.settingsChanged() }
             .onChange(of: controller.learningRequiresReadableField) { controller.settingsChanged() }
