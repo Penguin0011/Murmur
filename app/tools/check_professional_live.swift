@@ -24,12 +24,22 @@ let cases: [Case] = [
   Case(raw: "hey do you know if the build is done yet because uh I need to deploy it before lunch", must: ["build", "lunch", "?"], mustNot: ["Yes", "No,", "uh"]),
   Case(raw: "The quarterly numbers look strong. Revenue is up 12 percent and churn is down. I think we should share them with the board next week.", must: ["12", "board", "churn"], mustNot: []),
   Case(raw: "tell Sam that Alex owes him 20 dollars and not the other way around", must: ["Sam", "Alex", "20", "not"], mustNot: []),
+  // A repair that changes the meaning still replaces what came before it.
+  Case(raw: "hey that sounds pretty good no I mean that doesn't sound that great to me", must: ["doesn't sound"], mustNot: ["pretty good"]),
+  Case(raw: "um what time is it no I mean what day is it", must: ["What day is it?"], mustNot: ["time"]),
+  Case(raw: "The new office was finished. The new office was designed to hold forty people and a small lab.", must: ["designed to hold"], mustNot: ["was finished"]),
+  Case(raw: "first let's review test A and B secondly let's review test C and D", must: ["1.", "2."], mustNot: ["secondly", "Secondly"]),
+  // Must keep: earlier text the repair does not replace, real lists of values, counts, parallel sentences.
+  Case(raw: "he can't come so we won't go wait no I meant he won't go", must: ["can't come", "he won't go"], mustNot: ["we won't"]),
+  Case(raw: "I'm free Tuesday morning, Thursday morning and Friday afternoon", must: ["Tuesday", "Thursday", "Friday"], mustNot: []),
+  Case(raw: "I need two eggs and three apples for the cake", must: ["two eggs", "three apples"], mustNot: ["1."]),
+  Case(raw: "The project is late. The project is also over budget.", must: ["late", "over budget"], mustNot: []),
 ]
 let defaults = UserDefaults(suiteName: "cc.clouddev.dictation.development")!
 let base = defaults.string(forKey: "customAPIBaseURL")!, model = defaults.string(forKey: "customAPIModel")!
 let key = try KeychainCredentialStore().read(.customCleanup)
 guard let provider = makeCleanupProvider(.customAPI, key: key, apiBaseURL: base, model: model) else { fatalError("no provider") }
-let o = CleanupOptions(fillers: true, corrections: true, lists: true, punctuation: true, professional: true)
+let o = CleanupOptions(punctuation: true, polish: true, professional: true, spoken: true) // The Professional level as Settings sets it.
 let runs = Int(CommandLine.arguments.dropFirst().first ?? "3") ?? 3
 var pass = 0, good = 0, total = 0
 for (n, c) in cases.enumerated() {
