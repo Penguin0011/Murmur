@@ -319,7 +319,7 @@ final class ProcessingCoordinator {
     /// The mode's tone, applied last to whichever text was chosen (gap #7). Never on the email layout,
     /// and only as exactly `Tone.apply`, which `CleanupGuard.acceptsTone` checks.
     private func toned(_ text: String, input: String, style: DictationStyle) -> String {
-        guard style.tone != .formal, !text.isEmpty, !(style.options.spoken && RuleCleaner.emailLayout(input) != nil) else { return text }
+        guard style.options.anyEnabled, style.tone != .formal, !text.isEmpty, !(style.options.spoken && RuleCleaner.emailLayout(input) != nil) else { return text }
         let next = style.tone.apply(text)
         return CleanupGuard.acceptsTone(base: text, toned: next, tone: style.tone) ? next : text
     }

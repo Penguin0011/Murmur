@@ -23,7 +23,7 @@ struct CleanupOptions: Codable, Equatable, Hashable, Sendable {
     /// "at the rate", "hashtag", "ten percent", and the explicit "write an email to X saying" layout
     /// (see `RuleCleaner.spokenCommands`).
     var spoken: Bool
-    /// Opt-in: accept the model's edits without `CleanupGuard.check`; `CleanupPipeline.judge` still
+    /// Opt-in for Polish and Professional: accept edits without `CleanupGuard.check`; `CleanupPipeline.judge` still
     /// rejects an empty output, an answer, or a runaway length.
     var trustModel: Bool
 
@@ -492,7 +492,14 @@ enum CleanupGuard {
                 }
                 // "250,000", "2,50,000" and "250000" are the same word.
                 let lower = t.lower.first?.isNumber == true && t.lower.allSatisfy({ $0.isNumber || $0 == "," || $0 == "." }) ? t.lower.replacingOccurrences(of: ",", with: "") : t.lower
-                out.append(Word(text: t.text, lower: lower, sentenceStart: start, commaBefore: commaPending))
+                // "42-dollar" is the two spoken words "42 dollar".
+                let parts = lower.split(separator: "-", maxSplits: 1).map(String.init)
+                if parts.count == 2, parts[0].allSatisfy(\.isNumber), parts[1].first?.isLetter == true {
+                    out.append(Word(text: parts[0], lower: parts[0], sentenceStart: start, commaBefore: commaPending))
+                    out.append(Word(text: String(t.text.dropFirst(parts[0].count + 1)), lower: parts[1], sentenceStart: false, commaBefore: false))
+                } else {
+                    out.append(Word(text: t.text, lower: lower, sentenceStart: start, commaBefore: commaPending))
+                }
                 start = false; lineStart = false; commaPending = false
             } else if t.kind == .punct {
                 if t.isComma || t.isDash {
@@ -913,21 +920,28 @@ enum CleanupGuard {
         }
         // A marker counts inside a counted sequence ("first ... second") that starts at an announced first
         // marker, so "First, preheat the oven" and "Step one was easy; step two took all night" stay prose.
-        // Professional's prompt also lists spoken markers without an announcement, so they need only the sequence.
-        // Its prompt also allows unannounced ordinals; the guard does not, so prose such as "First we went home,
-        // second we ate" stays prose there too.
+        // Professional's prompt also lists spoken markers and ordinals without an announcement, so they need only
+        // the sequence ("First we went home, second we ate"); Polish and Strict keep that prose.
         func inSequence(_ i: Int, _ marker: (Int) -> Int?, markerWords: Int, announce: Bool) -> Bool {
             guard let n = marker(i) else { return false }
             let values = a.indices.compactMap(marker)
             guard values.contains(n + 1) || values.contains(n - 1) else { return false }
             return !announce || (0...i).contains { marker($0) == 1 && announced($0 - markerWords) }
         }
+        // An ordinal modifying a noun is prose even in Professional: after a determiner ("the first"), or before
+        // the same word as another ordinal ("first floor ... second floor"), unless that word is a subject ("first we").
+        // ponytail: a heuristic; an unannounced "first X ... second Y" with distinct nouns can still pass as a list.
+        func adjectival(_ i: Int) -> Bool {
+            if i > 0, ["the", "a", "an", "my", "our", "your", "his", "her", "their", "its", "this", "that"].contains(a[i - 1]) { return true }
+            guard i + 1 < a.count, !rawWords[i].commaAfter, !["i", "we", "you", "he", "she", "they", "it", "let's", "lets"].contains(a[i + 1]) else { return false }
+            return a.indices.contains { $0 != i && $0 + 1 < a.count && CleanupText.ordinals[a[$0]] != nil && a[$0 + 1] == a[i + 1] }
+        }
         // Enumeration words a list may replace with "N." markers: ordinals, "number/step/item"
         // plus a cardinal, and an "and"/"then" joining the next marker.
         func isMarkerWord(_ i: Int) -> Bool {
             guard options.lists && hasListMarkers else { return false }
             let w = a[i]
-            if CleanupText.ordinals[w] != nil { return inSequence(i, ordinalMarker, markerWords: 0, announce: true) }
+            if CleanupText.ordinals[w] != nil { return inSequence(i, ordinalMarker, markerWords: 0, announce: !options.professional || adjectival(i)) }
             if spokenMarker(i) != nil { return inSequence(i, spokenMarker, markerWords: 1, announce: !options.professional) }
             if ["number", "step", "item"].contains(w), i + 1 < a.count, spokenMarker(i + 1) != nil { return isMarkerWord(i + 1) }
             if w == "and" || w == "then", i + 1 < a.count, isMarkerWord(i + 1) { return true }
@@ -1303,7 +1317,6 @@ enum CleanupPrompt {
         }
         if options.professional && !ops.isEmpty {
             ops.append("- Rewrite into clear, correct, professional written English: fix grammar (subject-verb agreement, verb forms, pronoun case and order, e.g. \"me and John was\" becomes \"John and I were\", \"he don't\" becomes \"he doesn't\"), fix words speech recognition misheard, and smooth awkward or run-on phrasing. Keep the speaker's meaning and first-person voice; do not add content or make it longer.")
-            ops.append("Example: \"um so me and Sarah is meeting at 3 actually no I meant we are meeting at 4 and we need item one the slides item two the budget\" becomes \"Sarah and I are meeting at 4, and we need:\\n1. The slides\\n2. The budget\"")
         } else if options.polish && !ops.isEmpty {
             ops.append("- Fix obvious grammar slips and words speech recognition clearly misheard, changing as few words as possible (\"it go faster\" becomes \"it goes faster\").")
         }
@@ -1473,7 +1486,7 @@ enum CleanupPipeline {
            (try? RuleCleaner().clean(raw, options: CleanupOptions(fillers: true, corrections: false, lists: false)))?
                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { return .cleaned("") }
         // Trusted: only a malfunction is held, not an edit.
-        if options.trustModel {
+        if options.trustModel && (options.polish || options.professional) {
             let reason: CleanupFailureReason? = CleanupGuard.words(output).isEmpty ? .emptyOutput
                 : CleanupGuard.answers(raw: raw, cleaned: output) ? .answerPattern
                 : Double(output.count) > Double(raw.count) * 2 + 10 ? .lengthRatio : nil
@@ -2156,6 +2169,11 @@ extension RuleCleaner {
                let p = word(i - 2), !CleanupGuard.grammarWords.contains(p), out.last?.kind == .space {
                 out.removeLast(); out += [CleanupToken(kind: .punct, text: "."), t[n]]
                 changed = true; i = n + 1; continue
+            }
+            // Digits before "percent" too, as the prompt asks: "12 percent" -> "12%".
+            if w.allSatisfy(\.isNumber), let p = after(i), word(p) == "percent" {
+                emit(CleanupToken(kind: .word, text: tok.text + "%"))
+                changed = true; i = p + 1; continue
             }
             // Numbers: with hundred or a scale word, or before "percent". "give me five minutes",
             // "a hundred times", ordinals, years in pairs and digit strings stay words.

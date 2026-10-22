@@ -778,13 +778,13 @@ struct SettingsView: View {
                  : controller.cleanupChoice == .localRules
                  ? "Local rules use Strict. Choose an AI cleanup route above to enable Polish or Professional."
                  : controller.cleanupProfessional
-                 ? "Rewrites into clear, professional writing. May reword and change tone; names, numbers and “not” stay."
+                 ? "Rewrites into clear, professional writing, resolving enabled spoken corrections and preserving your final intent."
                  : controller.cleanupPolish
-                 ? "Keeps your voice and fixes small slips: fillers, false starts, grammar. Names, numbers and “not” stay."
+                 ? "Keeps your voice while fixing grammar, fillers and enabled spoken corrections."
                  : "Keeps your wording except for the enabled edits, including clear spoken corrections.")
                 .padding(.top, 8)
-            toggleRow("Trust AI rewrites", "Accept the AI's edits without checking names, numbers and wording against what you said. Faster polish, but it can change meaning.", isOn: $controller.cleanupTrustModel)
-                .padding(.top, 12).disabled(controller.cleanupChoice == .localRules)
+            toggleRow("Trust AI rewrites", "Only in Polish and Professional: accept edits without checking names, numbers and wording against what you said. This can change meaning.", isOn: $controller.cleanupTrustModel)
+                .padding(.top, 12).disabled(controller.cleanupChoice == .localRules || cleanupStyle.wrappedValue < 1)
         }
     }
 
