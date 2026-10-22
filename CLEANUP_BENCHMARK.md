@@ -117,7 +117,7 @@ Following the recommendation above, Polish and Professional now understand expli
 **What it still refuses.**
 - The output is checked in full against the repaired text, so it cannot add anything the repair did not say, and it cannot keep both versions.
 - The repair must restate one of the clause's content words within its first four words. It must also be at least as long as the clause, so a fragment never replaces a whole clause ("the report is not ready no I mean the slides" → "The slides." is refused).
-- A cue after a question mark is left alone, as "No" there may answer it: "What time is it? No, I mean, what day is it?" → "What day is it?" is still refused. A cue after a period is merged into the sentence first, as before, and passes.
+- Only "no I mean" and "no I meant" may correct the sentence before them, across its period or question mark, since a speaker does not answer their own question with "I mean". So "What time is it? No, I mean, what day is it?" → "What day is it?" passes. A bare "No" after a question stays an answer: "Is the meeting today? No, it's tomorrow." → "It's tomorrow." is refused.
 - Each number or name the clause loses needs one of its kind in the repair. "send 12 boxes wait no I meant send them friday" refines the boxes and does not replace them, so "Send them Friday." is still refused.
 
 **Result**, re-scored offline with `--rescore` on the two saved Professional runs and with the cleanup corpus:

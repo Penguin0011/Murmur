@@ -722,7 +722,10 @@ enum CleanupGuard {
             // A declarative or quantifying use is not a cue: "no I mean it", "actually no one came".
             guard end < tokenOfWord.count, !between(end - 1, end, \.isTerminal),
                   !["it", "business", "well", "to", "was", "is", "one", "body", "longer", "matter", "way", "doubt", "problem", "idea", "more"].contains(word(end)),
-                  start > (cuts.last?.upperBound ?? -1) + 1, !between(start - 1, start, \.isTerminal) else { continue }
+                  start > (cuts.last?.upperBound ?? -1) + 1,
+                  // "No, I mean" may follow a question it corrects ("What time is it? No, I mean, what day is it?"):
+                  // a speaker does not answer their own question with "I mean". A bare "No," there stays an answer.
+                  cue.first == "no" || !between(start - 1, start, \.isTerminal) else { continue }
             var s = start - 1
             while s > 0, !between(s - 1, s, \.isBoundary), !["so", "and", "but"].contains(word(s - 1)), start - s < 8 { s -= 1 }
             guard s == 0 || between(s - 1, s, \.isBoundary) || ["so", "and", "but"].contains(word(s - 1)) else { continue }

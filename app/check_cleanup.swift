@@ -617,6 +617,7 @@ struct EchoAsyncCleaner: AsyncCleaner {
         for (raw, out) in [
             ("hey that sounds pretty good no I mean that doesn't sound that great to me", "Hey, that doesn't sound that great to me."),
             ("um what time is it no I mean what day is it", "What day is it?"),
+            ("What time is it? No, I mean, what day is it?", "What day is it?"),
             ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Do not send Alex 20 dollars."),
             ("The new office was designed uh no let me start again the new office was designed to hold forty people and a small lab", "The new office was designed to hold forty people and a small lab."),
             (corrected, "Dana is not coming and the demo is Tuesday."),
@@ -632,12 +633,13 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Do not send Alex 20 dollars on Friday.", "a repair with a new fact"),
             (corrected, "Dana is coming and the demo is Tuesday.", "a negation dropped outside the correction"),
             ("the report is not ready no I mean the slides", "The slides.", "a fragment replacing a clause"),
+            ("Is the meeting today? No, it's tomorrow.", "It's tomorrow.", "a question's answer"),
             ("send the notes to shreia before noon", "Send the notes to Priya before noon.", "a name swapped for an unrelated one"),
             ("send the notes to priya before noon", "Send the notes to Shreya before noon.", "a half-similar name"),
             ("send it to the team", "Send it to Tim.", "a word respelled as a name"),
             ("we should include the budget", "We should Exclude the budget.", "a capitalized antonym"),
             ("we should increase the budget", "We should Decrease the budget.", "a capitalized antonym"),
-        ] { for o in [polish, professional] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "polish modes refuse: \(label)") } }
+        ] { for o in [.standard, polish, professional] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "every level refuses: \(label)") } }
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
         expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")
