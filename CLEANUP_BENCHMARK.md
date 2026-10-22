@@ -6,19 +6,19 @@ This is a synthetic, live measurement of AI cleanup at each level. It uses `app/
 
 On the configured route (Cerebras `gpt-oss-120b`, Professional, screen context on), the production prompt produced the intended text for **26 of 27** cases, at a 0.41 s median model-call latency. Groq's `openai/gpt-oss-120b` scored 27 of 27, but its median was twice as slow. The production prompt stays. Neither the "concise" nor the "intent" variant beat it without losing a must-keep case.
 
-Trust AI rewrites is what makes Professional work. With trust off, the word-level guard still rejects 6 of Cerebras' 26 good outputs and 8 of Groq's 27. That count is after this branch's guard fix; before it, the guard rejected 8 and 9. Most of what is still rejected are outputs where the guard cannot tell a good result from a bad one by comparing words (see below).
+Trust AI rewrites is what makes Professional work. With trust off, the word-level guard still rejects 5 of Cerebras' 26 good outputs and 7 of Groq's 27. That count is after this branch's guard fixes; before them, the guard rejected 8 and 9. Most of what is still rejected are outputs where the guard cannot tell a good result from a bad one by comparing words (see below).
 
-| Run | Endpoint / model | Prompt | Level | Context | Cases | Model good | Guard pass, trust off (before → after fix) | Final good, trust on | Provider errors (unrecovered) | Median / p95 s | Valid |
+| Run | Endpoint / model | Prompt | Level | Context | Cases | Model good | Guard pass, trust off (before → after fixes) | Final good, trust on | Provider errors (unrecovered) | Median / p95 s | Valid |
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|
-| This branch | Cerebras `gpt-oss-120b` | production | Professional | on | 27 | **26** | 18 → 20 | 26 | 2 (0) | **0.41 / 0.74** | yes |
-| This branch | Groq `openai/gpt-oss-120b` | production | Professional | on | 27 | 27 | 18 → 19 | 27 | 2 (0) | 0.80 / 1.38 | yes |
+| This branch | Cerebras `gpt-oss-120b` | production | Professional | on | 27 | **26** | 18 → 21 | 26 | 2 (0) | **0.41 / 0.74** | yes |
+| This branch | Groq `openai/gpt-oss-120b` | production | Professional | on | 27 | 27 | 18 → 20 | 27 | 2 (0) | 0.80 / 1.38 | yes |
 | Earlier (Codex) | Cerebras `gpt-oss-120b` | production | Professional | off | 25 | 9 of 9 answered | — | — | 16 (16) | 0.19 / 0.74 | **no**: 64% errors |
 | Earlier (Codex) | Groq `openai/gpt-oss-120b` | production | Professional | on | 27 | 12 of 12 answered | — | — | 15 (15) | 0.13 / 1.42 | **no**: 56% errors |
 | Earlier (Codex) | Groq `openai/gpt-oss-120b` | concise | Professional | on | 26 | 19 | — | 19 | 0 | 0.84 / 1.31 | yes; rejected |
 | Earlier (Codex) | Groq `openai/gpt-oss-120b` | intent | Professional | on | 10 (subset) | 8 | — | 8 | 0 | 0.51 / 1.57 | yes; too small |
 
 - **Model good:** the model's output meets the case's required phrases and avoids its forbidden phrases.
-- **Guard pass:** `CleanupGuard.check` accepts that output with trust off. It was re-scored offline with `--rescore`, before and after the guard fix on this branch.
+- **Guard pass:** `CleanupGuard.check` accepts that output with trust off. It was re-scored offline with `--rescore`, before and after the guard fixes on this branch.
 - **Final good:** the text the app would paste, with the user's trust setting on.
 - **Latency:** only successful model calls are counted.
 - **Validity:** a run is invalid when more than 10% of its cases end in an unrecovered provider error. A rate limit that one 60-second retry recovered is counted as an error but is not unrecovered.
@@ -51,25 +51,26 @@ The rejected "concise" variant turned ordinary prose and single sentences into n
 
 ## Trust off: guard false rejections
 
-After the fix, these are what the guard still rejects among good Professional outputs, across both runs:
+After the fixes, these are what the guard still rejects among good Professional outputs, across both runs:
 
 | Reason | Count | Example | Status |
 |---|---:|---|---|
 | `negationChanged` | 6 | "what time is it no I mean what day is it" → "What day is it?" | The repair drops a whole clause, and the word-level alignment cannot verify that. Counting the cue word "no" as a non-negation alone did not make these pass (they then fail `unexplainedDeletion`), so that change was not kept. |
-| `structureAdded` | 4 | "first … secondly …" → a numbered list | **Policy conflict.** The Professional prompt asks for unannounced ordinal lists. The guard's adversarial corpus requires "First we went to the store, second we cooked dinner." to stay prose. Allowing these lists breaks that case, so the guard was left as is. The other two are Groq's: "20 dollars" written as "$20" (a symbol the guard does not allow to be added) and "42‑dollar" written with a U+2011 non-breaking hyphen. |
+| `structureAdded` | 2 | Groq wrote "20 dollars" as "$20" and "42‑dollar" with a U+2011 non-breaking hyphen | The guard does not allow a new symbol. Cerebras did neither. |
 | `numberDropped` | 2 | "Send Alex 20 dollars no I mean do not send Alex 20 dollars" → "Do not send Alex 20 dollars." | Same family as `negationChanged`: the repaired clause repeats the number. |
 | `nameAdded` | 2 | Screen-context spelling (case 23) | By design. |
 
 Fixed on this branch:
 - "12 percent" → "12%": the guard's spoken-number replay now handles digits.
 - "42 dollar" → "42-dollar": a digit-hyphen-word token now reads as its two words.
+- Unannounced ordinal lists in Professional ("first … secondly …", "First we went to the store, second we cooked dinner"). The user decided on October 22, 2026 that Professional lists these even with trust off; Polish and Strict keep them as prose unless a list is announced. Ordinals that modify a noun ("the first", "first floor … second floor") stay prose in every level.
 
 Each fix has must-fail counterparts in `check_cleanup`, and the cleanup corpus still accepts 0 adversarial outputs.
 
 ## Unsolved
 
 - **A restarted sentence with no cue**, such as "The office was finished. The office was designed to…". Case 13 scores keeping both sentences as correct, because dropping the first can lose an independent fact ("The car is red. The car is parked outside."). A deterministic pre-pass would collide with "The project is late. The project is also over budget." It remains a model-only behaviour, and `gpt-oss-120b` keeps both.
-- **The unannounced-list conflict** between the Professional prompt and the guard needs a product decision.
+- **Meaning-changing repairs with trust off** ("what time is it no I mean what day is it") still fall back: the word-level guard cannot verify a dropped clause. Trust AI rewrites is the supported path for them.
 - **Polish and Strict**, other models, reasoning effort, and context on vs off still need live runs. Each newly compiled benchmark binary asks for Keychain access to the provider key, and the user was away to approve it.
 
 ## Pending live runs
