@@ -34,6 +34,19 @@ import Darwin
         precondition(provenance(olderEntry).allSatisfy { $0 == nil }, "older history decodes without provenance")
         let retexted = traced.with(finalText: "B.", status: "verified")
         precondition(retexted.finalText == "B." && provenance(retexted) == provenance(traced), "with(finalText:) keeps provenance")
+        // Diagnostics round-trip, survive with(finalText:), and older files decode without them.
+        var diagnosed = traced
+        diagnosed.transcription = TranscriptionDetail(segments: [SegmentDetail(text: " Thanks.", start: 1.5, end: 2, avgLogprob: -0.4, noSpeechProb: 0.1, compressionRatio: 0.9, loudWindows: 2, dropped: true)],
+                                                      clipSeconds: 2, peakP50: 0.02, peakP90: 0.3, silencePeak: 0.25, silenceThreshold: 0.01, precheck: "passed")
+        diagnosed.cleanup = CleanupDetail(modelOutput: "Hi.", guardVerdict: "cleaned", promptHash: "0123abcd", dictionaryTerms: ["Akme"], input: "hi", contextUsed: true,
+                                          contextApp: "com.apple.Notes", contextChars: ["selected": 0, "clipboard": 12, "window": 40])
+        diagnosed.afterPaste = AfterPaste(text: "Hi there.", changed: true, route: "ax", endReason: "focus departed")
+        diagnosed.timing = StageTiming(transcription: 0.4, cleanup: 0.9, insertion: 0.1, total: 1.6)
+        diagnosed.recordingFile = diagnosed.id + ".wav"
+        let diagnosedTrip = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(diagnosed.with(finalText: "Hi.", status: "verified")))
+        precondition(diagnosedTrip.transcription == diagnosed.transcription && diagnosedTrip.cleanup == diagnosed.cleanup && diagnosedTrip.afterPaste == diagnosed.afterPaste
+                     && diagnosedTrip.timing == diagnosed.timing && diagnosedTrip.recordingFile == diagnosed.recordingFile, "diagnostics round-trip and survive with(finalText:)")
+        precondition(olderEntry.transcription == nil && olderEntry.cleanup == nil && olderEntry.afterPaste == nil && olderEntry.timing == nil && olderEntry.recordingFile == nil, "older history decodes without diagnostics")
         let path = root.appendingPathComponent(entry.id + ".json")
         let abandoned = root.appendingPathComponent(".pending-" + UUID().uuidString)
         try JSONEncoder().encode(entry).write(to: abandoned)
