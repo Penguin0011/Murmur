@@ -770,21 +770,23 @@ struct SettingsView: View {
                 segmented(controller.cleanupChoice == .localRules
                           ? [(-1, "Faithful"), (0, "Strict")]
                           : [(-1, "Faithful"), (0, "Strict"), (1, "Polish"), (2, "Professional")], cleanupStyle, size: 14)
-                SettingInfoButton(text: "Faithful turns all cleanup off and keeps your dictated wording. Dictionary spelling corrections still apply. The raw transcript stays in History.")
+                SettingInfoButton(text: "Faithful keeps your words as dictated.\nStrict removes fillers and applies clear spoken corrections.\nPolish also resolves backtracks and small grammar slips, keeping your voice.\nProfessional rewrites into clear writing of what you meant.")
                     .accessibilityLabel("About Faithful")
             }.padding(.top, 8)
             help(cleanupStyle.wrappedValue == -1
-                 ? "Your dictated wording, with cleanup off."
+                 ? "Keeps the words as dictated, apart from dictionary spellings: “Um, let’s meet Tuesday, no, I mean, Thursday, at the cafe.”"
                  : controller.cleanupChoice == .localRules
-                 ? "Local rules use Strict. Choose an AI cleanup route above to enable Polish or Professional."
+                 ? "Local rules use Strict: “Let’s meet Thursday at the cafe.” Choose an AI cleanup route above to enable Polish or Professional."
                  : controller.cleanupProfessional
-                 ? "Rewrites into clear, professional writing. May reword and change tone; names, numbers and “not” stay."
+                 ? "Rewrites into clear, professional writing of what you meant: “Let’s meet on Thursday at the café.” Names, numbers and “not” stay."
                  : controller.cleanupPolish
-                 ? "Keeps your voice and fixes small slips: fillers, false starts, grammar. Names, numbers and “not” stay."
-                 : "Keeps your wording except for the enabled edits, including clear spoken corrections.")
+                 ? "Also resolves backtracks and false starts, and fixes small grammar slips, keeping your voice: “Let’s meet Thursday at the cafe.”"
+                 : "Removes fillers and applies clear spoken corrections, otherwise keeping your wording: “Let’s meet Thursday at the cafe.”")
                 .padding(.top, 8)
-            toggleRow("Trust AI rewrites", "Accept the AI's edits without checking names, numbers and wording against what you said. Faster polish, but it can change meaning.", isOn: $controller.cleanupTrustModel)
-                .padding(.top, 12).disabled(controller.cleanupChoice == .localRules)
+            if controller.cleanupChoice != .localRules && cleanupStyle.wrappedValue >= 1 {
+                toggleRow("Protect what I said", "Murmur checks each AI edit against your words and keeps your original if a name, number or “not” changes, or if something you said goes missing or something new appears. Turn off to paste the AI’s version as-is.", isOn: Binding(get: { !controller.cleanupTrustModel }, set: { controller.cleanupTrustModel = !$0 }))
+                    .padding(.top, 12)
+            }
         }
     }
 
@@ -1145,6 +1147,7 @@ struct SettingsView: View {
                  : HistoryMode.offDisclosure).padding(.top, 12)
             eyebrow("Keep transcripts for").padding(.top, 28)
             segmented([("30-days", "30 days"), ("six-months", "Six months"), ("forever", "Forever")], $controller.retention).padding(.top, 8)
+            toggleRow("Keep recordings for diagnostics (7 days)", "Keeps the audio of each dictation on this Mac, beside its History entry, so a developer can replay what Murmur heard. Off by default. Recordings are deleted after 7 days, and are kept only while History is saved. Delete All Data removes them.", isOn: $controller.keepRecordings).padding(.top, 20)
             if let notice = controller.historyNotice {
                 Text(notice).font(WindowType.body(14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
             }
@@ -2002,6 +2005,7 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.inputDeviceUID) { controller.settingsChanged() }
             .onChange(of: controller.retention) { controller.settingsChanged() }
             .onChange(of: controller.historyMode) { controller.settingsChanged() }
+            .onChange(of: controller.keepRecordings) { controller.settingsChanged() }
             .onChange(of: controller.updateChecksEnabled) { controller.settingsChanged() }
             .onChange(of: controller.installUpdatesAutomatically) { controller.settingsChanged() }
     }

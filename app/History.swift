@@ -35,6 +35,14 @@ struct HistoryEntry: Codable, Identifiable {
     var cleanupOutcome: CleanupPath? = nil
     /// True once the user edits `finalText` in History.
     var edited: Bool? = nil
+    // Diagnostics (October 22, 2026): what a developer needs to see why a dictation came out as it did.
+    // Dictation text lives only here, with the entry's permissions and retention, never in the unified log. Nil before then.
+    var transcription: TranscriptionDetail? = nil
+    var cleanup: CleanupDetail? = nil
+    var afterPaste: AfterPaste? = nil
+    var timing: StageTiming? = nil
+    /// File name in `history/recordings` when "Keep recordings for diagnostics" was on; purged after 7 days.
+    var recordingFile: String? = nil
 
     /// The same dictation with new text and status; the recording facts carry over.
     func with(finalText: String, status: String, fallback: String? = nil, rejected: String? = nil) -> HistoryEntry {
@@ -42,6 +50,60 @@ struct HistoryEntry: Codable, Identifiable {
         next.finalText = finalText; next.insertionStatus = status; next.cleanupFallback = fallback; next.cleanupRejectedOutput = rejected
         return next
     }
+}
+
+/// One Whisper segment as parsed, with the loud-window count under it and whether the parser dropped it.
+struct SegmentDetail: Codable, Equatable {
+    var text: String
+    var start: Double? = nil, end: Double? = nil
+    var avgLogprob: Double? = nil, noSpeechProb: Double? = nil, compressionRatio: Double? = nil
+    var loudWindows: Int? = nil
+    var dropped = false
+}
+
+/// What the transcriber heard and how loud the clip was. Segments only for Whisper verbose_json.
+struct TranscriptionDetail: Codable, Equatable {
+    var segments: [SegmentDetail]? = nil
+    var clipSeconds: Double? = nil
+    /// Median and 90th-percentile peak of the clip's 100 ms windows.
+    var peakP50: Double? = nil, peakP90: Double? = nil
+    /// The silence pre-check's level (second-highest window peak) and the threshold it was held against.
+    var silencePeak: Double? = nil, silenceThreshold: Double? = nil
+    /// "passed", or "unchecked" when the provider has no pre-check or the audio could not be decoded.
+    var precheck: String? = nil
+}
+
+/// The cleanup model's exchange, without any screen text.
+struct CleanupDetail: Codable, Equatable {
+    /// The model's exact output where the guard accepted it. A rejected output is `cleanupRejectedOutput`.
+    var modelOutput: String? = nil
+    /// "cleaned", "unchanged", "rejected" or "provider-error", one per section, comma-separated.
+    var guardVerdict: String? = nil
+    var providerError: String? = nil
+    /// Short hash of the system prompt, to correlate prompt changes with results.
+    var promptHash: String? = nil
+    var dictionaryTerms: [String]? = nil
+    /// The text sent for cleanup when the dictionary changed it from `rawText`.
+    var input: String? = nil
+    var contextUsed: Bool? = nil
+    /// Bundle ID of the app dictated into, and the characters of each context part sent. Never the context.
+    var contextApp: String? = nil
+    var contextChars: [String: Int]? = nil
+}
+
+/// The pasted span as last observed when the correction watch closed. Text and `changed` are nil when
+/// the watch lost the span (the reason is in `endReason`), so "unchanged" is never claimed without evidence.
+struct AfterPaste: Codable, Equatable {
+    var text: String? = nil
+    var changed: Bool? = nil
+    /// "ax" (read back from the field) or "keys" (followed by keystrokes).
+    var route: String? = nil
+    var endReason: String? = nil
+}
+
+/// Seconds per stage; total runs from the key release to the end of insertion.
+struct StageTiming: Codable, Equatable {
+    var transcription: Double? = nil, cleanup: Double? = nil, insertion: Double? = nil, total: Double? = nil
 }
 
 struct HistoryStore {

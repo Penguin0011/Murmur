@@ -23,7 +23,7 @@ struct CleanupOptions: Codable, Equatable, Hashable, Sendable {
     /// "at the rate", "hashtag", "ten percent", and the explicit "write an email to X saying" layout
     /// (see `RuleCleaner.spokenCommands`).
     var spoken: Bool
-    /// Opt-in: accept the model's edits without `CleanupGuard.check`; `CleanupPipeline.judge` still
+    /// Opt-in for Polish and Professional: accept edits without `CleanupGuard.check`; `CleanupPipeline.judge` still
     /// rejects an empty output, an answer, or a runaway length.
     var trustModel: Bool
 
@@ -492,7 +492,14 @@ enum CleanupGuard {
                 }
                 // "250,000", "2,50,000" and "250000" are the same word.
                 let lower = t.lower.first?.isNumber == true && t.lower.allSatisfy({ $0.isNumber || $0 == "," || $0 == "." }) ? t.lower.replacingOccurrences(of: ",", with: "") : t.lower
-                out.append(Word(text: t.text, lower: lower, sentenceStart: start, commaBefore: commaPending))
+                // "42-dollar" is the two spoken words "42 dollar".
+                let parts = lower.split(separator: "-", maxSplits: 1).map(String.init)
+                if parts.count == 2, parts[0].allSatisfy(\.isNumber), parts[1].first?.isLetter == true {
+                    out.append(Word(text: parts[0], lower: parts[0], sentenceStart: start, commaBefore: commaPending))
+                    out.append(Word(text: String(t.text.dropFirst(parts[0].count + 1)), lower: parts[1], sentenceStart: false, commaBefore: false))
+                } else {
+                    out.append(Word(text: t.text, lower: lower, sentenceStart: start, commaBefore: commaPending))
+                }
                 start = false; lineStart = false; commaPending = false
             } else if t.kind == .punct {
                 if t.isComma || t.isDash {
@@ -686,6 +693,60 @@ enum CleanupGuard {
         return CleanupText.render(CleanupText.normalize(t))
     }
 
+    static let explicitRepairCues: [[String]] = [["no", "i", "mean"], ["no", "i", "meant"], ["actually", "no"], ["let", "me", "start", "again"], ["scratch", "that"]]
+
+    /// Polish and Professional: `raw` with each explicitly cued repair applied ("um what time is it no I mean
+    /// what day is it" -> "um what day is it"). The cue goes with the whole clause before it, back to the
+    /// sentence start, a comma or "so"/"and"/"but" (at most eight words; a longer clause is left alone),
+    /// keeping a leading "hey" or "um". Only when the repair restates one of that clause's content words
+    /// within its first four words and is not shorter than the clause, so a fragment ("the report is not
+    /// ready no I mean the slides") never replaces a whole clause. `check` judges output against this text
+    /// too, so the output may drop the clause's names, numbers and negations, but adds nothing the repair
+    /// did not say and cannot keep both versions.
+    /// ponytail: word lists and a length bound, not a parser; Strict and the cleaner itself never use it.
+    static func applyExplicitRepairs(_ raw: String) -> String {
+        var tokens = CleanupText.tokenize(raw.replacingOccurrences(of: "\u{2019}", with: "'"))
+        let tokenOfWord = tokens.indices.filter { tokens[$0].kind == .word }
+        func word(_ x: Int) -> String { tokens[tokenOfWord[x]].lower }
+        func between(_ x: Int, _ y: Int, _ test: (CleanupToken) -> Bool) -> Bool { tokens[(tokenOfWord[x] + 1)..<tokenOfWord[y]].contains(where: test) }
+        let interregnum = CleanupText.hesitations.union(["wait", "oh", "no", "actually", "sorry"])
+        let openers = CleanupText.hesitations.union(["hey", "okay", "ok", "well", "oh", "so", "yeah", "alright"])
+        var cuts: [ClosedRange<Int>] = [], wi = 0
+        while wi < tokenOfWord.count {
+            defer { wi += 1 }
+            guard let cue = explicitRepairCues.first(where: { cue in wi + cue.count <= tokenOfWord.count
+                && (0..<cue.count).allSatisfy { word(wi + $0) == cue[$0] } && !(wi..<(wi + cue.count - 1)).contains { between($0, $0 + 1, \.isTerminal) } }) else { continue }
+            var start = wi, end = wi + cue.count
+            while start > (cuts.last?.upperBound ?? -1) + 1, interregnum.contains(word(start - 1)), !between(start - 1, start, \.isTerminal) { start -= 1 }
+            while end < tokenOfWord.count, CleanupText.hesitations.contains(word(end)), !between(end - 1, end, \.isTerminal) { end += 1 }
+            // A declarative or quantifying use is not a cue: "no I mean it", "actually no one came".
+            guard end < tokenOfWord.count, !between(end - 1, end, \.isTerminal),
+                  !["it", "business", "well", "to", "was", "is", "one", "body", "longer", "matter", "way", "doubt", "problem", "idea", "more"].contains(word(end)),
+                  start > (cuts.last?.upperBound ?? -1) + 1,
+                  // "No, I mean" may follow a question it corrects ("What time is it? No, I mean, what day is it?"):
+                  // a speaker does not answer their own question with "I mean". A bare "No," there stays an answer.
+                  cue.first == "no" || !between(start - 1, start, \.isTerminal) else { continue }
+            var s = start - 1
+            while s > 0, !between(s - 1, s, \.isBoundary), !["so", "and", "but"].contains(word(s - 1)), start - s < 8 { s -= 1 }
+            guard s == 0 || between(s - 1, s, \.isBoundary) || ["so", "and", "but"].contains(word(s - 1)) else { continue }
+            while s < start, openers.contains(word(s)) { s += 1 }
+            var repairEnd = end
+            while repairEnd + 1 < tokenOfWord.count, !between(repairEnd, repairEnd + 1, \.isTerminal) { repairEnd += 1 }
+            let clause = s..<start, repair = end..<min(repairEnd + 1, end + 4)
+            // Each number and name the clause loses has one of its kind in the repair ("20" -> "20", "Dana" -> "Dan"):
+            // "send 12 boxes wait no I meant send them friday" refines the boxes, it does not replace them.
+            func count(_ r: Range<Int>, _ test: (Int) -> Bool) -> Int { r.filter(test).count }
+            func number(_ x: Int) -> Bool { CleanupText.numberValue(word(x)) != nil }
+            func name(_ x: Int) -> Bool { tokens[tokenOfWord[x]].text.first?.isUppercase == true && x > 0 && !between(x - 1, x, \.isTerminal) && !word(x).hasPrefix("i'") && word(x) != "i" }
+            guard !clause.isEmpty, repairEnd + 1 - end >= clause.count,
+                  count(clause, number) <= count(end..<(repairEnd + 1), number), count(clause, name) <= count(end..<(repairEnd + 1), name),
+                  clause.contains(where: { x in !grammarWords.contains(word(x)) && repair.contains { word($0) == word(x) || zip(word($0), word(x)).prefix { $0 == $1 }.count >= 4 } }) else { continue }
+            cuts.append(s...(end - 1)); wi = end - 1
+        }
+        for cut in cuts.reversed() { tokens.removeSubrange(tokenOfWord[cut.lowerBound]...tokenOfWord[cut.upperBound]) }
+        return cuts.isEmpty ? raw : CleanupText.render(CleanupText.normalize(tokens))
+    }
+
     /// LCS alignment over lowercased words; returns matched raw and cleaned indices.
     static func align(_ a: [String], _ b: [String]) -> (Set<Int>, Set<Int>) {
         let n = a.count, m = b.count
@@ -722,8 +783,8 @@ enum CleanupGuard {
                       soundsLike: (String, String) -> Bool = { _, _ in false }) -> CleanupGuardResult {
         let result = checkWords(raw: raw, cleaned: cleaned, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike)
         if result != .pass, options.corrections, options.polish {
-            let repaired = RuleCleaner.applyInsteadCorrections(raw)
-            if repaired != raw, checkWords(raw: repaired, cleaned: cleaned, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike) == .pass { return .pass }
+            for repaired in [RuleCleaner.applyInsteadCorrections(raw), applyExplicitRepairs(raw)] where repaired != raw
+                && checkWords(raw: repaired, cleaned: cleaned, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike) == .pass { return .pass }
         }
         guard result != .pass, options.spoken else { return result }
         let spoken = RuleCleaner.spokenCommands(raw)
@@ -913,21 +974,28 @@ enum CleanupGuard {
         }
         // A marker counts inside a counted sequence ("first ... second") that starts at an announced first
         // marker, so "First, preheat the oven" and "Step one was easy; step two took all night" stay prose.
-        // Professional's prompt also lists spoken markers without an announcement, so they need only the sequence.
-        // Its prompt also allows unannounced ordinals; the guard does not, so prose such as "First we went home,
-        // second we ate" stays prose there too.
+        // Professional's prompt also lists spoken markers and ordinals without an announcement, so they need only
+        // the sequence ("First we went home, second we ate"); Polish and Strict keep that prose.
         func inSequence(_ i: Int, _ marker: (Int) -> Int?, markerWords: Int, announce: Bool) -> Bool {
             guard let n = marker(i) else { return false }
             let values = a.indices.compactMap(marker)
             guard values.contains(n + 1) || values.contains(n - 1) else { return false }
             return !announce || (0...i).contains { marker($0) == 1 && announced($0 - markerWords) }
         }
+        // An ordinal modifying a noun is prose even in Professional: after a determiner ("the first"), or before
+        // the same word as another ordinal ("first floor ... second floor"), unless that word is a subject ("first we").
+        // ponytail: a heuristic; an unannounced "first X ... second Y" with distinct nouns can still pass as a list.
+        func adjectival(_ i: Int) -> Bool {
+            if i > 0, ["the", "a", "an", "my", "our", "your", "his", "her", "their", "its", "this", "that"].contains(a[i - 1]) { return true }
+            guard i + 1 < a.count, !rawWords[i].commaAfter, !["i", "we", "you", "he", "she", "they", "it", "let's", "lets"].contains(a[i + 1]) else { return false }
+            return a.indices.contains { $0 != i && $0 + 1 < a.count && CleanupText.ordinals[a[$0]] != nil && a[$0 + 1] == a[i + 1] }
+        }
         // Enumeration words a list may replace with "N." markers: ordinals, "number/step/item"
         // plus a cardinal, and an "and"/"then" joining the next marker.
         func isMarkerWord(_ i: Int) -> Bool {
             guard options.lists && hasListMarkers else { return false }
             let w = a[i]
-            if CleanupText.ordinals[w] != nil { return inSequence(i, ordinalMarker, markerWords: 0, announce: true) }
+            if CleanupText.ordinals[w] != nil { return inSequence(i, ordinalMarker, markerWords: 0, announce: !options.professional || adjectival(i)) }
             if spokenMarker(i) != nil { return inSequence(i, spokenMarker, markerWords: 1, announce: !options.professional) }
             if ["number", "step", "item"].contains(w), i + 1 < a.count, spokenMarker(i + 1) != nil { return isMarkerWord(i + 1) }
             if w == "and" || w == "then", i + 1 < a.count, isMarkerWord(i + 1) { return true }
@@ -998,7 +1066,17 @@ enum CleanupGuard {
             if let i = gap(j).first(where: { !consumedRaw.contains($0) && CleanupText.truncatedNegations[a[$0]]?.contains(w.lower) == true }) {
                 consumedRaw.insert(i); continue
             }
-            if w.isName && !rawSet.contains(w.lower) { return .fail(.nameAdded) }
+            if w.isName && !rawSet.contains(w.lower) {
+                // Polish and Professional: a name may respell one lowercase raw word in its place ("shreia" ->
+                // "Shreya", as screen context spells it), judged on the transcript alone like a dictionary term,
+                // but closer: similarity 0.7 or `soundsLike`, so "priya" -> "Shreya" and "team" -> "Tim" (0.5) fail.
+                // A capitalized antonym is not a respelling ("include" -> "Exclude").
+                func letters(_ s: String) -> String { String(s.filter(\.isLetter)) }
+                guard options.polish, let i = gap(j).first(where: { x in !consumedRaw.contains(x) && !rawWords[x].isName && !grammarWords.contains(a[x])
+                    && !persons.contains { $0.contains(a[x]) } && CleanupText.numberValue(a[x]) == nil && !CleanupText.isNegation(a[x]) && !polarityFlip(a[x], w.lower)
+                    && (CleanupText.similarity(a[x], w.lower) >= 0.7 || soundsLike(letters(a[x]), letters(w.lower))) }) else { return .fail(.nameAdded) }
+                consumedRaw.insert(i); continue
+            }
             // Professional: a number or negation never moves; a new one replaces one in its own gap
             // ("don't" -> "doesn't"), so "paid 10 ... paid 20" cannot swap and "not" cannot change clause.
             if options.professional, let v = CleanupText.numberValue(w.lower) {
@@ -1303,7 +1381,6 @@ enum CleanupPrompt {
         }
         if options.professional && !ops.isEmpty {
             ops.append("- Rewrite into clear, correct, professional written English: fix grammar (subject-verb agreement, verb forms, pronoun case and order, e.g. \"me and John was\" becomes \"John and I were\", \"he don't\" becomes \"he doesn't\"), fix words speech recognition misheard, and smooth awkward or run-on phrasing. Keep the speaker's meaning and first-person voice; do not add content or make it longer.")
-            ops.append("Example: \"um so me and Sarah is meeting at 3 actually no I meant we are meeting at 4 and we need item one the slides item two the budget\" becomes \"Sarah and I are meeting at 4, and we need:\\n1. The slides\\n2. The budget\"")
         } else if options.polish && !ops.isEmpty {
             ops.append("- Fix obvious grammar slips and words speech recognition clearly misheard, changing as few words as possible (\"it go faster\" becomes \"it goes faster\").")
         }
@@ -1473,7 +1550,7 @@ enum CleanupPipeline {
            (try? RuleCleaner().clean(raw, options: CleanupOptions(fillers: true, corrections: false, lists: false)))?
                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { return .cleaned("") }
         // Trusted: only a malfunction is held, not an edit.
-        if options.trustModel {
+        if options.trustModel && (options.polish || options.professional) {
             let reason: CleanupFailureReason? = CleanupGuard.words(output).isEmpty ? .emptyOutput
                 : CleanupGuard.answers(raw: raw, cleaned: output) ? .answerPattern
                 : Double(output.count) > Double(raw.count) * 2 + 10 ? .lengthRatio : nil
@@ -2156,6 +2233,11 @@ extension RuleCleaner {
                let p = word(i - 2), !CleanupGuard.grammarWords.contains(p), out.last?.kind == .space {
                 out.removeLast(); out += [CleanupToken(kind: .punct, text: "."), t[n]]
                 changed = true; i = n + 1; continue
+            }
+            // Digits before "percent" too, as the prompt asks: "12 percent" -> "12%".
+            if w.allSatisfy(\.isNumber), let p = after(i), word(p) == "percent" {
+                emit(CleanupToken(kind: .word, text: tok.text + "%"))
+                changed = true; i = p + 1; continue
             }
             // Numbers: with hundred or a scale word, or before "percent". "give me five minutes",
             // "a hundred times", ordinals, years in pairs and digit strings stay words.

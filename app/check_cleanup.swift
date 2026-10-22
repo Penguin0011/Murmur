@@ -394,6 +394,29 @@ struct EchoAsyncCleaner: AsyncCleaner {
         let rewritten = "John and I were going to buy 42 apples, but he doesn't want to go, so he is not going to do that. Instead, we need to buy:\n1. Milk\n2. Eggs\n3. Bread"
         expect(CleanupGuard.check(raw: broken, cleaned: rewritten, options: professional) == .pass, "professional accepts the broken dictation")
         expect(CleanupGuard.check(raw: broken, cleaned: rewritten, options: polish) != .pass, "polish refuses the rewrite")
+        // Negations may never be added, or dropped beside a correction cue; Polish keeps unannounced ordinals as prose.
+        let spokenProfessional = CleanupOptions(punctuation: true, professional: true, spoken: true)
+        expect(CleanupGuard.check(raw: "First we went home and second we slept", cleaned: "1. We went home.\n2. We slept.", options: CleanupOptions(punctuation: true, polish: true, spoken: true)) != .pass, "polish keeps unannounced ordinals prose")
+        expect(CleanupGuard.check(raw: "Send Alex 20 dollars", cleaned: "Do not send Alex 20 dollars.", options: spokenProfessional) != .pass, "professional never adds a negation")
+        expect(CleanupGuard.check(raw: "the report is not ready no I mean the slides", cleaned: "The report is ready, I mean the slides.", options: spokenProfessional) != .pass, "professional never drops a real negation beside a cue")
+        // Digits before "percent" become N% as the prompt asks, and "42 dollar" may be hyphenated; values never change.
+        expect(CleanupGuard.check(raw: "Revenue is up 12 percent and churn is down.", cleaned: "Revenue is up 12% and churn is down.", options: spokenProfessional) == .pass, "professional accepts 12 percent as 12%")
+        expect(CleanupGuard.check(raw: "Revenue is up 12 percent and churn is down.", cleaned: "Revenue is up 13% and churn is down.", options: spokenProfessional) != .pass, "percent keeps its value")
+        expect(CleanupGuard.check(raw: "Priya has not approved the 42 dollar budget", cleaned: "Priya has not approved the 42-dollar budget.", options: spokenProfessional) == .pass, "professional accepts a hyphenated number")
+        expect(CleanupGuard.check(raw: "Priya has not approved the 42 dollar budget", cleaned: "Priya has not approved the 24-dollar budget.", options: spokenProfessional) != .pass, "a hyphenated number keeps its value")
+        expect(RuleCleaner.spokenCommands("up 12 percent") == "up 12%", "digits before percent become N%")
+        // Professional lists unannounced ordinals (the user's decision, October 22, 2026); Polish and Strict keep them prose,
+        // and ordinals that modify a noun stay prose everywhere.
+        let listPolish = CleanupOptions(punctuation: true, polish: true, spoken: true), listStrict = CleanupOptions(punctuation: true, spoken: true)
+        for (raw, out) in [("First we went to the store, second we cooked dinner.", "1. We went to the store\n2. We cooked dinner"),
+                           ("first let's review test A and B secondly let's review test C and D", "1. Let's review test A and B.\n2. Let's review test C and D."),
+                           ("first call the bank secondly email Dana", "1. Call the bank\n2. Email Dana")] {
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: spokenProfessional) == .pass, "professional lists unannounced ordinals: \(raw)")
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: listPolish) != .pass, "polish keeps unannounced ordinals prose: \(raw)")
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: listStrict) != .pass, "strict keeps unannounced ordinals prose: \(raw)")
+        }
+        expect(CleanupGuard.check(raw: "first we went home and then the first one was gone", cleaned: "1. We went home\n2. The one was gone", options: spokenProfessional) != .pass, "a determiner's ordinal is not a marker")
+        expect(CleanupGuard.check(raw: "First floor is open and second floor is closed", cleaned: "1. Floor is open\n2. Floor is closed", options: spokenProfessional) != .pass, "ordinal adjectives stay prose in professional")
         // Short grammar fixes pass as their long forms do; the lean option sets leave only the polish floor
         // to absorb them. Polish refuses the reordering ("I" is an inserted word); professional accepts it.
         let leanPolish = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true, polish: true)
@@ -588,9 +611,41 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("can you send me the report by 5 I mean the quarterly one not the monthly one", "Can you send me the report by 5, the quarterly one, not the monthly one?"),
             (broken, "John and I were going to buy 42 apples, but he doesn't want to go; he is not going to do that. Instead, we need to buy:\n1. Milk\n2. Eggs\n3. Bread"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) == .pass, "professional accepts live output: \(out.prefix(30))") }
+        // An explicit cue replaces the whole clause before it, with its numbers, names and negations (live outputs);
+        // the respelling is screen context's, judged on the transcript alone. Strict keeps refusing them.
+        let corrected = "Dana is not coming and the demo is Monday no I mean the demo is Tuesday"
+        for (raw, out) in [
+            ("hey that sounds pretty good no I mean that doesn't sound that great to me", "Hey, that doesn't sound that great to me."),
+            ("um what time is it no I mean what day is it", "What day is it?"),
+            ("What time is it? No, I mean, what day is it?", "What day is it?"),
+            ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Do not send Alex 20 dollars."),
+            ("The new office was designed uh no let me start again the new office was designed to hold forty people and a small lab", "The new office was designed to hold forty people and a small lab."),
+            (corrected, "Dana is not coming and the demo is Tuesday."),
+            ("send the notes to shreia before noon", "Send the notes to Shreya before noon."),
+        ] {
+            for o in [polish, professional] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) == .pass, "polish modes accept a correction: \(out.prefix(30))") }
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: .standard) != .pass, "strict refuses a correction: \(out.prefix(30))")
+        }
+        // Polish keeps the opening "hey"; only Professional drops it.
+        expect(CleanupGuard.check(raw: "hey that sounds pretty good no I mean that doesn't sound that great to me", cleaned: "That doesn't sound that great to me.", options: professional) == .pass, "professional accepts a correction without hey")
+        for (raw, out, label) in [
+            ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Send Alex 20, do not send Alex 20 dollars.", "a cue keeping both versions"),
+            ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Do not send Alex 20 dollars on Friday.", "a repair with a new fact"),
+            (corrected, "Dana is coming and the demo is Tuesday.", "a negation dropped outside the correction"),
+            ("the report is not ready no I mean the slides", "The slides.", "a fragment replacing a clause"),
+            ("Is the meeting today? No, it's tomorrow.", "It's tomorrow.", "a question's answer"),
+            ("send the notes to shreia before noon", "Send the notes to Priya before noon.", "a name swapped for an unrelated one"),
+            ("send the notes to priya before noon", "Send the notes to Shreya before noon.", "a half-similar name"),
+            ("send it to the team", "Send it to Tim.", "a word respelled as a name"),
+            ("we should include the budget", "We should Exclude the budget.", "a capitalized antonym"),
+            ("we should increase the budget", "We should Decrease the budget.", "a capitalized antonym"),
+        ] { for o in [.standard, polish, professional] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "every level refuses: \(label)") } }
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
         expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")
+        for options in [CleanupOptions(corrections: false, professional: true), CleanupOptions(lists: false, professional: true)] {
+            expect(!CleanupPrompt.build(transcript: "x", options: options, nonce: "n").system.contains("Sarah and I are meeting at 4"), "professional omits the combined example when an operation is off")
+        }
         // Polish asks for these edits; strict's prompt is unchanged.
         let polishPrompt = CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system
         expect(polishPrompt.contains("false starts") && polishPrompt.contains("grammar slips") && !polishPrompt.contains("respell words"), "polish prompt")
@@ -640,6 +695,11 @@ struct EchoAsyncCleaner: AsyncCleaner {
             expect(CleanupPipeline.judge(raw: raw, cleaned: out, options: trusted, allowedTerms: []) == .cleaned(out), "trust accepts: \(out.debugDescription)")
             if raw != edits[0].0 { expect(CleanupPipeline.judge(raw: raw, cleaned: out, options: guarded, allowedTerms: []) != .cleaned(out), "guard still holds without trust: \(out.debugDescription)") }
         }
+        for options in [CleanupOptions(trustModel: true), CleanupOptions(fillers: false, corrections: false, lists: false, trustModel: true)] {
+            expect(CleanupPipeline.judge(raw: "Send the deck to John and Maria by Friday.", cleaned: "Send the deck to Maria by Friday.", options: options, allowedTerms: []) != .cleaned("Send the deck to Maria by Friday."), "Strict and Faithful cannot bypass word checks with trust")
+        }
+        let trustedProfessional = CleanupOptions(professional: true, trustModel: true)
+        expect(CleanupPipeline.judge(raw: "We need three hundred chairs for the event.", cleaned: "We need 250 chairs for the event.", options: trustedProfessional, allowedTerms: []) == .cleaned("We need 250 chairs for the event."), "Professional permits trusted edits")
         let ask = "Can you summarize this email for me?"
         let held: [(String, String, CleanupFailureReason)] = [
             ("Ship the release today.", "  \n", .emptyOutput),
@@ -840,7 +900,6 @@ struct EchoAsyncCleaner: AsyncCleaner {
             .init(label: "lone ordinal made a list", raw: "First, preheat the oven to 350.", output: "1. Preheat the oven to 350.", options: all),
             .init(label: "lone ordinal made a list, words kept", raw: "First, preheat the oven to 350.", output: "1. First, preheat the oven to 350.", options: all),
             .init(label: "sequence prose made a list", raw: "First, preheat the oven, then mix the batter, then bake it.", output: "1. Preheat the oven\n2. Mix the batter\n3. Bake it", options: all),
-            .init(label: "unannounced ordinals made a list", raw: "First we went to the store, second we cooked dinner.", output: "1. We went to the store\n2. We cooked dinner", options: all),
             .init(label: "ordinal phrases made a list", raw: "Remember: first impressions matter, second chances are rare.", output: "Remember:\n1. Impressions matter\n2. Chances are rare", options: all),
             .init(label: "list longer than the enumeration", raw: "Shopping list: first apples, second milk and bread.", output: "Shopping list:\n1. Apples\n2. Milk\n3. Bread", options: all),
             .init(label: "reorders names", raw: "Alice paid Bob back yesterday.", output: "Bob paid Alice back yesterday.", options: all),

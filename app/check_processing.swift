@@ -81,8 +81,31 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try learningChecks(root.appendingPathComponent("learn"), defaults)
         try await sectionChecks(ProcessingCoordinator(directory: root.appendingPathComponent("sections"), defaults: defaults))
         try editorChecks(ProcessingCoordinator(directory: root.appendingPathComponent("editor"), defaults: defaults))
+        try recordingChecks(root.appendingPathComponent("recordings"))
         print("\(passes) checks passed, \(failures) failed")
         if failures > 0 { exit(1) }
+    }
+
+    /// Off keeps nothing, so the caller deletes the audio exactly as before; on keeps an owner-only copy for 7 days.
+    static func recordingChecks(_ history: URL) throws {
+        let audio = history.deletingLastPathComponent().appendingPathComponent("retry-\(UUID()).wav")
+        try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
+        try Data("RIFF".utf8).write(to: audio)
+        let recordings = DiagnosticRecordings(), id = UUID().uuidString
+        check(recordings.keep(audio, entryID: id) == nil && !FileManager.default.fileExists(atPath: DiagnosticRecordings.directory(inHistory: history).path), "off keeps nothing and creates nothing")
+        recordings.directory = DiagnosticRecordings.directory(inHistory: history)
+        let name = recordings.keep(audio, entryID: id)
+        let kept = DiagnosticRecordings.directory(inHistory: history).appendingPathComponent(id + ".wav")
+        let mode = (try? FileManager.default.attributesOfItem(atPath: kept.path)[.posixPermissions] as? NSNumber)?.intValue
+        check(name == id + ".wav" && FileManager.default.fileExists(atPath: audio.path) && mode == 0o600, "on copies the audio, owner-only, and leaves the original for the caller")
+        check(recordings.keep(audio, entryID: "../x") == nil, "only entry ids name recordings")
+        let usage = try HistoryCap.usage(directory: history)
+        check(usage == 0, "recordings do not count toward the History size cap")
+        try DiagnosticRecordings.purge(history: history, now: Date().addingTimeInterval(6 * 86400))
+        check(FileManager.default.fileExists(atPath: kept.path), "kept for 7 days")
+        try DiagnosticRecordings.purge(history: history, now: Date().addingTimeInterval(8 * 86400))
+        check(!FileManager.default.fileExists(atPath: kept.path), "purged after 7 days")
+        try? FileManager.default.removeItem(at: audio)
     }
 
     static func settingsChecks(_ defaults: UserDefaults) throws {
@@ -362,6 +385,15 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         p.cloudCleaner = MockCloudCleaner(.success("Call Akme."))
         await expect(p, "Um, call acme.", .insert("Call Akme."), "next dictation passes")
         check(p.lastRejectedOutput == nil, "rejected output cleared per dictation")
+        // Diagnostics: the accepted output as returned, the verdict, and a prompt hash that ignores the nonce and the terms.
+        check(p.lastModelOutput == "Call Akme." && p.lastGuardVerdict == "cleaned" && p.lastTerms == ["Akme"], "accepted output, verdict and terms kept")
+        let hashed = p.lastPromptHash
+        p.cloudCleaner = MockCloudCleaner(.success("Nothing special here."))
+        _ = await p.processAsync("Um, nothing special here.")
+        check(hashed != nil && hashed?.count == 8 && p.lastPromptHash == hashed && p.lastTerms.isEmpty, "prompt hash is stable across nonces and dictionary terms")
+        p.cloudCleaner = MockCloudCleaner(.success("Call Akme."))
+        _ = await p.processAsync("every like give or take twenty seconds okay")
+        check(p.lastGuardVerdict == "rejected" && p.lastModelOutput == nil, "a rejected output is a verdict, not a model output")
 
         // Reject an invented number without undoing an independently safe spoken correction.
         let correctionRaw = "Move the appointment to Monday. Actually, Thursday. Send the agenda afterward."
