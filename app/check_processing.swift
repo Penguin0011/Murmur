@@ -385,6 +385,27 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try p.update(settings)
         p.cloudCleaner = MockCloudCleaner(.failure(.network(.gemini)))
         await expect(p, "Meet on Monday period Thursday instead period", .insert("Meet on Thursday."), "spoken punctuation precedes local instead repair")
+
+        // A rejected rewrite still gets every enabled local operation, not just corrections.
+        settings.options = CleanupOptions(punctuation: true, professional: true, spoken: true)
+        try p.update(settings)
+        let spyCleaner = p.localCleaner; p.localCleaner = RuleCleaner()
+        p.cloudCleaner = MockCloudCleaner(.success("Please send the report on Monday at 9."))
+        await expect(p, "Um, please send the report on Friday, sorry, Monday.", .insert("Please send the report on Monday."), "fillers and repair survive rejected number")
+        check(p.lastFallback == .numberAdded, "rejection reason kept with local operations")
+        p.cloudCleaner = MockCloudCleaner(.success("Send the report, please. Thank you."))
+        await expect(p, "Send the report comma please period", .insert("Send the report, please."), "spoken commands survive rejected rewrite")
+        p.cloudCleaner = MockCloudCleaner(.success("Meet on Thursday at 9."))
+        await expect(p, "Meet on Monday period Thursday instead period", .insert("Meet on Thursday."), "spoken instead repair survives rejected rewrite")
+        p.cloudCleaner = MockCloudCleaner(.success("Shopping list: apples, milk and 9 bread."))
+        await expect(p, "Shopping list: first apples, second milk, third bread.", .insert("Shopping list:\n1. Apples\n2. Milk\n3. Bread"), "local list survives rejected rewrite")
+        p.cloudCleaner = MockCloudCleaner(.success("Um, she said \"ship it\" on Monday at 9."))
+        await expect(p, "Um, she said \"ship it\" on Monday.", .insert("She said \"ship it\" on Monday."), "quotes skip punctuation transfer, keep local cleanup")
+        settings.options.fillers = false; settings.options.spoken = false
+        try p.update(settings)
+        p.cloudCleaner = MockCloudCleaner(.success("Please send the report comma on Monday at 9."))
+        await expect(p, "Um, please send the report comma on Monday.", .insert("Um, please send the report comma on Monday."), "fallback respects fillers and spoken commands off")
+        p.localCleaner = spyCleaner
         settings.options = .standard
         try p.update(settings)
 

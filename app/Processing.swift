@@ -278,13 +278,22 @@ final class ProcessingCoordinator {
 
     /// Local rules, guarded; the dictionary-applied text itself if they fail the guard.
     private func localClean(_ text: String, terms: [String], options: CleanupOptions) -> String {
+        let local = Self.localRules(text, terms: terms, options: options, cleaner: localCleaner)
+        if let reason = local.reason { lastFallback = lastFallback ?? reason }
+        return local.text
+    }
+
+    /// Every enabled local operation (spoken commands, fillers, corrections, lists), guarded. A nil
+    /// `reason` means the rules passed the guard; otherwise `text` is the input with only the
+    /// spoken commands and "instead" corrections resolved.
+    static func localRules(_ text: String, terms: [String], options: CleanupOptions, cleaner: Cleaner = RuleCleaner()) -> (text: String, reason: CleanupFailureReason?) {
         var options = options
         let text = options.corrections && options.polish ? RuleCleaner.applyInsteadCorrections(options.spoken ? RuleCleaner.spokenCommands(text) : text) : text
         options.polish = false // Broader AI grammar and phrasing edits have no local fallback.
         options.professional = false
-        switch CleanupPipeline.process(raw: text, options: options, cleaner: localCleaner, allowedTerms: terms) {
-        case .cleaned(let cleaned), .unchanged(let cleaned): return cleaned
-        case .heldForRecovery(_, let reason): lastFallback = lastFallback ?? reason; return text
+        switch CleanupPipeline.process(raw: text, options: options, cleaner: cleaner, allowedTerms: terms) {
+        case .cleaned(let cleaned), .unchanged(let cleaned): return (cleaned, nil)
+        case .heldForRecovery(_, let reason): return (text, reason)
         }
     }
 
@@ -370,13 +379,9 @@ final class ProcessingCoordinator {
         case .cleaned(let text), .unchanged(let text): return CloudAttempt(text: text, reason: nil, error: nil)
         case .heldForRecovery(_, let why): reason = why
         }
-        // Resolve safe corrections before transferring punctuation, so rejection of an unrelated
-        // model edit does not restore the words the speaker explicitly replaced.
-        var fallback = section
-        if options.corrections,
-           case .cleaned(let corrected) = CleanupPipeline.process(raw: section, options: CleanupOptions(fillers: false, corrections: true, lists: false, polish: options.polish), cleaner: RuleCleaner(), allowedTerms: terms) {
-            fallback = corrected
-        }
+        // Transfer punctuation onto the full local cleanup, so rejecting the model's rewrite never
+        // skips the enabled local operations (fillers, corrections, lists, spoken commands).
+        let fallback = localRules(section, terms: terms, options: options).text
         if options.punctuation, let words = CleanupPipeline.punctuated(raw: fallback, cleaned: output, terms: terms),
            case .cleaned(let text) = CleanupPipeline.judge(raw: fallback, cleaned: words, options: punctuationOnly, allowedTerms: terms) {
             return CloudAttempt(text: text, reason: reason, error: nil, rejected: output)

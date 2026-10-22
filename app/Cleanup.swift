@@ -1411,6 +1411,8 @@ enum CleanupPipeline {
                 if respelled.contains(k) || (!start && !CleanupText.isSentenceStart(o, oi)) { word = o[oi].text }
                 // The model's . , ? : and any ! or ; the transcript already has here.
                 after = o[(oi + 1)..<end].filter { $0.kind == .punct && (marks.contains($0.text) || own.contains($0.text)) }.map(\.text)
+                // The model's sentence may end on a word the transcript lacks ("Monday at 9."): keep the transcript's last mark.
+                if after.isEmpty && k == rw.count - 1 { after = own }
                 breaks = o[(oi + 1)..<end].contains { $0.text == "\n" }
             }
             if start || word.lowercased() == "i" || word.lowercased().hasPrefix("i'") { word = CleanupText.capitalized(word) }
