@@ -611,6 +611,30 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("can you send me the report by 5 I mean the quarterly one not the monthly one", "Can you send me the report by 5, the quarterly one, not the monthly one?"),
             (broken, "John and I were going to buy 42 apples, but he doesn't want to go; he is not going to do that. Instead, we need to buy:\n1. Milk\n2. Eggs\n3. Bread"),
         ] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) == .pass, "professional accepts live output: \(out.prefix(30))") }
+        // An explicit cue replaces the whole clause before it, with its numbers, names and negations (live outputs);
+        // the respelling is screen context's, judged on the transcript alone. Strict keeps refusing them.
+        let corrected = "Dana is not coming and the demo is Monday no I mean the demo is Tuesday"
+        for (raw, out) in [
+            ("hey that sounds pretty good no I mean that doesn't sound that great to me", "That doesn't sound that great to me."),
+            ("hey that sounds pretty good no I mean that doesn't sound that great to me", "Hey, that doesn't sound that great to me."),
+            ("um what time is it no I mean what day is it", "What day is it?"),
+            ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Do not send Alex 20 dollars."),
+            ("The new office was designed uh no let me start again the new office was designed to hold forty people and a small lab", "The new office was designed to hold forty people and a small lab."),
+            (corrected, "Dana is not coming and the demo is Tuesday."),
+            ("send the notes to shreia before noon", "Send the notes to Shreya before noon."),
+        ] {
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) == .pass, "professional accepts a correction: \(out.prefix(30))")
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: .standard) != .pass, "strict refuses a correction: \(out.prefix(30))")
+        }
+        for (raw, out, label) in [
+            ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Send Alex 20, do not send Alex 20 dollars.", "a cue keeping both versions"),
+            ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Do not send Alex 20 dollars on Friday.", "a repair with a new fact"),
+            (corrected, "Dana is coming and the demo is Tuesday.", "a negation dropped outside the correction"),
+            ("the report is not ready no I mean the slides", "The slides.", "a fragment replacing a clause"),
+            ("send the notes to shreia before noon", "Send the notes to Priya before noon.", "a name swapped for an unrelated one"),
+            ("send the notes to priya before noon", "Send the notes to Shreya before noon.", "a half-similar name"),
+            ("send it to the team", "Send it to Tim.", "a word respelled as a name"),
+        ] { for o in [polish, professional] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "polish modes refuse: \(label)") } }
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
         expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")
