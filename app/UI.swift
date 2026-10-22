@@ -1147,6 +1147,7 @@ struct SettingsView: View {
                  : HistoryMode.offDisclosure).padding(.top, 12)
             eyebrow("Keep transcripts for").padding(.top, 28)
             segmented([("30-days", "30 days"), ("six-months", "Six months"), ("forever", "Forever")], $controller.retention).padding(.top, 8)
+            toggleRow("Keep recordings for diagnostics (7 days)", "Keeps the audio of each dictation on this Mac, beside its History entry, so a developer can replay what Murmur heard. Off by default. Recordings are deleted after 7 days, and are kept only while History is saved. Delete All Data removes them.", isOn: $controller.keepRecordings).padding(.top, 20)
             if let notice = controller.historyNotice {
                 Text(notice).font(WindowType.body(14, weight: .semibold)).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
             }
@@ -2004,6 +2005,7 @@ private struct AutoApplyGeneral: ViewModifier {
             .onChange(of: controller.inputDeviceUID) { controller.settingsChanged() }
             .onChange(of: controller.retention) { controller.settingsChanged() }
             .onChange(of: controller.historyMode) { controller.settingsChanged() }
+            .onChange(of: controller.keepRecordings) { controller.settingsChanged() }
             .onChange(of: controller.updateChecksEnabled) { controller.settingsChanged() }
             .onChange(of: controller.installUpdatesAutomatically) { controller.settingsChanged() }
     }

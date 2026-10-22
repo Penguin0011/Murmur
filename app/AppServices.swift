@@ -521,6 +521,7 @@ enum SettingsSearch {
         .init("Limit learning to readable fields", 4, "keystroke learning privacy dictionary"),
         .init("Transcript history", 5, "save off privacy storage"),
         .init("Keep transcripts for", 5, "retention delete thirty 30 days six months forever"),
+        .init("Keep recordings for diagnostics (7 days)", 5, "audio wav replay debug developer quality"),
         .init("Delete all data", 5, "erase wipe reset history recordings keys", target: "delete-data"),
         .init("API Keys", 6, "credentials password keychain gemini custom transcription cleanup", target: "top"),
         .init("Updates", 7, "version release download install", target: "top"),

@@ -343,6 +343,8 @@ final class PreStart: @unchecked Sendable {
     @Published var pressToToggle: Bool
     /// Short system sounds when recording starts and stops (gap #15); none on insertion.
     @Published var recordingSounds: Bool
+    /// "Keep recordings for diagnostics (7 days)": off by default; see `DiagnosticRecordings`.
+    @Published var keepRecordings: Bool
     /// Live words in the bubble while recording (gap #13); needs the optional download.
     @Published var liveWords: Bool
     /// Live words also while transcription runs in the cloud; off by default (user, Oct 15, 2026).
@@ -505,7 +507,13 @@ final class PreStart: @unchecked Sendable {
     private var destinationScreen: NSScreen?
     private var insertThisSession = true
     // Uptime marks for timing logs only: when the key was released, and when cleanup began.
-    private var finishedAt = 0.0, cleanupStartedAt = 0.0
+    private var finishedAt = 0.0, cleanupStartedAt = 0.0, transcribeStartedAt = 0.0
+    /// Where kept recordings go; nil while the setting is off or History is.
+    private let recordings = DiagnosticRecordings()
+    /// Kept only while History is saved: a diagnostic recording must not outlive History's own switch.
+    private func applyRecordingSetting() {
+        recordings.directory = keepRecordings && appliedHistoryMode.persistsTranscripts && !preview ? store.map { DiagnosticRecordings.directory(inHistory: $0.directory) } : nil
+    }
     private var leadingSpaceThisSession = false
     private var shortcutGeneration = UUID()
     private var listener: ShortcutListener?
@@ -579,6 +587,7 @@ final class PreStart: @unchecked Sendable {
         automaticInsertion = defaults.object(forKey: "automaticInsertion") as? Bool ?? true
         pressToToggle = defaults.bool(forKey: "pressToToggle")
         recordingSounds = defaults.object(forKey: "recordingSounds") as? Bool ?? true
+        keepRecordings = defaults.bool(forKey: "keepRecordings")
         liveWords = defaults.object(forKey: "liveWords") as? Bool ?? true
         liveWordsOnCloud = defaults.bool(forKey: "liveWordsOnCloud")
         retention = defaults.string(forKey: "retention") ?? "30-days"
@@ -610,6 +619,7 @@ final class PreStart: @unchecked Sendable {
             dataDirectory = base
             store = try HistoryStore(directory: base.appendingPathComponent("history"))
             if let store { records = HistoryRouter(disk: historyDisk(store), persists: appliedHistoryMode.persistsTranscripts) }
+            applyRecordingSetting()
             retry = try RetryAudio(directory: base.appendingPathComponent("retry-audio"))
             // Chunk files live only while their recording is transcribed; any left by a crash go now.
             let chunks = base.appendingPathComponent("chunks", isDirectory: true)
@@ -707,6 +717,7 @@ final class PreStart: @unchecked Sendable {
                 guard let self else { return }
                 do {
                     try self.retry?.purge(); try self.store?.purge(retention: self.appliedRetention)
+                    if let history = self.store?.directory { try DiagnosticRecordings.purge(history: history) }
                     if let cutoff = HistoryExpiry.cutoff(HistoryRetention(rawValue: self.appliedRetention) ?? .thirtyDays) { self.records?.purgeSessionOnly(recordedAtOrBefore: cutoff) }
                     self.meetingRecorder.purge(cutoff: HistoryExpiry.cutoff(HistoryRetention(rawValue: self.appliedRetention) ?? .thirtyDays))
                     try self.enforceHistoryCap(); self.refreshHistory(); self.refreshRecoveryAudio()
@@ -788,6 +799,7 @@ final class PreStart: @unchecked Sendable {
         defaults.set(modelDirectory, forKey: "modelDirectory"); defaults.set(shortcut, forKey: "shortcut")
         defaults.set(showMenuBar, forKey: "showMenuBar"); defaults.set(showInDock, forKey: "showInDock"); defaults.set(automaticInsertion, forKey: "automaticInsertion"); defaults.set(pressToToggle, forKey: "pressToToggle")
         defaults.set(recordingSounds, forKey: "recordingSounds")
+        defaults.set(keepRecordings, forKey: "keepRecordings"); applyRecordingSetting()
         defaults.set(liveWordsOnCloud, forKey: "liveWordsOnCloud")
         defaults.set(liveWords, forKey: "liveWords"); if liveWords { prepareLiveWords() }
         defaults.set(intelligentLeadingSpace, forKey: "intelligentLeadingSpace")
@@ -1165,6 +1177,7 @@ final class PreStart: @unchecked Sendable {
     /// no one-shot fallback and no retry audio.
     private func transcribe(_ audio: URL?, held: [Float]? = nil, done: @escaping () -> Void) {
         sessionSeconds = held.map { Double($0.count) / 16_000 } ?? audio.flatMap(Self.audioSeconds)
+        transcribeStartedAt = ProcessInfo.processInfo.systemUptime
         if let provider = sessionTranscriber { transcribeInCloud(audio, held: held, with: provider, done: done); return }
         setPhase("Processing", "Transcribing on this Mac…")
         let token = generation; let models = URL(fileURLWithPath: activeModelDirectory)
@@ -1253,7 +1266,8 @@ final class PreStart: @unchecked Sendable {
                   let text = result["text"] as? String else { throw CaptureError("No usable transcript") }
             // The model ran and answered, but heard nothing; audio stays until the 24-hour purge.
             guard text.contains(where: { $0.isLetter || $0.isNumber }) else { throw NoSpeech() }
-            let savedEntry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: text, insertionStatus: "saved-not-inserted")
+            var savedEntry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: text, insertionStatus: "saved-not-inserted")
+            if let audio { savedEntry.recordingFile = recordings.keep(audio, entryID: savedEntry.id) }
             try store.save(savedEntry)
             if let audio { try? FileManager.default.removeItem(at: audio) }
             DispatchQueue.main.async { [weak self] in
@@ -1277,10 +1291,11 @@ final class PreStart: @unchecked Sendable {
         let vocabulary = processing?.dictionary.vocabularyTerms ?? []
         let heldWAV = held.map { WAVAudio.encodePCM16($0, sampleRate: 16_000) }
         cloudRequest.start({
-            if let heldWAV { return await CloudTranscription.run(provider: provider, audioData: heldWAV, vocabulary: vocabulary) }
-            return await CloudTranscription.run(provider: provider, audioFile: audio ?? URL(fileURLWithPath: "/dev/null"), vocabulary: vocabulary)
-        }) { [weak self] outcome in
+            if let heldWAV { return await CloudTranscription.runDetailed(provider: provider, audioData: heldWAV, vocabulary: vocabulary) }
+            return await CloudTranscription.runDetailed(provider: provider, audioFile: audio ?? URL(fileURLWithPath: "/dev/null"), vocabulary: vocabulary)
+        }) { [weak self] (result: (outcome: CloudTranscriptionOutcome, detail: CloudTranscriptionDetail)) in
             guard let self, self.generation == token else { return }
+            let outcome = result.outcome
             self.cloudStage = nil; self.cloudDone = nil
             timingLog.notice("cloud-transcribe took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3)) outcome=\(Self.transcriptionOutcomeName(outcome), privacy: .public)")
             let text: String, held: Bool
@@ -1298,6 +1313,8 @@ final class PreStart: @unchecked Sendable {
             // An answer-shaped LLM transcript is held like a failed cleanup: raw text only, never inserted.
             var entry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: held ? "" : text, insertionStatus: held ? "held-transcript" : "saved-not-inserted")
             entry.transcriptionProvider = provider.id.rawValue; entry.transcriptionModel = Self.modelID(provider)
+            entry.transcription = Self.transcriptionDetail(result.detail)
+            if let audio { entry.recordingFile = self.recordings.keep(audio, entryID: entry.id) }
             do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the transcript. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry for up to 24 hours.")"); done(); return }
             if let audio { try? FileManager.default.removeItem(at: audio) }
             guard !held else {
@@ -1314,6 +1331,7 @@ final class PreStart: @unchecked Sendable {
         cleanupStartedAt = ProcessInfo.processInfo.systemUptime
         // Saved with the next write of this entry; no extra disk write before insertion.
         var savedEntry = savedEntry; savedEntry.seconds = sessionSeconds
+        savedEntry.timing = StageTiming(transcription: cleanupStartedAt - transcribeStartedAt)
         recoveryEntryID = savedEntry.id
         // A trigger word beats the app or website matched at start; it is cut from the text, not from History's raw transcript.
         let trigger = WritingModes.trigger(writingModes, in: savedEntry.rawText)
@@ -1327,6 +1345,13 @@ final class PreStart: @unchecked Sendable {
         savedEntry.transcriptionModel = sessionTranscriber == nil ? unifiedRepository : Self.modelID(sessionTranscriber)
         savedEntry.appVersion = (info?["CFBundleShortVersionString"] as? String).map { v in (info?["CFBundleVersion"] as? String).map { "\(v) (\($0))" } ?? v }
         savedEntry.contextUsed = style?.context != nil && style?.options.anyEnabled == true && processing?.settings.route == .cloud && processing?.cloudCleaner != nil
+        // Counts and the app only, never the screen text.
+        var detail = CleanupDetail(contextUsed: savedEntry.contextUsed)
+        if savedEntry.contextUsed == true, let context = style?.context {
+            detail.contextApp = destination?.bundleID
+            detail.contextChars = ["selected": context.selected.count, "clipboard": context.clipboard.count, "window": context.window.count]
+        }
+        savedEntry.cleanup = detail
         guard let processing, processing.settings.route != .local else {
             complete(processing?.process(text, style: style) ?? .heldForRecovery(raw: text, reason: .cleanerFailed), entry: savedEntry, store: store, done: done); return
         }
@@ -1337,6 +1362,15 @@ final class PreStart: @unchecked Sendable {
             self.complete(outcome, entry: savedEntry, store: store, done: done)
         }
         setPhase("Processing", "Cleaning up with \(processing.cloudCleaner?.id.displayName ?? "the cleanup provider")…")
+    }
+    /// The pre-check and segment detail as History keeps it.
+    private static func transcriptionDetail(_ detail: CloudTranscriptionDetail) -> TranscriptionDetail {
+        TranscriptionDetail(
+            segments: detail.segments?.map { SegmentDetail(text: $0.text, start: $0.start, end: $0.end, avgLogprob: $0.avgLogprob, noSpeechProb: $0.noSpeechProb,
+                                                           compressionRatio: $0.compressionRatio, loudWindows: $0.loudWindows, dropped: $0.dropped) },
+            clipSeconds: detail.clipSeconds, peakP50: detail.peakP50.map(Double.init), peakP90: detail.peakP90.map(Double.init),
+            silencePeak: detail.silencePeak.map(Double.init), silenceThreshold: detail.silencePeak == nil ? nil : Double(GeminiTranscriptionProvider.defaultSilencePeak),
+            precheck: detail.precheck)
     }
     /// Content-free outcome name for the timing log.
     private static func transcriptionOutcomeName(_ outcome: CloudTranscriptionOutcome) -> String {
@@ -1360,6 +1394,14 @@ final class PreStart: @unchecked Sendable {
     private func complete(_ outcome: ProcessingOutcome, entry savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, done: @escaping () -> Void) {
         var entry = savedEntry
         entry.cleanupOutcome = processing?.lastOutcome
+        entry.timing?.cleanup = ProcessInfo.processInfo.systemUptime - cleanupStartedAt
+        if let processing {
+            var detail = entry.cleanup ?? CleanupDetail()
+            detail.modelOutput = processing.lastModelOutput; detail.guardVerdict = processing.lastGuardVerdict; detail.promptHash = processing.lastPromptHash
+            detail.dictionaryTerms = processing.lastTerms.isEmpty ? nil : processing.lastTerms; detail.input = processing.lastCleanupInput
+            detail.providerError = processing.lastProviderError.map { Mirror(reflecting: $0).children.first?.label ?? "\($0)" }
+            entry.cleanup = detail
+        }
         timingLog.notice("cleanup took=\(ProcessInfo.processInfo.systemUptime - self.cleanupStartedAt, format: .fixed(precision: 3)) path=\(self.processing?.lastOutcome?.rawValue ?? "none", privacy: .public)")
         entry.cleanupProvider = processing?.settings.route == .local ? "local-rules" : processing?.cloudCleaner?.id.rawValue
         entry.cleanupModel = Self.modelID(processing?.cloudCleaner)
@@ -1420,13 +1462,20 @@ final class PreStart: @unchecked Sendable {
                 let insertion = readable ? insertText(entry.finalText, into: target!) : pasteIntoFrontmostApp(entry.finalText)
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 attempted = true
-                timingLog.notice("dictation took=\(ProcessInfo.processInfo.systemUptime - self.finishedAt, format: .fixed(precision: 3))")
+                let inserted = ProcessInfo.processInfo.systemUptime
+                entry.timing?.insertion = inserted - inserting
+                // finishedAt is 0 until a key release is seen (a History retry, Undo); the line would then be uptime.
+                if finishedAt > 0 {
+                    entry.timing?.total = inserted - finishedAt
+                    timingLog.notice("dictation took=\(inserted - self.finishedAt, format: .fixed(precision: 3))")
+                    finishedAt = 0
+                }
                 if let app = target?.bundleID, !app.isEmpty { recentApps = [app] + recentApps.filter { $0 != app }.prefix(9) }
                 lastDictationText = entry.finalText
                 entry.insertionStatus = insertion.status.rawValue
                 if insertion.status != .failed { entry.app = target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
                 try store.save(entry)
-                watchCorrections(insertion, text: entry.finalText, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
+                watchCorrections(insertion, text: entry.finalText, entryID: entry.id, at: target?.selection?.location, pid: target?.pid ?? NSWorkspace.shared.frontmostApplication?.processIdentifier)
                 showInsertionResult(insertion, entryID: entry.id, text: entry.finalText)
                 // A provider failure is not silent: a bad key or quota would otherwise degrade every dictation.
                 if insertion.status != .failed, let error = processing?.lastProviderError {
@@ -1620,6 +1669,7 @@ final class PreStart: @unchecked Sendable {
         var changedAt: TimeInterval = ProcessInfo.processInfo.systemUptime
         var pending = false
         var settledEarly = false
+        var entryID = "", route = ""
     }
     static let stableSettleDelay: TimeInterval = 2
     /// Gap #9: an accepted reading unchanged for `stableSettleDelay` settles before the window closes.
@@ -1629,7 +1679,8 @@ final class PreStart: @unchecked Sendable {
     private var watch: Watch?
     private var watchTimer: Timer?
     private var keyTap: CFMachPort?
-    private func watchCorrections(_ insertion: InsertionResult, text: String, at offset: Int?, pid: pid_t?) {
+    private func watchCorrections(_ insertion: InsertionResult, text: String, entryID: String, at offset: Int?, pid: pid_t?) {
+        // With learning off no span is observed, so the entry gets no after-paste text.
         guard processing?.settings.learningEnabled == true else { timingLog.notice("watch route=none why=learning-off"); return }
         guard insertion.status != .failed else { timingLog.notice("watch route=none why=insert-failed"); return }
         let now = ProcessInfo.processInfo.systemUptime
@@ -1646,7 +1697,7 @@ final class PreStart: @unchecked Sendable {
         } else { axMiss = insertion.snapshot == nil ? "no-readback" : insertion.snapshot!.readableText ? "no-offset" : "unreadable" }
         if axMiss.isEmpty, let field = insertion.snapshot, let value = field.value, let offset,
            let observation = DictationObservation(value: value, insertedRange: NSRange(location: offset, length: length), now: now) {
-            watch = Watch(observation: observation, pid: field.pid, field: field, keys: nil, current: text)
+            watch = Watch(observation: observation, pid: field.pid, field: field, keys: nil, current: text, entryID: entryID, route: "ax")
             timingLog.notice("watch route=ax")
         } else if processing?.settings.learningRequiresReadableField != true, !IsSecureEventInputEnabled(),
                   let pid, CGPreflightListenEventAccess(), startKeyTap(),
@@ -1655,7 +1706,7 @@ final class PreStart: @unchecked Sendable {
             keys.resolve = { CorrectionFilter.plausibleEdit(original: text, candidates: $0, isCommonWord: isCommonEnglishWord) }
             let identity = LearningFocusIdentity.capture(pid: pid)
             guard !identity.secure else { stopWatching(); return }
-            watch = Watch(observation: observation, pid: pid, field: nil, keyFocus: identity, keys: keys, current: text)
+            watch = Watch(observation: observation, pid: pid, field: nil, keyFocus: identity, keys: keys, current: text, entryID: entryID, route: "keys")
             timingLog.notice("watch route=keys ax-miss=\(axMiss, privacy: .public)")
         } else {
             timingLog.notice("watch route=none ax-miss=\(axMiss, privacy: .public) input-monitoring=\(CGPreflightListenEventAccess(), privacy: .public)")
@@ -1710,6 +1761,7 @@ final class PreStart: @unchecked Sendable {
             watch = w
             if w.observation.stopped {
                 stopWatching()
+                recordAfterPaste(w)
                 // Settling can also delete learned entries (reversal, conflict), so always refresh.
                 defer { refreshDictionary() }
                 let learned = try processing?.settle(sessionID: session) ?? []
@@ -1723,6 +1775,13 @@ final class PreStart: @unchecked Sendable {
                 if let entry = learned.last { announceLearned(entry) }
             }
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
+    }
+    /// The span as last observed when the window closed, whatever the learning ledger made of it.
+    private func recordAfterPaste(_ w: Watch) {
+        guard !w.entryID.isEmpty, var entry = history.first(where: { $0.id == w.entryID }) else { return }
+        let seen = w.observation.edited
+        entry.afterPaste = AfterPaste(text: seen, changed: seen.map { $0 != w.observation.initial }, route: w.route, endReason: w.observation.stopReason)
+        try? records?.save(entry); refreshHistory()
     }
     private func announceLearned(_ entry: DictionaryEntry) {
         bubble.showLearned(entry.preferred, entryID: entry.id, screen: destinationScreen)
