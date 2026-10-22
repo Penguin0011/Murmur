@@ -203,9 +203,14 @@ func checkKeychainStore() {
         let body = fw.httpBody ?? Data()
         let parts = splitMultipart(body, boundary: boundary)
         check(parts["model"] == Data("whisper-1".utf8), "model field")
-        check(parts["response_format"] == Data("verbose_json".utf8), "whisper asks for verbose_json segments")
-        let gpt = OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "gpt-4o-transcribe", audio: audio, boundary: boundary)
-        check(splitMultipart(gpt.httpBody ?? Data(), boundary: boundary)["response_format"] == Data("json".utf8), "gpt-4o-transcribe keeps json (its only format)")
+        check(parts["response_format"] == Data("json".utf8), "an undocumented whisper server keeps json")
+        func format(_ endpoint: String, _ model: String) -> Data? {
+            splitMultipart(OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: endpoint)!, apiKey: key, model: model, audio: audio, boundary: boundary).httpBody ?? Data(), boundary: boundary)["response_format"]
+        }
+        check(format("https://api.groq.com/openai/v1/audio/transcriptions", "whisper-large-v3-turbo") == Data("verbose_json".utf8), "Groq whisper asks for verbose_json segments")
+        check(format("https://api.openai.com/v1/audio/transcriptions", "whisper-1") == Data("verbose_json".utf8), "OpenAI whisper asks for verbose_json segments")
+        check(format("https://api.openai.com/v1/audio/transcriptions", "gpt-4o-transcribe") == Data("json".utf8), "gpt-4o-transcribe keeps json (its only format)")
+        check(format("https://openrouter.ai/api/v1/audio/transcriptions", "openai/whisper-large-v3-turbo") == Data("json".utf8), "OpenRouter whisper keeps json")
         check(parts["language"] == Data("en".utf8), "language field")
         check(parts["prompt"] == nil, "custom transcription omits free-form dictionary prompts")
         func promptPart(_ hint: String) -> Data? {

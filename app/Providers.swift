@@ -514,7 +514,9 @@ enum Multipart {
 enum OpenAITranscriptionFormat {
     static func makeRequest(endpoint: URL, apiKey: APIKey?, model: String, audio: AudioPayload, boundary: String) -> URLRequest {
         // Whisper models return per-segment confidence in verbose_json; gpt-4o-transcribe accepts only json.
-        let format = model.lowercased().contains("whisper") ? "verbose_json" : "json"
+        // Only Groq and OpenAI document it; other compatible servers keep json so a rejected format never fails the route.
+        let documented = ["api.groq.com", "api.openai.com"].contains(endpoint.host?.lowercased() ?? "")
+        let format = documented && model.lowercased().contains("whisper") ? "verbose_json" : "json"
         var fields: [(name: String, value: String)] = [("model", model), ("response_format", format), ("temperature", "0")]
         if let language = audio.language, !language.isEmpty { fields.append(("language", language)) }
         // Whisper treats prompt text as prior transcript context and can echo it. Apply dictionary
