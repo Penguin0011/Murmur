@@ -79,15 +79,16 @@ private func verboseJSON(_ segments: [(text: String, start: Double, end: Double,
 }
 
 /// Runs the real verbose_json parser on the audio levels the route computes. No network.
-private final class VerboseJSONStub: TranscriptionProvider, @unchecked Sendable {
+private final class VerboseJSONStub: DetailedTranscriber, @unchecked Sendable {
     let id = ProviderID.customAPI
     let json: String
     init(_ json: String) { self.json = json }
     var disclosure: DataDisclosure {
         DataDisclosure(provider: id, stage: .transcription, destinationHost: "example.invalid", leavesDevice: ["the recorded audio"], staysOnDevice: ["history"], retentionNote: "test")
     }
-    func transcribe(_ audio: AudioPayload) async throws -> String {
-        try OpenAITranscriptionFormat.parse(provider: .customAPI, result: HTTPResult(status: 200, body: Data(json.utf8)), levels: audio.levels)
+    func transcribe(_ audio: AudioPayload) async throws -> String { try await transcribeDetailed(audio).text }
+    func transcribeDetailed(_ audio: AudioPayload) async throws -> TranscriptionResult {
+        try OpenAITranscriptionFormat.parseDetailed(provider: .customAPI, result: HTTPResult(status: 200, body: Data(json.utf8)), levels: audio.levels)
     }
     func validate() async throws {}
 }
@@ -542,6 +543,14 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         await checkA(await CloudTranscription.run(provider: VerboseJSONStub(verboseJSON([
             (" .", 0, 1, -0.2)])), audioData: speech) == .noSpeech(skipped: false),
             "lone punctuation is no speech")
+        // The no-speech log line names why and carries scores, never words.
+        let invented = await CloudTranscription.runDetailed(provider: VerboseJSONStub(verboseJSON([(" Hello there friend.", 0, 5, -1.4)])), audioData: silence)
+        await checkA(invented.detail.noSpeechReason == "lowConfidence" && invented.detail.noSpeechLogLine.contains("segments=1 logprob-min-max=-1.40/-1.40") && !invented.detail.noSpeechLogLine.contains("Hello"), "low-confidence no-speech line has scores, no text")
+        let punctuation = await CloudTranscription.runDetailed(provider: VerboseJSONStub(verboseJSON([(" .", 0, 1, -0.2)])), audioData: speech)
+        await checkA(punctuation.detail.noSpeechReason == "punctuationOnly", "punctuation-only reason")
+        var precheckProvider = GeminiTranscriptionProvider(apiKey: testKey); precheckProvider.transport = MockTransport(HTTPResult(status: 200, body: geminiBody("unused")))
+        let skipped = await CloudTranscription.runDetailed(provider: precheckProvider, audioData: WAVAudio.encodePCM16([Float](repeating: 0.001, count: 48_000), sampleRate: 48_000))
+        await checkA(skipped.detail.noSpeechReason == "precheck" && skipped.detail.noSpeechLogLine.hasPrefix("no-speech reason=precheck clip="), "pre-check skip reason")
         await checkA(await CloudTranscription.run(provider: VerboseJSONStub(verboseJSON([
             (" Send the report.", 0, 1, -0.8)])), audioData: speech) == .transcript(" Send the report."),
             "moderately confident speech is kept")

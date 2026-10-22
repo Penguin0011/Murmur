@@ -6,12 +6,15 @@ pasting) from ~/Library/Application Support/Dictation/history. Run it only on yo
 paste its output into a shared place. Unlike dictation_health.py it is not content-free.
 
 Usage: python3 -I app/tools/dictation_digest.py [-n 20] [--since 2h|1d|2026-10-22T09:00] [--json] [--self-check]
+Text mode ends with the "No-speech dictations" Murmur logged in that window (default 1d): those make no History entry,
+so only their content-free scores are available, from `/usr/bin/log show`. --json lists History entries only.
 Entries made before October 22, 2026 lack the diagnostic fields and show them empty.
 """
 import datetime
 import json
 import os
 import re
+import subprocess
 import sys
 
 HISTORY = os.path.expanduser("~/Library/Application Support/Dictation/history")
@@ -81,6 +84,21 @@ def block(e):
     return "\n".join(out)
 
 
+def no_speech(window):
+    """Content-free `no-speech reason=… clip=… p50=…` lines from Murmur's unified log, as (time, message)."""
+    try:
+        out = subprocess.run(["/usr/bin/log", "show", "--last", window, "--style", "compact", "--predicate",
+                              'process == "Murmur" AND eventMessage BEGINSWITH "no-speech"'],
+                             capture_output=True, text=True, timeout=120).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return [(line[:19], line[line.index("no-speech "):].strip()) for line in out.splitlines() if "no-speech " in line and line[:2] == "20"]
+
+
+def window_for(since, now):
+    return "1d" if since is None else f"{max(60, int(now - since))}s"
+
+
 def select(rows, count, since):
     return [e for e in rows if e["_unix"] >= since] if since is not None else rows[-count:]
 
@@ -96,7 +114,7 @@ def self_check():
     text = block(rich)
     assert "model   : 'Hi.'" in text and "CHANGED" in text and "DROPPED" in text and "total=1.50s" in text, text
     assert len(select(rows, 2, None)) == 2 and len(select(rows, 9, now - 250)) == 3
-    assert parse_since("2h", now) == now - 7200
+    assert parse_since("2h", now) == now - 7200 and window_for(None, now) == "1d" and window_for(now - 7200, now) == "7200s"
     print("dictation_digest self-check passed")
 
 
@@ -115,6 +133,9 @@ def main(argv):
         print(json.dumps([{k: v for k, v in e.items() if k != "_unix"} for e in rows], indent=2, ensure_ascii=False))
     else:
         print("\n\n".join(block(e) for e in rows) if rows else "No dictations in History for that range.")
+        found = no_speech(window_for(since, now))
+        print("\n\n=== No-speech dictations (unified log, no entry in History)")
+        print("  log unavailable" if found is None else "\n".join(f"  {when}  {message}" for when, message in found) or "  none")
 
 
 if __name__ == "__main__":

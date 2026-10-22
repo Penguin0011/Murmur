@@ -1303,6 +1303,7 @@ final class PreStart: @unchecked Sendable {
             case .transcript(let value): text = value; held = false
             case .heldAnswerSuspected(let value): text = value; held = true
             case .noSpeech, .failed, .cancelled:
+                if case .noSpeech = outcome { timingLog.notice("\(result.detail.noSpeechLogLine, privacy: .public)") }
                 // Audio stays for retry (until the 24-hour purge) unless the provider error discards it.
                 if case .failed(_, false) = outcome, let audio { try? FileManager.default.removeItem(at: audio) }
                 var message = CloudTranscription.message(outcome) ?? CloudTranscription.unknownFailure

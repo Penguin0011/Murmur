@@ -363,6 +363,17 @@ struct CloudTranscriptionDetail: Sendable, Equatable {
     /// "passed", "skipped", or "unchecked" when the provider has no pre-check or no level.
     var precheck = "unchecked"
     var segments: [TranscriptSegment]? = nil
+    /// Why the outcome was no speech: "precheck", "lowConfidence" (every segment dropped), "empty" or "punctuationOnly".
+    var noSpeechReason: String? = nil
+
+    /// Content-free line for the unified log: reason, clip loudness and pre-check level, segment scores. Never text.
+    var noSpeechLogLine: String {
+        func f(_ value: Float?) -> String { value.map { String(format: "%.4f", $0) } ?? "-" }
+        let scores = (segments ?? []).compactMap(\.avgLogprob)
+        let range = scores.isEmpty ? "-" : String(format: "%.2f/%.2f", scores.min()!, scores.max()!)
+        return "no-speech reason=\(noSpeechReason ?? "unknown") clip=\(clipSeconds.map { String(format: "%.2f", $0) } ?? "-") p50=\(f(peakP50)) p90=\(f(peakP90)) "
+            + "silence=\(f(silencePeak))/\(f(silencePeak == nil ? nil : GeminiTranscriptionProvider.defaultSilencePeak)) segments=\(segments?.count ?? 0) logprob-min-max=\(range)"
+    }
 }
 
 enum CloudTranscription {
@@ -392,7 +403,7 @@ enum CloudTranscription {
         var detail = CloudTranscriptionDetail(clipSeconds: prepared.duration, silencePeak: prepared.peak)
         if let peaks = prepared.payload.levels.flatMap(OpenAITranscriptionFormat.peakPercentiles) { detail.peakP50 = peaks.p50; detail.peakP90 = peaks.p90 }
         if let checker = provider as? SilencePrecheckedTranscriber, let peak = prepared.peak {
-            if checker.shouldSkip(peakLevel: peak, durationSeconds: prepared.duration) { detail.precheck = "skipped"; return (.noSpeech(skipped: true), detail) }
+            if checker.shouldSkip(peakLevel: peak, durationSeconds: prepared.duration) { detail.precheck = "skipped"; detail.noSpeechReason = "precheck"; return (.noSpeech(skipped: true), detail) }
             detail.precheck = "passed"
         }
         if Task.isCancelled { return (.cancelled, detail) }
@@ -410,7 +421,10 @@ enum CloudTranscription {
             }
             if Task.isCancelled { return (.cancelled, detail) }
             // A transcript of only punctuation (" .") is silence too: nothing is pasted.
-            if !text.contains(where: { $0.isLetter || $0.isNumber }) { return (.noSpeech(skipped: false), detail) }
+            if !text.contains(where: { $0.isLetter || $0.isNumber }) {
+                detail.noSpeechReason = !text.isEmpty ? "punctuationOnly" : detail.segments?.isEmpty == false && detail.segments?.allSatisfy(\.dropped) == true ? "lowConfidence" : "empty"
+                return (.noSpeech(skipped: false), detail)
+            }
             return (suspected ? .heldAnswerSuspected(text) : .transcript(text), detail)
         } catch let error as ProviderError {
             if error == .cancelled || Task.isCancelled { return (.cancelled, detail) }
