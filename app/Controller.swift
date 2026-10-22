@@ -1289,7 +1289,8 @@ final class PreStart: @unchecked Sendable {
                 self.setPhase("Error", message); done(); return
             }
             // An answer-shaped LLM transcript is held like a failed cleanup: raw text only, never inserted.
-            let entry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: held ? "" : text, insertionStatus: held ? "held-transcript" : "saved-not-inserted")
+            var entry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: held ? "" : text, insertionStatus: held ? "held-transcript" : "saved-not-inserted")
+            entry.transcriptionProvider = provider.id.rawValue; entry.transcriptionModel = Self.modelID(provider)
             do { try store.save(entry) } catch { self.setPhase("Error", "Could not save the transcript. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry for up to 24 hours.")"); done(); return }
             if let audio { try? FileManager.default.removeItem(at: audio) }
             guard !held else {
