@@ -144,6 +144,45 @@ enum HistoryCap {
     }
 }
 
+/// Optional recordings kept for diagnostics (off by default): the WAV the app would delete after a
+/// successful transcription is copied into `history/recordings`, linked from its History entry by file
+/// name, and purged after 7 days. `directory` is nil while the setting is off, so nothing is kept.
+/// Safe to read from any thread: the transcription callbacks run off the main actor.
+final class DiagnosticRecordings: @unchecked Sendable {
+    static let lifetime: TimeInterval = 7 * 24 * 60 * 60
+    static func directory(inHistory history: URL) -> URL { history.appendingPathComponent("recordings", isDirectory: true) }
+    private let lock = NSLock()
+    private var target: URL?
+    var directory: URL? {
+        get { lock.lock(); defer { lock.unlock() }; return target }
+        set { lock.lock(); target = newValue; lock.unlock() }
+    }
+
+    /// Copies `audio` to `<entry id>.wav` (owner-only) and returns its file name, or nil when off or on any failure.
+    /// A copy, not a move: if saving the entry fails, the retry audio is still there.
+    func keep(_ audio: URL, entryID: String) -> String? {
+        guard let directory, UUID(uuidString: entryID) != nil else { return nil }
+        let name = entryID + ".wav", destination = directory.appendingPathComponent(name)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.copyItem(at: audio, to: destination)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600, .modificationDate: Date()], ofItemAtPath: destination.path)
+            return name
+        } catch { try? FileManager.default.removeItem(at: destination); return nil }
+    }
+
+    /// Removes recordings older than `lifetime`. Runs whether or not the setting is still on.
+    static func purge(history: URL, now: Date = Date()) throws {
+        let folder = directory(inHistory: history)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        for file in files where file.pathExtension == "wav" {
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            if now.timeIntervalSince(modified) >= lifetime || modified > now { try FileManager.default.removeItem(at: file) }
+        }
+    }
+}
+
 /// History-off keeps results only in memory for the running session.
 enum HistoryMode: String, Codable {
     case on, off
