@@ -394,6 +394,11 @@ struct EchoAsyncCleaner: AsyncCleaner {
         let rewritten = "John and I were going to buy 42 apples, but he doesn't want to go, so he is not going to do that. Instead, we need to buy:\n1. Milk\n2. Eggs\n3. Bread"
         expect(CleanupGuard.check(raw: broken, cleaned: rewritten, options: professional) == .pass, "professional accepts the broken dictation")
         expect(CleanupGuard.check(raw: broken, cleaned: rewritten, options: polish) != .pass, "polish refuses the rewrite")
+        // Negations may never be added, or dropped beside a correction cue; Polish keeps unannounced ordinals as prose.
+        let spokenProfessional = CleanupOptions(punctuation: true, professional: true, spoken: true)
+        expect(CleanupGuard.check(raw: "First we went home and second we slept", cleaned: "1. We went home.\n2. We slept.", options: CleanupOptions(punctuation: true, polish: true, spoken: true)) != .pass, "polish keeps unannounced ordinals prose")
+        expect(CleanupGuard.check(raw: "Send Alex 20 dollars", cleaned: "Do not send Alex 20 dollars.", options: spokenProfessional) != .pass, "professional never adds a negation")
+        expect(CleanupGuard.check(raw: "the report is not ready no I mean the slides", cleaned: "The report is ready, I mean the slides.", options: spokenProfessional) != .pass, "professional never drops a real negation beside a cue")
         // Short grammar fixes pass as their long forms do; the lean option sets leave only the polish floor
         // to absorb them. Polish refuses the reordering ("I" is an inserted word); professional accepts it.
         let leanPolish = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true, polish: true)
