@@ -394,6 +394,38 @@ struct EchoAsyncCleaner: AsyncCleaner {
         let rewritten = "John and I were going to buy 42 apples, but he doesn't want to go, so he is not going to do that. Instead, we need to buy:\n1. Milk\n2. Eggs\n3. Bread"
         expect(CleanupGuard.check(raw: broken, cleaned: rewritten, options: professional) == .pass, "professional accepts the broken dictation")
         expect(CleanupGuard.check(raw: broken, cleaned: rewritten, options: polish) != .pass, "polish refuses the rewrite")
+        // Short grammar fixes pass as their long forms do; the lean option sets leave only the polish floor
+        // to absorb them. Polish refuses the reordering ("I" is an inserted word); professional accepts it.
+        let leanPolish = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true, polish: true)
+        let leanProfessional = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true, professional: true)
+        let lean = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
+        func long(_ s: String) -> String { String(s.dropLast()) + " for the meeting this morning." }
+        for (raw, out, modes) in [
+            ("Me and John was late.", "John and I were late.", [professional, leanProfessional]),
+            ("He don't know.", "He doesn't know.", [polish, professional, leanPolish, leanProfessional]),
+            ("It go faster.", "It goes faster.", [polish, professional, leanPolish, leanProfessional]),
+        ] {
+            for o in modes {
+                expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) == .pass, "short grammar fix passes: \(out)")
+                expect(CleanupGuard.check(raw: long(raw), cleaned: long(out), options: o) == .pass, "long grammar fix passes: \(out)")
+            }
+            for o in [lean, CleanupOptions.standard, CleanupOptions.faithful] {
+                expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "short grammar fix refused without polish: \(out)")
+            }
+        }
+        for (raw, out, label) in [
+            ("Me and John was late.", "I was late.", "dropped name"),
+            ("He don't know.", "He knows.", "negation flip"),
+            ("It go faster.", "It goes 5 times faster.", "added number"),
+            ("I told him.", "He told me.", "reversed roles"),
+            ("I will go.", "I went.", "tense"),
+            ("We could leave.", "We should leave.", "modal swap"),
+        ] {
+            for o in [polish, professional, leanPolish, leanProfessional] {
+                expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "short grammar fix refuses: \(label)")
+                expect(CleanupGuard.check(raw: long(raw), cleaned: long(out), options: o) != .pass, "long grammar fix refuses: \(label)")
+            }
+        }
         for (out, label) in [
             (rewritten.replacingOccurrences(of: "42", with: "40"), "changed number"),
             (rewritten.replacingOccurrences(of: "John", with: "Jim"), "changed name"),

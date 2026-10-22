@@ -787,7 +787,12 @@ enum CleanupGuard {
         if options.corrections { maxEdit += 0.45 }
         if options.lists { maxEdit += 0.35 }
         maxEdit = min(maxEdit, 0.9)
-        if Double(deletions + insertions) > maxEdit * Double(a.count) + 1 { return .fail(.editDistance) }
+        // Polish and professional ask for grammar fixes ("it go" -> "it goes", "me and John was" -> "John and
+        // I were"): short utterances may swap two words, or three reordered in professional. Names, numbers,
+        // negations and inserted words are still checked below.
+        // ponytail: flat floor, not a grammar-aware diff; a short full rewrite relies on the later checks.
+        let editFloor = options.professional ? 6.0 : options.polish ? 4 : 0
+        if Double(deletions + insertions) > max(maxEdit * Double(a.count) + 1, editFloor) { return .fail(.editDistance) }
 
         let window = options.corrections ? correctionWindow(raw, loose: options.professional) : []
         // A correction is applied whole or not at all: a dropped cue takes the word it corrects with it,
