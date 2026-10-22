@@ -242,6 +242,8 @@ final class ProcessingCoordinator {
     private(set) var lastFallback: CleanupFailureReason?
     /// The cleanup model's output the guard rejected in the last dictation, or nil. Main thread.
     private(set) var lastRejectedOutput: String?
+    /// Which path supplied the last dictation's text. Main thread.
+    private(set) var lastOutcome: CleanupPath?
     /// What the punctuation transfer is guarded as: sentence punctuation and capitals, no word changes.
     static let punctuationOnly = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
 
@@ -293,10 +295,11 @@ final class ProcessingCoordinator {
     /// `style` carries a writing mode's overrides; nil uses the settings. Screen context and custom
     /// instructions are never used here: local rules send nothing and take no instructions.
     func process(_ raw: String, style: DictationStyle? = nil) -> ProcessingOutcome {
-        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil
+        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil; lastOutcome = nil
         let style = style ?? DictationStyle(mode: nil, settings: settings)
         let prepared = prepare(raw)
         if settings.route == .cloud && style.options.anyEnabled { lastFallback = .cleanerFailed }
+        lastOutcome = !style.options.anyEnabled ? .off : settings.route == .cloud ? .localRules : .localRoute
         return .insert(toned(localClean(prepared.text, terms: prepared.terms, options: style.options), input: prepared.text, style: style))
     }
 
@@ -311,7 +314,7 @@ final class ProcessingCoordinator {
     /// Full path including the cloud route. Always inserts: see the failure policy above.
     /// Main actor: the dictionary is read on the main thread; only the provider calls run elsewhere.
     @MainActor func processAsync(_ raw: String, style: DictationStyle? = nil) async -> ProcessingOutcome {
-        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil
+        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil; lastOutcome = nil
         guard settings.route == .cloud else { return process(raw, style: style) }
         let style = style ?? DictationStyle(mode: nil, settings: settings)
         let prepared = prepare(raw)
@@ -322,8 +325,9 @@ final class ProcessingCoordinator {
             c.selected = String(c.selected.prefix(400)); c.clipboard = String(c.clipboard.prefix(400)); c.window = String(c.window.prefix(1_000))
             context = c
         }
+        if !options.anyEnabled { lastOutcome = .off }
         if !options.anyEnabled || prepared.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .insert(toned(prepared.text, input: prepared.text, style: style)) }
-        guard let provider = cloudCleaner else { lastFallback = .cleanerFailed; return .insert(toned(localClean(prepared.text, terms: terms, options: options), input: prepared.text, style: style)) }
+        guard let provider = cloudCleaner else { lastFallback = .cleanerFailed; lastOutcome = .localRules; return .insert(toned(localClean(prepared.text, terms: terms, options: options), input: prepared.text, style: style)) }
         // On the slow Gemma fallback, long text is cleaned in parallel sections, each guarded on its own.
         // Apple's on-device model splits longer text, to stay inside its context window (AppleCleanup.swift).
         let sections = (provider as? GeminiCleanupProvider)?.onFallback == true ? CleanupSections.split(prepared.text)
@@ -336,6 +340,8 @@ final class ProcessingCoordinator {
             for await (index, attempt) in group { out[index] = attempt }
             return out
         }
+        // The worst section decides.
+        lastOutcome = results.contains { $0.text == nil } ? .localRules : results.contains { $0.reason != nil } ? .modelPunctuationOnLocal : .modelAccepted
         var parts: [String] = []
         for (section, attempt) in zip(sections, results) {
             if let reason = attempt.reason { lastFallback = lastFallback ?? reason }

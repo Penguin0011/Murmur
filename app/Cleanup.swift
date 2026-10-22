@@ -159,6 +159,19 @@ enum CleanupFailureReason: String, Codable, Equatable, Sendable, CaseIterable {
     case quoteEdited
 }
 
+/// Which path supplied a dictation's final text, recorded in History. Content-free.
+enum CleanupPath: String, Codable, Equatable, Sendable {
+    /// No cleanup operation was enabled.
+    case off
+    case modelAccepted
+    /// The model's words were rejected; its punctuation was applied to the local cleanup.
+    case modelPunctuationOnLocal
+    /// The model was rejected or failed (or not configured); local rules were used.
+    case localRules
+    /// The local route: local rules, no model.
+    case localRoute
+}
+
 enum CleanupGuardResult: Equatable, Sendable {
     case pass
     case fail(CleanupFailureReason)

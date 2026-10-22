@@ -18,6 +18,23 @@ struct HistoryEntry: Codable, Identifiable {
     var seconds: Double? = nil
     /// Bundle ID of the app the text was pasted into, for Insights; nil when unknown or not pasted.
     var app: String? = nil
+    // Provenance (October 21, 2026): identifiers and settings only, never text, context or keys. Nil before then.
+    /// Cleanup options in effect, after any writing mode's override.
+    var cleanupOptions: CleanupOptions? = nil
+    var writingModeID: String? = nil
+    var writingModeName: String? = nil
+    /// `ProviderID` raw value, or "local" for this Mac's model.
+    var transcriptionProvider: String? = nil
+    var transcriptionModel: String? = nil
+    /// `ProviderID` raw value, or "local-rules".
+    var cleanupProvider: String? = nil
+    var cleanupModel: String? = nil
+    var appVersion: String? = nil
+    /// Whether screen context was sent to the cleanup model.
+    var contextUsed: Bool? = nil
+    var cleanupOutcome: CleanupPath? = nil
+    /// True once the user edits `finalText` in History.
+    var edited: Bool? = nil
 
     /// The same dictation with new text and status; the recording facts carry over.
     func with(finalText: String, status: String, fallback: String? = nil, rejected: String? = nil) -> HistoryEntry {

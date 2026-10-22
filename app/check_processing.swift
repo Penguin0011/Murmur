@@ -121,6 +121,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(p.process("Um, I called acme today.") == .insert("Um, I called Akme today."), "faithful applies dictionary only")
         check(p.process("so, um, ack me and the like") == .insert("so, um, Akme and the like"), "faithful multiword variant")
         check(spy.calls == 0, "faithful never calls the cleaner")
+        check(p.lastOutcome == .off, "faithful outcome is off")
         check(p.process("No terms here, um.") == .insert("No terms here, um."), "faithful without terms is raw")
 
         // Standard options through RuleCleaner, dictionary before cleanup.
@@ -128,6 +129,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try p.update(settings)
         p.localCleaner = RuleCleaner()
         check(p.process("Um, I called acme today.") == .insert("I called Akme today."), "RuleCleaner + dictionary")
+        check(p.lastOutcome == .localRoute, "local route outcome")
         check(p.process("Meet Tuesday, sorry, Thursday at three.") == .insert("Meet Thursday at three."), "correction")
 
         // One option alone.
@@ -282,12 +284,14 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         // Not configured: local rules.
         await expect(p, "Um, call acme.", .insert("Um, call Akme."), "unconfigured cloud uses local rules")
         check(local.calls == 1, "unconfigured cloud ran local rules")
+        check(p.lastOutcome == .localRules, "unconfigured cloud outcome is local rules")
 
         // Success, guarded.
         let good = MockCloudCleaner(.success("Call Akme."))
         p.cloudCleaner = good
         await expect(p, "Um, call acme.", .insert("Call Akme."), "cloud success")
         check(good.messages.count == 1, "one provider call")
+        check(p.lastOutcome == .modelAccepted, "accepted model outcome")
         let prompt = good.messages.first
         check(prompt?.user.contains("Um, call Akme.") == true, "provider receives dictionary-applied text")
         check(prompt?.system.contains("Akme") == true, "relevant term in prompt")
@@ -336,6 +340,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         await expect(p, "Um, call acme.", .insert("Um, call Akme."), "cloud failure uses local rules")
         check(timeout.messages.count == 1, "a provider error is not retried")
         check(p.lastProviderError == .timeout(.gemini) && p.lastFallback == .cleanerFailed, "provider error kept")
+        check(p.lastOutcome == .localRules, "provider error outcome is local rules")
         p.cloudCleaner = MockCloudCleaner(.failure(.network(.gemini)))
         await expect(p, "Um, call acme.", .insert("Um, call Akme."), "network failure uses local rules")
         check(local.calls == localBefore + 2, "local rules ran for each failure")
@@ -347,6 +352,13 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(dropped.messages.count == 1, "no retry call")
         check(p.lastFallback == .unexplainedDeletion && p.lastProviderError == nil, "rejection reason kept, no provider error")
         check(p.lastRejectedOutput == "Every give or take twenty seconds. Okay?", "rejected model output kept for debugging")
+        check(p.lastOutcome == .modelPunctuationOnLocal, "rejected words, model punctuation outcome")
+        settings.options.punctuation = false
+        try p.update(settings)
+        await expect(p, "every like give or take twenty seconds okay", .insert("every like give or take twenty seconds okay"), "rejection without punctuation uses local rules")
+        check(p.lastFallback != nil && p.lastOutcome == .localRules, "rejected without punctuation outcome is local rules")
+        settings.options = .standard
+        try p.update(settings)
         p.cloudCleaner = MockCloudCleaner(.success("Call Akme."))
         await expect(p, "Um, call acme.", .insert("Call Akme."), "next dictation passes")
         check(p.lastRejectedOutput == nil, "rejected output cleared per dictation")
@@ -403,6 +415,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try p.update(settings)
         await expect(p, "Um, call acme.", .insert("Um, call Akme."), "cloud faithful applies dictionary only")
         check(idle.messages.isEmpty, "faithful never calls the provider")
+        check(p.lastOutcome == .off, "cloud faithful outcome is off")
 
         // Local route through the async entry point uses the local cleaner.
         settings.route = .local; settings.options = .standard

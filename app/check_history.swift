@@ -19,6 +19,21 @@ import Darwin
         let older = #"{"id":"\#(UUID().uuidString)","recordedAt":0,"rawText":"a","finalText":"a","insertionStatus":"unverified"}"#
         let olderEntry = try JSONDecoder().decode(HistoryEntry.self, from: Data(older.utf8))
         precondition(olderEntry.cleanupFallback == nil, "older history decodes without a fallback reason")
+        // Provenance round-trips, older files decode without it, and new text keeps it.
+        var traced = fellBack
+        traced.cleanupOptions = CleanupOptions(professional: true); traced.writingModeID = UUID().uuidString; traced.writingModeName = "Email"
+        traced.transcriptionProvider = "local"; traced.transcriptionModel = unifiedRepository
+        traced.cleanupProvider = "gemini"; traced.cleanupModel = "gemma-4-26b-a4b-it"; traced.appVersion = "1.0 (7)"
+        traced.contextUsed = true; traced.cleanupOutcome = .modelPunctuationOnLocal; traced.edited = true
+        let tracedTrip = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(traced))
+        func provenance(_ e: HistoryEntry) -> [String?] {
+            [e.cleanupOptions.map { "\($0)" }, e.writingModeID, e.writingModeName, e.transcriptionProvider, e.transcriptionModel, e.cleanupProvider,
+             e.cleanupModel, e.appVersion, e.contextUsed.map { "\($0)" }, e.cleanupOutcome?.rawValue, e.edited.map { "\($0)" }]
+        }
+        precondition(tracedTrip.cleanupOptions == CleanupOptions(professional: true) && provenance(tracedTrip) == provenance(traced), "provenance round-trips")
+        precondition(provenance(olderEntry).allSatisfy { $0 == nil }, "older history decodes without provenance")
+        let retexted = traced.with(finalText: "B.", status: "verified")
+        precondition(retexted.finalText == "B." && provenance(retexted) == provenance(traced), "with(finalText:) keeps provenance")
         let path = root.appendingPathComponent(entry.id + ".json")
         let abandoned = root.appendingPathComponent(".pending-" + UUID().uuidString)
         try JSONEncoder().encode(entry).write(to: abandoned)
@@ -88,6 +103,6 @@ import Darwin
         let rewritten = try ModelVerificationCache.fingerprint(modelRoot, manifest: manifest)
         precondition(rewritten != hashed, "rewrite must change the fingerprint")
         do { try cache.verify(modelRoot, manifest: manifest); fatalError("Cache accepted rewritten weights") } catch {}
-        print("Native history and verifier checks passed (atomic roundtrip, permissions, calendar expiry, invalid policy, mismatched/corrupt history, quarantine and expiry of unreadable files, deletion, absent/corrupt weights).")
+        print("Native history and verifier checks passed (atomic roundtrip, provenance, permissions, calendar expiry, invalid policy, mismatched/corrupt history, quarantine and expiry of unreadable files, deletion, absent/corrupt weights).")
     }
 }

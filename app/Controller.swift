@@ -1311,6 +1311,13 @@ final class PreStart: @unchecked Sendable {
         let text = trigger?.text ?? savedEntry.rawText
         let style = processing.map { DictationStyle(mode: trigger?.mode ?? sessionMode, settings: $0.settings, context: sessionContext) }
         sessionContext = nil
+        // Provenance: identifiers and settings only, never text, context or keys.
+        let mode = trigger?.mode ?? sessionMode, info = Bundle.main.infoDictionary
+        savedEntry.cleanupOptions = style?.options; savedEntry.writingModeID = mode?.id.uuidString; savedEntry.writingModeName = mode?.name
+        savedEntry.transcriptionProvider = sessionTranscriber?.id.rawValue ?? "local"
+        savedEntry.transcriptionModel = sessionTranscriber == nil ? unifiedRepository : Self.modelID(sessionTranscriber)
+        savedEntry.appVersion = (info?["CFBundleShortVersionString"] as? String).map { v in (info?["CFBundleVersion"] as? String).map { "\(v) (\($0))" } ?? v }
+        savedEntry.contextUsed = style?.context != nil && style?.options.anyEnabled == true && processing?.settings.route == .cloud && processing?.cloudCleaner != nil
         guard let processing, processing.settings.route != .local else {
             complete(processing?.process(text, style: style) ?? .heldForRecovery(raw: text, reason: .cleanerFailed), entry: savedEntry, store: store, done: done); return
         }
@@ -1322,8 +1329,20 @@ final class PreStart: @unchecked Sendable {
         }
         setPhase("Processing", "Cleaning up with \(processing.cloudCleaner?.id.displayName ?? "the cleanup provider")…")
     }
+    /// Model identifiers for History; nil where the provider has none (Apple's on-device model).
+    private static func modelID(_ provider: Any?) -> String? {
+        // Read after the call: a rate limit during this dictation moves Gemini to its fallback model.
+        if let p = provider as? GeminiCleanupProvider { return p.onFallback ? p.fallback : p.model }
+        if let p = provider as? OpenAICompatibleCleanupProvider { return p.model }
+        if let p = provider as? GeminiTranscriptionProvider { return p.model }
+        if let p = provider as? GeminiTranscribeProvider { return p.model }
+        return (provider as? OpenAICompatibleTranscriptionProvider)?.server.model
+    }
     private func complete(_ outcome: ProcessingOutcome, entry savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, done: @escaping () -> Void) {
         var entry = savedEntry
+        entry.cleanupOutcome = processing?.lastOutcome
+        entry.cleanupProvider = processing?.settings.route == .local ? "local-rules" : processing?.cloudCleaner?.id.rawValue
+        entry.cleanupModel = Self.modelID(processing?.cloudCleaner)
         let text = entry.rawText
         let saved = HistoryText.saved(persists: !store.sessionOnlyIDs.contains(entry.id))
         // A held result keeps only the raw transcript and is never inserted.
@@ -1753,7 +1772,7 @@ final class PreStart: @unchecked Sendable {
     func editEntryText(_ entry: HistoryEntry, to text: String) -> Bool {
         guard text != entry.finalText else { return true }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { message = "The final text cannot be empty."; return false }
-        var edited = entry; edited.finalText = text
+        var edited = entry; edited.finalText = text; edited.edited = true
         do { try records?.update(edited) } catch { message = "Could not save this transcript."; return false }
         if lastDictationText == entry.finalText { lastDictationText = text }
         refreshHistory()
