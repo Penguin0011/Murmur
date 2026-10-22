@@ -99,7 +99,8 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         let mode = (try? FileManager.default.attributesOfItem(atPath: kept.path)[.posixPermissions] as? NSNumber)?.intValue
         check(name == id + ".wav" && FileManager.default.fileExists(atPath: audio.path) && mode == 0o600, "on copies the audio, owner-only, and leaves the original for the caller")
         check(recordings.keep(audio, entryID: "../x") == nil, "only entry ids name recordings")
-        check(try HistoryCap.usage(directory: history) == 0, "recordings do not count toward the History size cap")
+        let usage = try HistoryCap.usage(directory: history)
+        check(usage == 0, "recordings do not count toward the History size cap")
         try DiagnosticRecordings.purge(history: history, now: Date().addingTimeInterval(6 * 86400))
         check(FileManager.default.fileExists(atPath: kept.path), "kept for 7 days")
         try DiagnosticRecordings.purge(history: history, now: Date().addingTimeInterval(8 * 86400))
