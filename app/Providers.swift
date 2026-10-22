@@ -513,7 +513,9 @@ enum Multipart {
 
 enum OpenAITranscriptionFormat {
     static func makeRequest(endpoint: URL, apiKey: APIKey?, model: String, audio: AudioPayload, boundary: String) -> URLRequest {
-        var fields: [(name: String, value: String)] = [("model", model), ("response_format", "json"), ("temperature", "0")]
+        // Whisper models return per-segment confidence in verbose_json; gpt-4o-transcribe accepts only json.
+        let format = model.lowercased().contains("whisper") ? "verbose_json" : "json"
+        var fields: [(name: String, value: String)] = [("model", model), ("response_format", format), ("temperature", "0")]
         if let language = audio.language, !language.isEmpty { fields.append(("language", language)) }
         // Whisper treats prompt text as prior transcript context and can echo it. Apply dictionary
         // spellings after transcription; compatible endpoints have no shared structured vocabulary field.
@@ -526,13 +528,30 @@ enum OpenAITranscriptionFormat {
         return request
     }
 
-    /// `{"text": "..."}`. An empty string (silence) is valid; a missing `text` is not.
+    // ponytail: Whisper's own defaults (no_speech_threshold, logprob_threshold), not yet calibrated
+    // against real dictations; tune once tails from real recordings are measured.
+    static let noSpeechThreshold = 0.6
+    static let logprobThreshold = -1.0
+
+    /// `{"text": "..."}`. An empty string (silence) is valid; a missing `text` is not. With verbose_json
+    /// `segments`, trailing segments the model itself marks as no speech are dropped (Whisper invents
+    /// "Thank you." on silent tails); the words are never inspected. Partial segment data keeps `text`.
     static func parse(provider: ProviderID, result: HTTPResult) throws -> String {
         guard (200..<300).contains(result.status) else { throw ProviderErrorClassifier.classify(provider: provider, result: result) }
         guard let object = try? JSONSerialization.jsonObject(with: result.body) as? [String: Any] else { throw ProviderError.malformedResponse(provider) }
         if object["error"] != nil { throw ProviderErrorClassifier.classify(provider: provider, result: result) }
         guard let text = object["text"] as? String else { throw ProviderError.malformedResponse(provider) }
-        return text
+        guard let raw = object["segments"] as? [[String: Any]] else { return text }
+        var segments: [(text: String, silent: Bool)] = []
+        for segment in raw {
+            guard let words = segment["text"] as? String, let noSpeech = segment["no_speech_prob"] as? Double,
+                  let logprob = segment["avg_logprob"] as? Double else { return text }
+            segments.append((words, noSpeech > noSpeechThreshold && logprob < logprobThreshold))
+        }
+        guard segments.last?.silent == true else { return text }
+        while segments.last?.silent == true { segments.removeLast() }
+        // Whisper segment text carries its own leading space.
+        return segments.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

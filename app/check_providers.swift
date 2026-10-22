@@ -203,7 +203,9 @@ func checkKeychainStore() {
         let body = fw.httpBody ?? Data()
         let parts = splitMultipart(body, boundary: boundary)
         check(parts["model"] == Data("whisper-1".utf8), "model field")
-        check(parts["response_format"] == Data("json".utf8), "response_format field")
+        check(parts["response_format"] == Data("verbose_json".utf8), "whisper asks for verbose_json segments")
+        let gpt = OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: "https://stt.example.test/v1/audio/transcriptions")!, apiKey: key, model: "gpt-4o-transcribe", audio: audio, boundary: boundary)
+        check(splitMultipart(gpt.httpBody ?? Data(), boundary: boundary)["response_format"] == Data("json".utf8), "gpt-4o-transcribe keeps json (its only format)")
         check(parts["language"] == Data("en".utf8), "language field")
         check(parts["prompt"] == nil, "custom transcription omits free-form dictionary prompts")
         func promptPart(_ hint: String) -> Data? {
@@ -257,6 +259,20 @@ func checkKeychainStore() {
         expectError(.malformedResponse(.customAPI), "STT non-JSON") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, "<html>")) }
         expectError(.authentication(.customAPI), "observed 401") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(401, unauthorizedBody)) }
         expectError(.server(.customAPI, status: 503), "503 no healthy upstream") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(503, "no healthy upstream")) }
+        func segmented(_ segments: [(String, Double, Double)]) -> String? {
+            let parts = segments.map { #"{"text": "\#($0.0)", "no_speech_prob": \#($0.1), "avg_logprob": \#($0.2), "start": 0, "end": 1, "compression_ratio": 1.2}"# }
+            let text = segments.map(\.0).joined()
+            return try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": "\#(text)", "segments": [\#(parts.joined(separator: ","))]}"#))
+        }
+        check(segmented([(" Send the report.", 0.01, -0.2), (" Maybe shower.", 0.9, -1.5)]) == "Send the report.", "trailing no-speech segment dropped")
+        check(segmented([(" Send the report.", 0.01, -0.2), (" Thank you.", 0.1, -0.3)]) == " Send the report. Thank you.", "spoken Thank you. kept, text unchanged")
+        check(segmented([(" One.", 0.01, -0.2), (" um", 0.9, -1.5), (" Two.", 0.02, -0.2)]) == " One. um Two.", "middle low-confidence segment kept")
+        check(segmented([(" One.", 0.01, -0.2), (" um", 0.9, -1.5), (" Two.", 0.02, -0.2), (" Thank you.", 0.95, -1.2)]) == "One. um Two.", "only the trailing run is dropped")
+        check(segmented([(" Thank you.", 0.9, -1.5), (" Bye.", 0.8, -1.1)]) == "", "all no-speech becomes empty")
+        check(segmented([(" Send it.", 0.01, -0.2), (" Thank you.", 0.9, -0.5)]) == " Send it. Thank you.", "high no_speech alone is not enough")
+        let partial = #"{"text": " Send it. Thank you.", "segments": [{"text": " Send it.", "start": 0, "end": 1}, {"text": " Thank you.", "no_speech_prob": 0.9, "avg_logprob": -1.5}]}"#
+        check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, partial))) == " Send it. Thank you.", "segments without confidence fall back to text")
+        check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": " Hi.", "segments": "x"}"#))) == " Hi.", "malformed segments fall back to text")
 
         check((try? GeminiCleanupProvider.parse(result(200, geminiSuccess))) == "Please send the report.", "Gemini success parse")
         check((try? GeminiCleanupProvider.parse(result(200, geminiThought))) == "Meet Thursday at three.", "Gemini joins parts, skips thoughts")
