@@ -67,6 +67,44 @@ Fixed on this branch:
 
 Each fix has must-fail counterparts in `check_cleanup`, and the cleanup corpus still accepts 0 adversarial outputs.
 
+## Professional with only meaning checks (offline analysis)
+
+The question: when "Protect what I said" is on, should Professional keep only the meaning checks (names, numbers, negations, answers, quotes, runaway length) and drop the wording checks (`unexplainedDeletion`, `insertedWords`, `editDistance`, `lengthRatio`, `structureAdded`)?
+
+**Method.** A scratch copy of the guard was patched so an environment variable switches the wording checks off in Professional only. Production code is unchanged. The patched copy was run against the 53 good outputs from the two live runs (via `--rescore`) and against `check_cleanup`'s adversarial set. Two variants:
+- **B:** drops the generic wording checks and `polishCheck`.
+- **A:** also drops Professional's own word-level checks, which report as `unexplainedDeletion`/`insertedWords`. These cover dropped prepositions and particles, tense and modal changes, inserted adverbs and instructions, and swapped roles.
+
+| Guard in Professional | Good live outputs accepted (Cerebras + Groq) | Adversarial outputs wrongly accepted |
+|---|---:|---:|
+| Current | 41 / 53 (21 + 20) | 0 |
+| B: meaning checks + Professional word checks | 42 / 53 (21 + 21) | 11 |
+| A: meaning checks only | 43 / 53 (21 + 22) | 452, and 36 explicit "professional refuses" checks fail |
+
+**What slips through:**
+- **Under B (11):**
+  - a smiley, an emoji or an exclamation mark added;
+  - a correction cue dropped while both versions are kept ("Book it for 2, no, 3 people" → "Book it for 2, 3 people"; "Dana, no, Dan" → "Dana, Dan"; "Monday, no, Tuesday"; two inside list items);
+  - a lone "First, …" made into a list;
+  - a list longer than the speaker enumerated.
+- **Under A, additionally:** answered requests, poems, jokes, summaries, "include" → "exclude", swapped roles and objects, tense and modal changes, dropped prepositions and particles, inserted instructions.
+
+**What is still rejected in every variant.** These are 5 Cerebras outputs and 5–6 Groq outputs, all from meaning checks misfiring on corrections:
+- **`negationChanged` (6):** "what time is it no I mean what day is it", "that sounds pretty good no I mean that doesn't…", "…designed uh no let me start again…". The cue's "no" counts as a dropped negation.
+  - A prototype that does not count "no" in "no I mean", "no wait" or "uh no let me" kept the adversarial count at 0, and all checks still passed.
+  - Even so, these outputs then fail `unexplainedDeletion`. The replaced clause ("that sounds pretty good") lies outside the guard's correction window, which reaches back only over words the repair restates.
+- **`numberDropped` (2):** "Send Alex 20 dollars no I mean do not send Alex 20 dollars" → "Do not send Alex 20 dollars." The first copy of "20" goes with the replaced clause.
+- **`nameAdded` (2):** "shreia" → "Shreya" spelled from screen context, which the guard never accepts.
+
+**Recommendation.** Do not drop the wording checks.
+- Variant B gains 1 of 53 good outputs (Groq's U+2011 hyphen) for 11 adversarial passes. Variant A gains 2 and admits answers and meaning reversals.
+- Several "wording" checks are really integrity checks, so keep them: no added symbols, a cue dropped while both versions are kept, and the list count.
+
+What would help is making the meaning checks aware of corrections, in Professional only. This would recover up to 10 of the 12 remaining rejections. Each change must keep the adversarial count at 0.
+1. **Don't count a cue's "no" as a negation.** The prototype above shows this is safe.
+2. **Let an explicit cue ("no I mean", "wait no I meant", "let me start again") with a repair after it mark the whole replaced clause as droppable**, back to the previous sentence start, comma or "so/and/but". Droppable includes its numbers, names and negations. The output must still contain nothing that is not in the raw text after the cue, and must not keep both versions.
+3. **Accept a screen-context name only when it respells a raw word spelled at least half like it.** This reuses the dictionary-term machinery and keeps context from ever adding a new name.
+
 ## Unsolved
 
 - **A restarted sentence with no cue**, such as "The office was finished. The office was designed to…". Case 13 scores keeping both sentences as correct, because dropping the first can lose an independent fact ("The car is red. The car is parked outside."). A deterministic pre-pass would collide with "The project is late. The project is also over budget." It remains a model-only behaviour, and `gpt-oss-120b` keeps both.
