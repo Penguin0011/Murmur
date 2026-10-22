@@ -513,6 +513,7 @@ enum SettingsSearch {
         .init("Format spoken lists", 2, "numbered bullets cleanup"),
         .init("Fix punctuation and capitalization", 2, "commas periods capitals cleanup"),
         .init("Spoken commands and numbers", 2, "email paragraph digits symbols cleanup"),
+        .init("Trust AI rewrites", 2, "accept model guard checks polish rewrite cleanup"),
         .init("Use screen context", 2, "clipboard selected text privacy cleanup"),
         .init("Writing modes", 3, "apps websites trigger words custom instructions tone", target: "top"),
         .init("Dictionary", 4, "vocabulary preferred spelling aliases words", target: "top"),

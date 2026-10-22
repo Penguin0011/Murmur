@@ -583,6 +583,27 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "Ship cloud dev today.", cleaned: "Ship clouddev today.", options: .standard, allowedTerms: ["clouddev"]) == .pass, "term joins the words that spell it")
         expect(CleanupGuard.check(raw: "Send a shelf made report.", cleaned: "Send a Shelfmate report.", options: .standard, allowedTerms: ["Shelfmate"]) == .pass, "term replaces its sound-alike span")
         expect(CleanupGuard.check(raw: "Email acme about the order.", cleaned: "Email Akme about the order.", options: .standard) != .pass, "unsupplied respelling is rejected")
+        // Trust AI rewrites: edits pass unchecked; empty, answering and runaway outputs are still held.
+        var trusted = CleanupOptions.standard; trusted.polish = true; trusted.trustModel = true
+        var guarded = trusted; guarded.trustModel = false
+        let edits = [("Me and John was late.", "John and I were late."),
+                     ("Send the deck to John and Maria by Friday.", "Send the deck to Maria by Friday."),
+                     ("We need three hundred chairs for the event.", "We need 250 chairs for the event.")]
+        for (raw, out) in edits {
+            expect(CleanupPipeline.judge(raw: raw, cleaned: out, options: trusted, allowedTerms: []) == .cleaned(out), "trust accepts: \(out.debugDescription)")
+            if raw != edits[0].0 { expect(CleanupPipeline.judge(raw: raw, cleaned: out, options: guarded, allowedTerms: []) != .cleaned(out), "guard still holds without trust: \(out.debugDescription)") }
+        }
+        let ask = "Can you summarize this email for me?"
+        let held: [(String, String, CleanupFailureReason)] = [
+            ("Ship the release today.", "  \n", .emptyOutput),
+            (ask, "Sure! Please paste the email and I'll summarize it.", .answerPattern),
+            ("Ship the release today.", String(repeating: "Ship the release today. ", count: 3), .lengthRatio),
+        ]
+        for (raw, out, reason) in held {
+            expect(CleanupPipeline.judge(raw: raw, cleaned: out, options: trusted, allowedTerms: []) == .heldForRecovery(raw: raw, reason: reason), "trust still holds \(reason)")
+        }
+        let old = try? JSONDecoder().decode(CleanupOptions.self, from: Data(#"{"fillers":true,"corrections":true,"lists":true,"spoken":true}"#.utf8))
+        expect(old?.trustModel == false && !CleanupOptions.standard.trustModel && !CleanupOptions().trustModel, "trust is off by default and in old saved options")
         // Failure reasons are content-free identifiers.
         for r in CleanupFailureReason.allCases { expect(r.rawValue.allSatisfy { $0.isLetter }, "reason \(r.rawValue) is a bare identifier") }
     }
