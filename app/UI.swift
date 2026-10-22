@@ -770,18 +770,18 @@ struct SettingsView: View {
                 segmented(controller.cleanupChoice == .localRules
                           ? [(-1, "Faithful"), (0, "Strict")]
                           : [(-1, "Faithful"), (0, "Strict"), (1, "Polish"), (2, "Professional")], cleanupStyle, size: 14)
-                SettingInfoButton(text: "Faithful turns all cleanup off and keeps your dictated wording. Dictionary spelling corrections still apply. The raw transcript stays in History.")
+                SettingInfoButton(text: "Faithful keeps your words as dictated.\nStrict removes fillers and applies clear spoken corrections.\nPolish also resolves backtracks and small grammar slips, keeping your voice.\nProfessional rewrites into clear writing of what you meant.")
                     .accessibilityLabel("About Faithful")
             }.padding(.top, 8)
             help(cleanupStyle.wrappedValue == -1
-                 ? "Your dictated wording, with cleanup off."
+                 ? "Keeps the words as dictated, apart from dictionary spellings: “Um, let’s meet Tuesday, no I mean Thursday, at the cafe.”"
                  : controller.cleanupChoice == .localRules
-                 ? "Local rules use Strict. Choose an AI cleanup route above to enable Polish or Professional."
+                 ? "Local rules use Strict: “Let’s meet Thursday at the cafe.” Choose an AI cleanup route above to enable Polish or Professional."
                  : controller.cleanupProfessional
-                 ? "Rewrites into clear, professional writing, resolving enabled spoken corrections and preserving your final intent."
+                 ? "Rewrites into clear, professional writing of what you meant: “Let’s meet on Thursday at the café.” Names, numbers and “not” stay."
                  : controller.cleanupPolish
-                 ? "Keeps your voice while fixing grammar, fillers and enabled spoken corrections."
-                 : "Keeps your wording except for the enabled edits, including clear spoken corrections.")
+                 ? "Also resolves backtracks and false starts, and fixes small grammar slips, keeping your voice: “Let’s meet Thursday at the cafe.”"
+                 : "Removes fillers and applies clear spoken corrections, otherwise keeping your wording: “Let’s meet Thursday at the cafe.”")
                 .padding(.top, 8)
             toggleRow("Trust AI rewrites", "Only in Polish and Professional: accept edits without checking names, numbers and wording against what you said. This can change meaning.", isOn: $controller.cleanupTrustModel)
                 .padding(.top, 12).disabled(controller.cleanupChoice == .localRules || cleanupStyle.wrappedValue < 1)
