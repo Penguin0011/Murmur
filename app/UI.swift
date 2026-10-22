@@ -774,7 +774,7 @@ struct SettingsView: View {
                     .accessibilityLabel("About Faithful")
             }.padding(.top, 8)
             help(cleanupStyle.wrappedValue == -1
-                 ? "Keeps the words as dictated, apart from dictionary spellings: “Um, let’s meet Tuesday, no I mean Thursday, at the cafe.”"
+                 ? "Keeps the words as dictated, apart from dictionary spellings: “Um, let’s meet Tuesday, no, I mean, Thursday, at the cafe.”"
                  : controller.cleanupChoice == .localRules
                  ? "Local rules use Strict: “Let’s meet Thursday at the cafe.” Choose an AI cleanup route above to enable Polish or Professional."
                  : controller.cleanupProfessional
