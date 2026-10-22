@@ -405,6 +405,18 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "Priya has not approved the 42 dollar budget", cleaned: "Priya has not approved the 42-dollar budget.", options: spokenProfessional) == .pass, "professional accepts a hyphenated number")
         expect(CleanupGuard.check(raw: "Priya has not approved the 42 dollar budget", cleaned: "Priya has not approved the 24-dollar budget.", options: spokenProfessional) != .pass, "a hyphenated number keeps its value")
         expect(RuleCleaner.spokenCommands("up 12 percent") == "up 12%", "digits before percent become N%")
+        // Professional lists unannounced ordinals (the user's decision, October 22, 2026); Polish and Strict keep them prose,
+        // and ordinals that modify a noun stay prose everywhere.
+        let listPolish = CleanupOptions(punctuation: true, polish: true, spoken: true), listStrict = CleanupOptions(punctuation: true, spoken: true)
+        for (raw, out) in [("First we went to the store, second we cooked dinner.", "1. We went to the store\n2. We cooked dinner"),
+                           ("first let's review test A and B secondly let's review test C and D", "1. Let's review test A and B.\n2. Let's review test C and D."),
+                           ("first call the bank secondly email Dana", "1. Call the bank\n2. Email Dana")] {
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: spokenProfessional) == .pass, "professional lists unannounced ordinals: \(raw)")
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: listPolish) != .pass, "polish keeps unannounced ordinals prose: \(raw)")
+            expect(CleanupGuard.check(raw: raw, cleaned: out, options: listStrict) != .pass, "strict keeps unannounced ordinals prose: \(raw)")
+        }
+        expect(CleanupGuard.check(raw: "first we went home and then the first one was gone", cleaned: "1. We went home\n2. The one was gone", options: spokenProfessional) != .pass, "a determiner's ordinal is not a marker")
+        expect(CleanupGuard.check(raw: "First floor is open and second floor is closed", cleaned: "1. Floor is open\n2. Floor is closed", options: spokenProfessional) != .pass, "ordinal adjectives stay prose in professional")
         // Short grammar fixes pass as their long forms do; the lean option sets leave only the polish floor
         // to absorb them. Polish refuses the reordering ("I" is an inserted word); professional accepts it.
         let leanPolish = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true, polish: true)
@@ -859,7 +871,6 @@ struct EchoAsyncCleaner: AsyncCleaner {
             .init(label: "lone ordinal made a list", raw: "First, preheat the oven to 350.", output: "1. Preheat the oven to 350.", options: all),
             .init(label: "lone ordinal made a list, words kept", raw: "First, preheat the oven to 350.", output: "1. First, preheat the oven to 350.", options: all),
             .init(label: "sequence prose made a list", raw: "First, preheat the oven, then mix the batter, then bake it.", output: "1. Preheat the oven\n2. Mix the batter\n3. Bake it", options: all),
-            .init(label: "unannounced ordinals made a list", raw: "First we went to the store, second we cooked dinner.", output: "1. We went to the store\n2. We cooked dinner", options: all),
             .init(label: "ordinal phrases made a list", raw: "Remember: first impressions matter, second chances are rare.", output: "Remember:\n1. Impressions matter\n2. Chances are rare", options: all),
             .init(label: "list longer than the enumeration", raw: "Shopping list: first apples, second milk and bread.", output: "Shopping list:\n1. Apples\n2. Milk\n3. Bread", options: all),
             .init(label: "reorders names", raw: "Alice paid Bob back yesterday.", output: "Bob paid Alice back yesterday.", options: all),

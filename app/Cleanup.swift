@@ -920,21 +920,28 @@ enum CleanupGuard {
         }
         // A marker counts inside a counted sequence ("first ... second") that starts at an announced first
         // marker, so "First, preheat the oven" and "Step one was easy; step two took all night" stay prose.
-        // Professional's prompt also lists spoken markers without an announcement, so they need only the sequence.
-        // Its prompt also allows unannounced ordinals; the guard does not, so prose such as "First we went home,
-        // second we ate" stays prose there too.
+        // Professional's prompt also lists spoken markers and ordinals without an announcement, so they need only
+        // the sequence ("First we went home, second we ate"); Polish and Strict keep that prose.
         func inSequence(_ i: Int, _ marker: (Int) -> Int?, markerWords: Int, announce: Bool) -> Bool {
             guard let n = marker(i) else { return false }
             let values = a.indices.compactMap(marker)
             guard values.contains(n + 1) || values.contains(n - 1) else { return false }
             return !announce || (0...i).contains { marker($0) == 1 && announced($0 - markerWords) }
         }
+        // An ordinal modifying a noun is prose even in Professional: after a determiner ("the first"), or before
+        // the same word as another ordinal ("first floor ... second floor"), unless that word is a subject ("first we").
+        // ponytail: a heuristic; an unannounced "first X ... second Y" with distinct nouns can still pass as a list.
+        func adjectival(_ i: Int) -> Bool {
+            if i > 0, ["the", "a", "an", "my", "our", "your", "his", "her", "their", "its", "this", "that"].contains(a[i - 1]) { return true }
+            guard i + 1 < a.count, !rawWords[i].commaAfter, !["i", "we", "you", "he", "she", "they", "it", "let's", "lets"].contains(a[i + 1]) else { return false }
+            return a.indices.contains { $0 != i && $0 + 1 < a.count && CleanupText.ordinals[a[$0]] != nil && a[$0 + 1] == a[i + 1] }
+        }
         // Enumeration words a list may replace with "N." markers: ordinals, "number/step/item"
         // plus a cardinal, and an "and"/"then" joining the next marker.
         func isMarkerWord(_ i: Int) -> Bool {
             guard options.lists && hasListMarkers else { return false }
             let w = a[i]
-            if CleanupText.ordinals[w] != nil { return inSequence(i, ordinalMarker, markerWords: 0, announce: true) }
+            if CleanupText.ordinals[w] != nil { return inSequence(i, ordinalMarker, markerWords: 0, announce: !options.professional || adjectival(i)) }
             if spokenMarker(i) != nil { return inSequence(i, spokenMarker, markerWords: 1, announce: !options.professional) }
             if ["number", "step", "item"].contains(w), i + 1 < a.count, spokenMarker(i + 1) != nil { return isMarkerWord(i + 1) }
             if w == "and" || w == "then", i + 1 < a.count, isMarkerWord(i + 1) { return true }
