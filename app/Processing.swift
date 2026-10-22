@@ -247,6 +247,15 @@ final class ProcessingCoordinator {
     private(set) var lastRejectedOutput: String?
     /// Which path supplied the last dictation's text. Main thread.
     private(set) var lastOutcome: CleanupPath?
+    /// Diagnostics for the last dictation's History entry (October 22, 2026). Main thread.
+    /// The model's output where the guard accepted it, the guard's verdict per section, the prompt's
+    /// hash, the dictionary terms sent, and the text cleanup received when the dictionary changed it.
+    private(set) var lastModelOutput: String?
+    private(set) var lastGuardVerdict: String?
+    private(set) var lastPromptHash: String?
+    private(set) var lastTerms: [String] = []
+    private(set) var lastCleanupInput: String?
+    private func resetDiagnostics() { lastModelOutput = nil; lastGuardVerdict = nil; lastPromptHash = nil; lastTerms = []; lastCleanupInput = nil }
     /// What the punctuation transfer is guarded as: sentence punctuation and capitals, no word changes.
     static let punctuationOnly = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true)
 
@@ -308,9 +317,10 @@ final class ProcessingCoordinator {
     /// `style` carries a writing mode's overrides; nil uses the settings. Screen context and custom
     /// instructions are never used here: local rules send nothing and take no instructions.
     func process(_ raw: String, style: DictationStyle? = nil) -> ProcessingOutcome {
-        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil; lastOutcome = nil
+        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil; lastOutcome = nil; resetDiagnostics()
         let style = style ?? DictationStyle(mode: nil, settings: settings)
         let prepared = prepare(raw)
+        lastTerms = prepared.terms; lastCleanupInput = prepared.text == raw ? nil : prepared.text
         if settings.route == .cloud && style.options.anyEnabled { lastFallback = .cleanerFailed }
         lastOutcome = !style.options.anyEnabled ? .off : settings.route == .cloud ? .localRules : .localRoute
         return .insert(toned(localClean(prepared.text, terms: prepared.terms, options: style.options), input: prepared.text, style: style))
@@ -327,11 +337,12 @@ final class ProcessingCoordinator {
     /// Full path including the cloud route. Always inserts: see the failure policy above.
     /// Main actor: the dictionary is read on the main thread; only the provider calls run elsewhere.
     @MainActor func processAsync(_ raw: String, style: DictationStyle? = nil) async -> ProcessingOutcome {
-        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil; lastOutcome = nil
+        lastProviderError = nil; lastFallback = nil; lastRejectedOutput = nil; lastOutcome = nil; resetDiagnostics()
         guard settings.route == .cloud else { return process(raw, style: style) }
         let style = style ?? DictationStyle(mode: nil, settings: settings)
         let prepared = prepare(raw)
         let options = style.options, terms = prepared.terms
+        lastTerms = terms; lastCleanupInput = prepared.text == raw ? nil : prepared.text
         var context = style.context, instructions = style.instructions
         // ponytail: fixed caps keep prompt + a 400-word section inside Apple's ~4K-token window; size by token count if it still overflows.
         if cloudCleaner?.id == .appleIntelligence, var c = context {
@@ -359,12 +370,33 @@ final class ProcessingCoordinator {
         for (section, attempt) in zip(sections, results) {
             if let reason = attempt.reason { lastFallback = lastFallback ?? reason }
             if let error = attempt.error { lastProviderError = lastProviderError ?? error }
-            // A rejected output may echo screen context, so it is not kept for History when context was sent.
+            // A rejected output was never pasted and may echo screen context, so it is not kept for History when
+            // context was sent. An accepted output is what was pasted (before tone and spacing), so keeping it
+            // stores nothing History does not already hold, and it is the model's exact output.
             if context == nil, let rejected = attempt.rejected { lastRejectedOutput = (lastRejectedOutput.map { $0 + "\n\n" } ?? "") + rejected }
+            if let accepted = attempt.accepted { lastModelOutput = (lastModelOutput.map { $0 + "\n\n" } ?? "") + accepted }
+            lastPromptHash = lastPromptHash ?? attempt.promptHash
             let text = attempt.text ?? localClean(section, terms: terms, options: options)
             if !text.isEmpty { parts.append(text) }
         }
+        var verdicts: [String] = []
+        for attempt in results where !verdicts.contains(attempt.verdict) { verdicts.append(attempt.verdict) }
+        lastGuardVerdict = verdicts.joined(separator: ",")
         return .insert(toned(parts.joined(separator: " "), input: prepared.text, style: style))
+    }
+
+    /// A short, stable name for a system prompt: the template without the per-call tag nonce and without the
+    /// style notes, screen-context note and dictionary terms appended after it, so a changed template is the
+    /// only thing that changes the hash. FNV-1a, 8 hex digits.
+    static func promptHash(_ system: String) -> String {
+        var base = system
+        for marker in ["\n\nThe user's style notes", "\n\nThe user message may start with reference text", "\n\nPreferred spellings from"] {
+            if let range = base.range(of: marker) { base = String(base[..<range.lowerBound]) }
+        }
+        base = base.replacingOccurrences(of: #"-[0-9A-Fa-f]{32}"#, with: "-N", options: .regularExpression)
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in base.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100000001b3 }
+        return String(format: "%016llx", hash).prefix(8).description
     }
 
     /// One section's cloud result. Nil `text` means use local rules; `reason` is why the full
@@ -374,6 +406,11 @@ final class ProcessingCoordinator {
         var reason: CleanupFailureReason?
         var error: ProviderError?
         var rejected: String? = nil
+        /// The model's output the guard accepted, as returned.
+        var accepted: String? = nil
+        /// "cleaned", "unchanged", "rejected" or "provider-error".
+        var verdict = "provider-error"
+        var promptHash: String? = nil
     }
 
     /// One provider call, no retry (a rate limit or an outage would only fail again). If the guard
@@ -382,11 +419,14 @@ final class ProcessingCoordinator {
     private static func cloudClean(_ section: String, provider: CleanupProvider, options: CleanupOptions, terms: [String],
                                    context: ScreenContext? = nil, instructions: String = "") async -> CloudAttempt {
         let output: String
-        do { output = try await provider.cleanup(CleanupPrompt.build(transcript: section, options: options, dictionaryTerms: terms, context: context, instructions: instructions)) }
-        catch { return CloudAttempt(text: nil, reason: .cleanerFailed, error: error as? ProviderError) }
+        let messages = CleanupPrompt.build(transcript: section, options: options, dictionaryTerms: terms, context: context, instructions: instructions)
+        let hash = promptHash(messages.system)
+        do { output = try await provider.cleanup(messages) }
+        catch { return CloudAttempt(text: nil, reason: .cleanerFailed, error: error as? ProviderError, promptHash: hash) }
         let reason: CleanupFailureReason
         switch CleanupPipeline.judge(raw: section, cleaned: output, options: options, allowedTerms: terms, soundsLike: DictionaryStore.soundsLike) {
-        case .cleaned(let text), .unchanged(let text): return CloudAttempt(text: text, reason: nil, error: nil)
+        case .cleaned(let text): return CloudAttempt(text: text, reason: nil, error: nil, accepted: output, verdict: "cleaned", promptHash: hash)
+        case .unchanged(let text): return CloudAttempt(text: text, reason: nil, error: nil, accepted: output, verdict: "unchanged", promptHash: hash)
         case .heldForRecovery(_, let why): reason = why
         }
         // Transfer punctuation onto the full local cleanup, so rejecting the model's rewrite never
@@ -394,9 +434,9 @@ final class ProcessingCoordinator {
         let fallback = localRules(section, terms: terms, options: options).text
         if options.punctuation, let words = CleanupPipeline.punctuated(raw: fallback, cleaned: output, terms: terms),
            case .cleaned(let text) = CleanupPipeline.judge(raw: fallback, cleaned: words, options: punctuationOnly, allowedTerms: terms) {
-            return CloudAttempt(text: text, reason: reason, error: nil, rejected: output)
+            return CloudAttempt(text: text, reason: reason, error: nil, rejected: output, verdict: "rejected", promptHash: hash)
         }
-        return CloudAttempt(text: nil, reason: reason, error: nil, rejected: output)
+        return CloudAttempt(text: nil, reason: reason, error: nil, rejected: output, verdict: "rejected", promptHash: hash)
     }
 
     // MARK: Learning

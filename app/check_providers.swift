@@ -291,6 +291,11 @@ func checkKeychainStore() {
         check(timed([(" Send the report.", 0, 1), (" Thank you.", 1.2, 1.9)], clicked) == "Send the report.", "a click under the tail is not speech")
         check(timed([(" One.", 0, 0.5), (" Two.", 1.2, 1.4), (" Three.", 0.5, 1)], spokeThenQuiet) == " One. Two. Three.", "a quiet middle segment is kept")
         check(OpenAITranscriptionFormat.loudWindows([0.3, 0.3, 0.002], start: 0, end: 0.25) == 2 && OpenAITranscriptionFormat.loudWindows([0.3], start: 4, end: 5) == 0, "windows under a segment are counted, rounding its end up")
+        // The segments come back with their scores and which were dropped; the text is the same as parse's.
+        let detailed = try? OpenAITranscriptionFormat.parseDetailed(provider: .customAPI, result: result(200, #"{"text": " Send the report. Thank you.", "segments": [{"text": " Send the report.", "no_speech_prob": 0.01, "avg_logprob": -0.2, "compression_ratio": 1.1, "start": 0, "end": 1}, {"text": " Thank you.", "no_speech_prob": 0.1, "avg_logprob": -0.3, "start": 1.2, "end": 1.9}]}"#), levels: spokeThenQuiet)
+        check(detailed?.text == "Send the report." && detailed?.segments?.map { $0.dropped } == [false, true] && detailed?.segments?[0].loudWindows == 10 && detailed?.segments?[1].loudWindows == 0
+              && detailed?.segments?[0].avgLogprob == -0.2 && detailed?.segments?[0].compressionRatio == 1.1 && detailed?.segments?[1].compressionRatio == nil, "segment detail keeps scores, loud windows and the dropped flag")
+        check((try? OpenAITranscriptionFormat.parseDetailed(provider: .customAPI, result: result(200, sttSuccess)))?.segments == nil, "plain json has no segments")
         let partial = #"{"text": " Send it. Thank you.", "segments": [{"text": " Send it.", "start": 0, "end": 1}, {"text": " Thank you.", "no_speech_prob": 0.9, "avg_logprob": -1.5}]}"#
         check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, partial))) == " Send it. Thank you.", "segments without confidence fall back to text")
         check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": " Hi.", "segments": "x"}"#))) == " Hi.", "malformed segments fall back to text")
