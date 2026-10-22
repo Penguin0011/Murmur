@@ -1361,6 +1361,9 @@ struct SettingsView: View {
                         Text(entry.finalText.isEmpty ? "No final text saved." : entry.finalText).font(WindowType.body(16)).lineSpacing(3)
                             .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
                     }
+                    if let line = Self.outcomeNote(entry) {
+                        Text(line).font(WindowType.body(13)).foregroundStyle(Palette.ink64).padding(.top, 6)
+                    }
                     if entry.rawText != entry.finalText {
                         eyebrow("Raw transcription").padding(.top, 16)
                         Text(entry.rawText).font(WindowType.body(15)).lineSpacing(3).foregroundStyle(Palette.ink70)
@@ -1422,6 +1425,23 @@ struct SettingsView: View {
         case "held-cleanup": return "Cleanup changed too much, so only the raw transcript was saved and nothing was inserted."
         case "held-transcript": return "The transcript was held for review, so nothing was inserted."
         default: return nil
+        }
+    }
+
+    /// Which path wrote the final text, in one line; nil for entries saved before it was recorded.
+    static func outcomeNote(_ entry: HistoryEntry) -> String? {
+        guard let outcome = entry.cleanupOutcome else { return nil }
+        let kind = entry.cleanupOptions?.professional == true ? "Professional rewrite" : entry.cleanupOptions?.polish == true ? "Polish" : "AI cleanup"
+        let failed = entry.cleanupFallback == nil || entry.cleanupFallback == CleanupFailureReason.cleanerFailed.rawValue
+        // "unexplainedDeletion" -> "unexplained deletion"
+        let why = failed ? "" : " (" + (entry.cleanupFallback ?? "").map { $0.isUppercase ? " " + $0.lowercased() : String($0) }.joined() + ")"
+        let edited = entry.edited == true ? " Edited since." : ""
+        switch outcome {
+        case .off: return "Cleanup off; dictionary only." + edited
+        case .modelAccepted: return "\(kind) applied." + edited
+        case .modelPunctuationOnLocal: return "\(kind) rejected\(why); AI punctuation applied to local cleanup." + edited
+        case .localRules: return "\(kind) \(failed ? "failed" : "rejected")\(why); local cleanup used." + edited
+        case .localRoute: return "Local cleanup on this Mac." + edited
         }
     }
 

@@ -81,6 +81,8 @@ import SwiftUI
             HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "Synthetic transcript pasted into an unreadable field. Long text wraps for visual inspection.\nSecond synthetic paragraph keeps this fixture free of real transcript content.", finalText: "Synthetic transcript pasted into an unreadable field. Long text wraps for visual inspection.\nSecond synthetic paragraph keeps this fixture free of real transcript content.", insertionStatus: "unverified"),
             HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-3600), rawText: "Synthetic verified transcript.", finalText: "Synthetic verified transcript.", insertionStatus: "verified")
         ]
+        entries[0].cleanupOptions = CleanupOptions(professional: true); entries[0].cleanupFallback = CleanupFailureReason.unexplainedDeletion.rawValue
+        entries[0].cleanupOutcome = .localRules
         if CommandLine.arguments.contains("--empty") { entries = [] }
         // Insights (gap #19): timed dictations into a few apps on most of the last 24 days.
         if args.contains("--insights") && !args.contains("--empty") {
