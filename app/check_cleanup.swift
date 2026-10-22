@@ -426,6 +426,21 @@ struct EchoAsyncCleaner: AsyncCleaner {
                 expect(CleanupGuard.check(raw: long(raw), cleaned: long(out), options: o) != .pass, "long grammar fix refuses: \(label)")
             }
         }
+        // A restarted sentence may go in Polish and Professional, never in Strict or Faithful.
+        let restart = "Shaker settlements were organized. Shaker settlements were built to be self-sufficient communities."
+        let restated = "Shaker settlements were built to be self-sufficient communities."
+        for o in [polish, professional] { expect(CleanupGuard.check(raw: restart, cleaned: restated, options: o) == .pass, "restarted sentence drops in polish modes") }
+        for o in [CleanupOptions.standard, CleanupOptions.faithful] { expect(CleanupGuard.check(raw: restart, cleaned: restated, options: o) != .pass, "restarted sentence kept without polish") }
+        expect(CleanupPrompt.build(transcript: "x", options: polish).system.contains("restarted sentence")
+               && !CleanupPrompt.build(transcript: "x", options: .standard).system.contains("restarted sentence"), "only polish modes ask to drop restarts")
+        for (raw, out, label) in [
+            ("Meet at 5 today. Meet at the office later this afternoon.", "Meet at the office later this afternoon.", "number in the restart"),
+            ("We are not going home. We are going to the store after lunch.", "We are going to the store after lunch.", "negation in the restart"),
+            ("Dogs are great pets. Dogs are loyal pets.", "Dogs are loyal pets.", "parallel sentence of equal length"),
+            ("Sam called. Sam called Priya about the launch plan today.", "Priya called about the launch plan today.", "name not restated"),
+        ] {
+            for o in [polish, professional] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "restart drop refuses: \(label)") }
+        }
         for (out, label) in [
             (rewritten.replacingOccurrences(of: "42", with: "40"), "changed number"),
             (rewritten.replacingOccurrences(of: "John", with: "Jim"), "changed name"),

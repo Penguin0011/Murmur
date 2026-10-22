@@ -856,6 +856,19 @@ enum CleanupGuard {
             }
         }
         func dropAllowed(_ i: Int) -> Bool { window.contains(i) || repeats.contains(i) }
+        // Polish and Professional: a short sentence that the next, longer one restarts with the same two
+        // opening words ("Shaker settlements were organized. Shaker settlements were built to be...") may go
+        // whole. Its numbers and negations stay protected; its names may go only because the restart repeats them.
+        // ponytail: opening words can't tell an abandoned sentence from a parallel one ("The project is late.
+        // The project is also over budget."); the prompt asks the model to keep those, and Strict never drops.
+        var restarts = Set<Int>()
+        if options.corrections && options.polish {
+            let starts = [0] + rawWords.indices.filter { $0 > 0 && rawWords[$0].sentenceStart } + [a.count]
+            for k in starts.indices.dropLast(2) {
+                let s = starts[k], t = starts[k + 1], next = starts[k + 2]
+                if (3...12).contains(t - s), t - s < next - t, a[s..<(s + 2)] == a[t..<(t + 2)] { restarts.formUnion(s..<t) }
+            }
+        }
         // Filler words the fillers option may delete: hesitations anywhere; "like" and "you know"
         // only when set off by commas or sentence-initial (never "I like you", "you know the answer").
         func fillerDeletable(_ i: Int) -> Bool {
@@ -1028,7 +1041,7 @@ enum CleanupGuard {
         var rawNameCounts: [String: Int] = [:], allowedNameDrops: [String: Int] = [:]
         for (i, w) in rawWords.enumerated() where w.isName {
             rawNameCounts[w.lower, default: 0] += 1
-            if dropAllowed(i) { allowedNameDrops[w.lower, default: 0] += 1 }
+            if dropAllowed(i) || restarts.contains(i) { allowedNameDrops[w.lower, default: 0] += 1 }
         }
         for (n, c) in rawNameCounts where outNameCounts[n, default: 0] < c - allowedNameDrops[n, default: 0] {
             if termWords.isEmpty { return .fail(.nameDropped) }
@@ -1122,6 +1135,7 @@ enum CleanupGuard {
         for i in rawWords.indices where !consumedRaw.contains(i) {
             if options.fillers && (fillerDeletable(i) || repeats.contains(i)) { continue }
             if options.corrections && window.contains(i) { continue }
+            if restarts.contains(i) { continue }
             if isMarkerWord(i) { continue }
             unexplained.append(i)
         }
@@ -1270,6 +1284,7 @@ enum CleanupPrompt {
             ops.append("- Apply explicit spoken self-corrections only when the replaced words are unambiguous, e.g. \"Tuesday, sorry, Thursday\" becomes \"Thursday\". An apology such as \"sorry\" on its own is not a correction. If the scope of a correction is unclear, keep the original wording.")
         }
         if options.corrections && options.polish {
+            ops.append("- Remove a restarted sentence: when the speaker starts a sentence, abandons it, and starts again with the same opening words, keep only the second version, even when its wording differs: \"Shaker settlements were organized. Shaker settlements were built to be self-sufficient\" becomes \"Shaker settlements were built to be self-sufficient\". Keep the first sentence when it states its own fact that the second adds to: \"The project is late. The project is also over budget.\" stays.")
             ops.append("- A standalone single-word alternative ending in instead may replace the immediately preceding final word only for one unambiguous weekday, month, time or color slot. Keep generic noun alternatives and multiple possible targets unchanged; never guess which object to replace.")
         }
         if options.punctuation {
