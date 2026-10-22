@@ -504,6 +504,8 @@ final class PreStart: @unchecked Sendable {
     private var sessionContext: ScreenContext?
     private var destinationScreen: NSScreen?
     private var insertThisSession = true
+    // Uptime marks for timing logs only: when the key was released, and when cleanup began.
+    private var finishedAt = 0.0, cleanupStartedAt = 0.0
     private var leadingSpaceThisSession = false
     private var shortcutGeneration = UUID()
     private var listener: ShortcutListener?
@@ -948,6 +950,7 @@ final class PreStart: @unchecked Sendable {
         if action == .start, session.state == .listening { startLiveWords() }
         if session.state != .listening { stopLiveWords() }
         if wasListening, action == .finish || (action == .cancel && listener?.cancelIsExplicit == true) { cue(.stop) }
+        if wasListening, action == .finish { finishedAt = ProcessInfo.processInfo.systemUptime }
         if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
         if action == .cancel {
             destination = nil
@@ -1269,6 +1272,7 @@ final class PreStart: @unchecked Sendable {
     private func transcribeInCloud(_ audio: URL?, held: [Float]?, with provider: TranscriptionProvider, done: @escaping () -> Void) {
         guard let store = records else { setPhase("Error", "Private storage is unavailable. \(audio == nil ? Self.heldDiscarded : "Audio is saved for retry.")"); done(); return }
         let token = generation; let timestamp = listeningStarted
+        let began = ProcessInfo.processInfo.systemUptime
         cloudStage = .transcription; cloudDone = done
         let vocabulary = processing?.dictionary.vocabularyTerms ?? []
         let heldWAV = held.map { WAVAudio.encodePCM16($0, sampleRate: 16_000) }
@@ -1278,6 +1282,7 @@ final class PreStart: @unchecked Sendable {
         }) { [weak self] outcome in
             guard let self, self.generation == token else { return }
             self.cloudStage = nil; self.cloudDone = nil
+            timingLog.notice("cloud-transcribe took=\(ProcessInfo.processInfo.systemUptime - began, format: .fixed(precision: 3)) outcome=\(Self.transcriptionOutcomeName(outcome), privacy: .public)")
             let text: String, held: Bool
             switch outcome {
             case .transcript(let value): text = value; held = false
@@ -1306,6 +1311,7 @@ final class PreStart: @unchecked Sendable {
     /// Dictionary, then cleanup, for a transcript already saved to History. Local rules run here;
     /// any other cleanup route makes one provider call in a cancellable Task (no local fallback).
     private func deliver(_ savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, token: UUID, done: @escaping () -> Void) {
+        cleanupStartedAt = ProcessInfo.processInfo.systemUptime
         // Saved with the next write of this entry; no extra disk write before insertion.
         var savedEntry = savedEntry; savedEntry.seconds = sessionSeconds
         recoveryEntryID = savedEntry.id
@@ -1332,6 +1338,16 @@ final class PreStart: @unchecked Sendable {
         }
         setPhase("Processing", "Cleaning up with \(processing.cloudCleaner?.id.displayName ?? "the cleanup provider")…")
     }
+    /// Content-free outcome name for the timing log.
+    private static func transcriptionOutcomeName(_ outcome: CloudTranscriptionOutcome) -> String {
+        switch outcome {
+        case .transcript: return "transcript"
+        case .heldAnswerSuspected: return "held"
+        case .noSpeech: return "noSpeech"
+        case .failed: return "failed"
+        case .cancelled: return "cancelled"
+        }
+    }
     /// Model identifiers for History; nil where the provider has none (Apple's on-device model).
     private static func modelID(_ provider: Any?) -> String? {
         // Read after the call: a rate limit during this dictation moves Gemini to its fallback model.
@@ -1344,6 +1360,7 @@ final class PreStart: @unchecked Sendable {
     private func complete(_ outcome: ProcessingOutcome, entry savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, done: @escaping () -> Void) {
         var entry = savedEntry
         entry.cleanupOutcome = processing?.lastOutcome
+        timingLog.notice("cleanup took=\(ProcessInfo.processInfo.systemUptime - self.cleanupStartedAt, format: .fixed(precision: 3)) path=\(self.processing?.lastOutcome?.rawValue ?? "none", privacy: .public)")
         entry.cleanupProvider = processing?.settings.route == .local ? "local-rules" : processing?.cloudCleaner?.id.rawValue
         entry.cleanupModel = Self.modelID(processing?.cloudCleaner)
         let text = entry.rawText
@@ -1403,6 +1420,7 @@ final class PreStart: @unchecked Sendable {
                 let insertion = readable ? insertText(entry.finalText, into: target!) : pasteIntoFrontmostApp(entry.finalText)
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 attempted = true
+                timingLog.notice("dictation took=\(ProcessInfo.processInfo.systemUptime - self.finishedAt, format: .fixed(precision: 3))")
                 if let app = target?.bundleID, !app.isEmpty { recentApps = [app] + recentApps.filter { $0 != app }.prefix(9) }
                 lastDictationText = entry.finalText
                 entry.insertionStatus = insertion.status.rawValue
