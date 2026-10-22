@@ -109,14 +109,15 @@ What would help is making the meaning checks aware of corrections, in Profession
 Following the recommendation above, Polish and Professional now understand explicit correction cues. Strict and Faithful do not change.
 
 **What it accepts.**
-- After "no I mean", "no, I mean", "wait no I meant", "actually no" or "let me start again", the guard also judges the output against the transcript with the cue and the clause before it removed (`CleanupGuard.applyExplicitRepairs`).
+- After "no I mean", "no, I mean", "wait no I meant", "actually no", "let me start again" or "scratch that", the guard also judges the output against the transcript with the cue and the clause before it removed (`CleanupGuard.applyExplicitRepairs`).
 - The clause reaches back to the sentence start, a comma or "so/and/but", at most eight words. A leading "hey" or "um" stays.
-- So the clause's numbers, names and negations may go, and the cue's "no" is never counted as a negation. "Scratch that" and comma cues keep their existing handling.
+- So the clause's numbers, names and negations may go, and the cue's "no" is never counted as a negation. Comma cues and most "scratch that" repairs, which are usually shorter than the clause, keep their existing handling.
 - A screen-context spelling passes as a respelling of the raw word (see Screen context).
 
 **What it still refuses.**
 - The output is checked in full against the repaired text, so it cannot add anything the repair did not say, and it cannot keep both versions.
 - The repair must restate one of the clause's content words within its first four words. It must also be at least as long as the clause, so a fragment never replaces a whole clause ("the report is not ready no I mean the slides" → "The slides." is refused).
+- A cue after a question mark is left alone, as "No" there may answer it: "What time is it? No, I mean, what day is it?" → "What day is it?" is still refused. A cue after a period is merged into the sentence first, as before, and passes.
 - Each number or name the clause loses needs one of its kind in the repair. "send 12 boxes wait no I meant send them friday" refines the boxes and does not replace them, so "Send them Friday." is still refused.
 
 **Result**, re-scored offline with `--rescore` on the two saved Professional runs and with the cleanup corpus:
@@ -127,7 +128,7 @@ Following the recommendation above, Polish and Professional now understand expli
 | Correction-aware | **51 / 53** (26 + 25) | **0** at every level |
 
 - All existing "refuses" checks still pass.
-- New `check_cleanup` cases cover each new acceptance. Their must-fail counterparts are: a cue that keeps both versions, a repair that adds a fact, a negation dropped outside the correction, a fragment repair, and a name swapped for an unrelated or half-similar one.
+- New `check_cleanup` cases cover each new acceptance. Their must-fail counterparts are: a cue that keeps both versions, a repair that adds a fact, a negation dropped outside the correction, a fragment repair, and a name swapped for an unrelated or half-similar one, and a capitalized antonym ("include" → "Exclude").
 - The two remaining rejections are Groq's new symbols (above), not corrections.
 - **Limitation:** these are 10 recovered outputs from one run per provider. Polish was checked only with synthetic cases.
 
