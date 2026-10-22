@@ -564,7 +564,7 @@ enum OpenAITranscriptionFormat {
         if object["error"] != nil { throw ProviderErrorClassifier.classify(provider: provider, result: result) }
         guard let text = object["text"] as? String else { throw ProviderError.malformedResponse(provider) }
         guard let raw = object["segments"] as? [[String: Any]] else { return text }
-        var segments: [(text: String, silent: Bool, scores: String)] = []
+        var segments: [(text: String, silent: Bool, scores: String, unsure: Bool)] = []
         for segment in raw {
             guard let words = segment["text"] as? String, let noSpeech = segment["no_speech_prob"] as? Double,
                   let logprob = segment["avg_logprob"] as? Double else { return text }
@@ -576,7 +576,18 @@ enum OpenAITranscriptionFormat {
                 silent = silent || loud < minLoudWindows
                 scores += String(format: " start=%.2f end=%.2f clip=%.2f loud_windows=%d", start, end, Double(levels.count) / 10, loud)
             }
-            segments.append((words, silent, scores))
+            segments.append((words, silent, scores, logprob < logprobThreshold))
+        }
+        if let levels, !levels.isEmpty {
+            let sorted = levels.sorted()
+            logTail(String(format: "clip peaks p50=%.4f p90=%.4f", sorted[sorted.count / 2], sorted[sorted.count * 9 / 10]))
+        }
+        // Groq reports no_speech_prob 0 even for a transcript invented from room noise, but then every
+        // segment is low-confidence. Treated as no speech, the recording stays for a retry.
+        // ponytail: one invented clip (-1.40) against real speech no worse than -0.37; recalibrate from the log.
+        if !segments.isEmpty && segments.allSatisfy(\.unsure) {
+            logTail("all \(segments.count) segments below logprob \(logprobThreshold): no speech")
+            return ""
         }
         // Content-free: scores and times of the trailing segments only, never their words.
         var tail = segments.count - 1

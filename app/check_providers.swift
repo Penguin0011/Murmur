@@ -275,6 +275,9 @@ func checkKeychainStore() {
         check(segmented([(" One.", 0.01, -0.2), (" um", 0.9, -1.5), (" Two.", 0.02, -0.2), (" Thank you.", 0.95, -1.2)]) == "One. um Two.", "only the trailing run is dropped")
         check(segmented([(" Thank you.", 0.9, -1.5), (" Bye.", 0.8, -1.1)]) == "", "all no-speech becomes empty")
         check(segmented([(" Send it.", 0.01, -0.2), (" Thank you.", 0.9, -0.5)]) == " Send it. Thank you.", "high no_speech alone is not enough")
+        check(segmented([(" I'm going to go ahead and get started.", 0, -1.4)]) == "", "a wholly low-confidence transcript is no speech")
+        check(segmented([(" Ship it on Monday.", 0, -0.8)]) == " Ship it on Monday.", "a moderately confident transcript is kept")
+        check(segmented([(" Ship it on Monday.", 0, -0.3), (" And the docs.", 0, -1.4)]) == " Ship it on Monday. And the docs.", "one low-confidence segment alone is kept")
         // With the sent audio's 100 ms peaks: a trailing segment over quiet audio is dropped, whatever the model's confidence.
         func timed(_ segments: [(String, Double, Double)], _ levels: [Float]) -> String? {
             let parts = segments.map { #"{"text": "\#($0.0)", "no_speech_prob": 0.1, "avg_logprob": -0.3, "start": \#($0.1), "end": \#($0.2)}"# }
