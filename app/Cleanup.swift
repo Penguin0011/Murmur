@@ -1067,9 +1067,10 @@ enum CleanupGuard {
                 // Polish and Professional: a name may respell one lowercase raw word in its place ("shreia" ->
                 // "Shreya", as screen context spells it), judged on the transcript alone like a dictionary term,
                 // but closer: similarity 0.7 or `soundsLike`, so "priya" -> "Shreya" and "team" -> "Tim" (0.5) fail.
+                // A capitalized antonym is not a respelling ("include" -> "Exclude").
                 func letters(_ s: String) -> String { String(s.filter(\.isLetter)) }
                 guard options.polish, let i = gap(j).first(where: { x in !consumedRaw.contains(x) && !rawWords[x].isName && !grammarWords.contains(a[x])
-                    && !persons.contains { $0.contains(a[x]) } && CleanupText.numberValue(a[x]) == nil && !CleanupText.isNegation(a[x])
+                    && !persons.contains { $0.contains(a[x]) } && CleanupText.numberValue(a[x]) == nil && !CleanupText.isNegation(a[x]) && !polarityFlip(a[x], w.lower)
                     && (CleanupText.similarity(a[x], w.lower) >= 0.7 || soundsLike(letters(a[x]), letters(w.lower))) }) else { return .fail(.nameAdded) }
                 consumedRaw.insert(i); continue
             }

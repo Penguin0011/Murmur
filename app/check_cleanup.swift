@@ -615,7 +615,6 @@ struct EchoAsyncCleaner: AsyncCleaner {
         // the respelling is screen context's, judged on the transcript alone. Strict keeps refusing them.
         let corrected = "Dana is not coming and the demo is Monday no I mean the demo is Tuesday"
         for (raw, out) in [
-            ("hey that sounds pretty good no I mean that doesn't sound that great to me", "That doesn't sound that great to me."),
             ("hey that sounds pretty good no I mean that doesn't sound that great to me", "Hey, that doesn't sound that great to me."),
             ("um what time is it no I mean what day is it", "What day is it?"),
             ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Do not send Alex 20 dollars."),
@@ -623,9 +622,11 @@ struct EchoAsyncCleaner: AsyncCleaner {
             (corrected, "Dana is not coming and the demo is Tuesday."),
             ("send the notes to shreia before noon", "Send the notes to Shreya before noon."),
         ] {
-            expect(CleanupGuard.check(raw: raw, cleaned: out, options: professional) == .pass, "professional accepts a correction: \(out.prefix(30))")
+            for o in [polish, professional] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) == .pass, "polish modes accept a correction: \(out.prefix(30))") }
             expect(CleanupGuard.check(raw: raw, cleaned: out, options: .standard) != .pass, "strict refuses a correction: \(out.prefix(30))")
         }
+        // Polish keeps the opening "hey"; only Professional drops it.
+        expect(CleanupGuard.check(raw: "hey that sounds pretty good no I mean that doesn't sound that great to me", cleaned: "That doesn't sound that great to me.", options: professional) == .pass, "professional accepts a correction without hey")
         for (raw, out, label) in [
             ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Send Alex 20, do not send Alex 20 dollars.", "a cue keeping both versions"),
             ("Send Alex 20 dollars no I mean do not send Alex 20 dollars", "Do not send Alex 20 dollars on Friday.", "a repair with a new fact"),
@@ -634,6 +635,8 @@ struct EchoAsyncCleaner: AsyncCleaner {
             ("send the notes to shreia before noon", "Send the notes to Priya before noon.", "a name swapped for an unrelated one"),
             ("send the notes to priya before noon", "Send the notes to Shreya before noon.", "a half-similar name"),
             ("send it to the team", "Send it to Tim.", "a word respelled as a name"),
+            ("we should include the budget", "We should Exclude the budget.", "a capitalized antonym"),
+            ("we should increase the budget", "We should Decrease the budget.", "a capitalized antonym"),
         ] { for o in [polish, professional] { expect(CleanupGuard.check(raw: raw, cleaned: out, options: o) != .pass, "polish modes refuse: \(label)") } }
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
