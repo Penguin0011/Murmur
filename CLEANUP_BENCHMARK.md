@@ -6,19 +6,19 @@ This is a synthetic, live measurement of AI cleanup at each level. It uses `app/
 
 On the configured route (Cerebras `gpt-oss-120b`, Professional, screen context on), the production prompt produced the intended text for **26 of 27** cases, at a 0.41 s median model-call latency. Groq's `openai/gpt-oss-120b` scored 27 of 27, but its median was twice as slow. The production prompt stays. Neither the "concise" nor the "intent" variant beat it without losing a must-keep case.
 
-Trust AI rewrites is what makes Professional work. With trust off, the word-level guard still rejects 5 of Cerebras' 26 good outputs and 7 of Groq's 27. That count is after this branch's guard fixes; before them, the guard rejected 8 and 9. Most of what is still rejected are outputs where the guard cannot tell a good result from a bad one by comparing words (see below).
+With trust off ("Protect what I said" on), the word-level guard now rejects 0 of Cerebras' 26 good outputs and 2 of Groq's 27. It rejected 8 and 9 before the ordinal and number fixes, and 5 and 7 before the guard learned spoken corrections (see [Correction-aware guard](#correction-aware-guard)). Groq's 2 are new symbols, not corrections.
 
-| Run | Endpoint / model | Prompt | Level | Context | Cases | Model good | Guard pass, trust off (before → after fixes) | Final good, trust on | Provider errors (unrecovered) | Median / p95 s | Valid |
+| Run | Endpoint / model | Prompt | Level | Context | Cases | Model good | Guard pass, trust off (before fixes → after → correction-aware) | Final good, trust on | Provider errors (unrecovered) | Median / p95 s | Valid |
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|
-| This branch | Cerebras `gpt-oss-120b` | production | Professional | on | 27 | **26** | 18 → 21 | 26 | 2 (0) | **0.41 / 0.74** | yes |
-| This branch | Groq `openai/gpt-oss-120b` | production | Professional | on | 27 | 27 | 18 → 20 | 27 | 2 (0) | 0.80 / 1.38 | yes |
+| This branch | Cerebras `gpt-oss-120b` | production | Professional | on | 27 | **26** | 18 → 21 → **26** | 26 | 2 (0) | **0.41 / 0.74** | yes |
+| This branch | Groq `openai/gpt-oss-120b` | production | Professional | on | 27 | 27 | 18 → 20 → **25** | 27 | 2 (0) | 0.80 / 1.38 | yes |
 | Earlier (Codex) | Cerebras `gpt-oss-120b` | production | Professional | off | 25 | 9 of 9 answered | — | — | 16 (16) | 0.19 / 0.74 | **no**: 64% errors |
 | Earlier (Codex) | Groq `openai/gpt-oss-120b` | production | Professional | on | 27 | 12 of 12 answered | — | — | 15 (15) | 0.13 / 1.42 | **no**: 56% errors |
 | Earlier (Codex) | Groq `openai/gpt-oss-120b` | concise | Professional | on | 26 | 19 | — | 19 | 0 | 0.84 / 1.31 | yes; rejected |
 | Earlier (Codex) | Groq `openai/gpt-oss-120b` | intent | Professional | on | 10 (subset) | 8 | — | 8 | 0 | 0.51 / 1.57 | yes; too small |
 
 - **Model good:** the model's output meets the case's required phrases and avoids its forbidden phrases.
-- **Guard pass:** `CleanupGuard.check` accepts that output with trust off. It was re-scored offline with `--rescore`, before and after the guard fixes on this branch.
+- **Guard pass:** `CleanupGuard.check` accepts that output with trust off. It was re-scored offline with `--rescore` after each round of guard fixes.
 - **Final good:** the text the app would paste, with the user's trust setting on.
 - **Latency:** only successful model calls are counted.
 - **Validity:** a run is invalid when more than 10% of its cases end in an unrecovered provider error. A rate limit that one 60-second retry recovered is counted as an error but is not unrecovered.
@@ -44,21 +44,20 @@ The rejected "concise" variant turned ordinary prose and single sentences into n
 ## Screen context
 
 - **Context changes nothing for unrelated text.** With context on, Cerebras kept "Shreia" when the screen held only unrelated inventory text (case 24). It did not replace "Priya" with an on-screen "Shreya" (case 25). It ignored on-screen instructions to change the date and budget and to output a codeword (case 22).
-- **Context fixes spellings, but only with trust on.** "shreia" became "Shreya" when the screen held "Attendee spelling: Shreya" (case 23).
-  - With trust off, the guard rejects that same output as `nameAdded`.
-  - This is deliberate: the guard judges only against the transcript, so screen text can never widen what it accepts.
+- **Context fixes spellings.** "shreia" became "Shreya" when the screen held "Attendee spelling: Shreya" (case 23).
+  - With trust off, the guard now accepts it as a respelling of the raw word, not because of the screen text.
+  - The guard still judges only against the transcript, so screen text can never widen what it accepts. A name may replace only a lowercase raw word in its place spelled at least 0.7 like it (or `soundsLike` it, as dictionary terms do). "priya" → "Shreya" and "the team" → "Tim" (0.5 each) are refused.
 - **Not yet measured:** context on vs off has not been compared live. Neither have the three new context cases (32–34): a term spelled on screen, about 3,000 characters of unrelated text, and on-screen instructions. Keep context on: the only change measured so far is a correct spelling, and no run copied screen text or followed instructions from it.
 
 ## Trust off: guard false rejections
 
-After the fixes, these are what the guard still rejects among good Professional outputs, across both runs:
+After all fixes, including the [correction-aware guard](#correction-aware-guard), these are what the guard still rejects among good Professional outputs, across both runs:
 
 | Reason | Count | Example | Status |
 |---|---:|---|---|
-| `negationChanged` | 6 | "what time is it no I mean what day is it" → "What day is it?" | The repair drops a whole clause, and the word-level alignment cannot verify that. Counting the cue word "no" as a non-negation alone did not make these pass (they then fail `unexplainedDeletion`), so that change was not kept. |
-| `structureAdded` | 2 | Groq wrote "20 dollars" as "$20" and "42‑dollar" with a U+2011 non-breaking hyphen | The guard does not allow a new symbol. Cerebras did neither. |
-| `numberDropped` | 2 | "Send Alex 20 dollars no I mean do not send Alex 20 dollars" → "Do not send Alex 20 dollars." | Same family as `negationChanged`: the repaired clause repeats the number. |
-| `nameAdded` | 2 | Screen-context spelling (case 23) | By design. |
+| `structureAdded` | 2 | Groq wrote "20 dollars" as "$20" and "42‑dollar" with a U+2011 non-breaking hyphen | The guard does not allow a new symbol. Cerebras did neither. Not a correction case. |
+
+Before the correction-aware guard, it also rejected 6 as `negationChanged`, 2 as `numberDropped` and 2 as `nameAdded`; all 10 now pass.
 
 Fixed on this branch:
 - "12 percent" → "12%": the guard's spoken-number replay now handles digits.
@@ -105,10 +104,37 @@ What would help is making the meaning checks aware of corrections, in Profession
 2. **Let an explicit cue ("no I mean", "wait no I meant", "let me start again") with a repair after it mark the whole replaced clause as droppable**, back to the previous sentence start, comma or "so/and/but". Droppable includes its numbers, names and negations. The output must still contain nothing that is not in the raw text after the cue, and must not keep both versions.
 3. **Accept a screen-context name only when it respells a raw word spelled at least half like it.** This reuses the dictionary-term machinery and keeps context from ever adding a new name.
 
+## Correction-aware guard
+
+Following the recommendation above, Polish and Professional now understand explicit correction cues. Strict and Faithful do not change.
+
+**What it accepts.**
+- After "no I mean", "no, I mean", "wait no I meant", "actually no" or "let me start again", the guard also judges the output against the transcript with the cue and the clause before it removed (`CleanupGuard.applyExplicitRepairs`).
+- The clause reaches back to the sentence start, a comma or "so/and/but", at most eight words. A leading "hey" or "um" stays.
+- So the clause's numbers, names and negations may go, and the cue's "no" is never counted as a negation. "Scratch that" and comma cues keep their existing handling.
+- A screen-context spelling passes as a respelling of the raw word (see Screen context).
+
+**What it still refuses.**
+- The output is checked in full against the repaired text, so it cannot add anything the repair did not say, and it cannot keep both versions.
+- The repair must restate one of the clause's content words within its first four words. It must also be at least as long as the clause, so a fragment never replaces a whole clause ("the report is not ready no I mean the slides" → "The slides." is refused).
+- Each number or name the clause loses needs one of its kind in the repair. "send 12 boxes wait no I meant send them friday" refines the boxes and does not replace them, so "Send them Friday." is still refused.
+
+**Result**, re-scored offline with `--rescore` on the two saved Professional runs and with the cleanup corpus:
+
+| Guard in Professional | Good live outputs accepted (Cerebras + Groq) | Adversarial outputs wrongly accepted |
+|---|---:|---:|
+| Before | 41 / 53 (21 + 20) | 0 |
+| Correction-aware | **51 / 53** (26 + 25) | **0** at every level |
+
+- All existing "refuses" checks still pass.
+- New `check_cleanup` cases cover each new acceptance. Their must-fail counterparts are: a cue that keeps both versions, a repair that adds a fact, a negation dropped outside the correction, a fragment repair, and a name swapped for an unrelated or half-similar one.
+- The two remaining rejections are Groq's new symbols (above), not corrections.
+- **Limitation:** these are 10 recovered outputs from one run per provider. Polish was checked only with synthetic cases.
+
 ## Unsolved
 
 - **A restarted sentence with no cue**, such as "The office was finished. The office was designed to…". Case 13 scores keeping both sentences as correct, because dropping the first can lose an independent fact ("The car is red. The car is parked outside."). A deterministic pre-pass would collide with "The project is late. The project is also over budget." It remains a model-only behaviour, and `gpt-oss-120b` keeps both.
-- **Meaning-changing repairs with trust off** ("what time is it no I mean what day is it") still fall back: the word-level guard cannot verify a dropped clause. Trust AI rewrites is the supported path for them.
+- **Repairs the guard cannot place.** A cue-less repair, a repair shorter than the clause it replaces, or a clause over eight words with no comma or join still falls back with trust off. Trust AI rewrites is the supported path for them.
 - **Polish and Strict**, other models, reasoning effort, and context on vs off still need live runs. Each newly compiled benchmark binary asks for Keychain access to the provider key, and the user was away to approve it.
 
 ## Pending live runs
