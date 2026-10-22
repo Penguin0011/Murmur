@@ -399,6 +399,12 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupGuard.check(raw: "First we went home and second we slept", cleaned: "1. We went home.\n2. We slept.", options: CleanupOptions(punctuation: true, polish: true, spoken: true)) != .pass, "polish keeps unannounced ordinals prose")
         expect(CleanupGuard.check(raw: "Send Alex 20 dollars", cleaned: "Do not send Alex 20 dollars.", options: spokenProfessional) != .pass, "professional never adds a negation")
         expect(CleanupGuard.check(raw: "the report is not ready no I mean the slides", cleaned: "The report is ready, I mean the slides.", options: spokenProfessional) != .pass, "professional never drops a real negation beside a cue")
+        // Digits before "percent" become N% as the prompt asks, and "42 dollar" may be hyphenated; values never change.
+        expect(CleanupGuard.check(raw: "Revenue is up 12 percent and churn is down.", cleaned: "Revenue is up 12% and churn is down.", options: spokenProfessional) == .pass, "professional accepts 12 percent as 12%")
+        expect(CleanupGuard.check(raw: "Revenue is up 12 percent and churn is down.", cleaned: "Revenue is up 13% and churn is down.", options: spokenProfessional) != .pass, "percent keeps its value")
+        expect(CleanupGuard.check(raw: "Priya has not approved the 42 dollar budget", cleaned: "Priya has not approved the 42-dollar budget.", options: spokenProfessional) == .pass, "professional accepts a hyphenated number")
+        expect(CleanupGuard.check(raw: "Priya has not approved the 42 dollar budget", cleaned: "Priya has not approved the 24-dollar budget.", options: spokenProfessional) != .pass, "a hyphenated number keeps its value")
+        expect(RuleCleaner.spokenCommands("up 12 percent") == "up 12%", "digits before percent become N%")
         // Short grammar fixes pass as their long forms do; the lean option sets leave only the polish floor
         // to absorb them. Polish refuses the reordering ("I" is an inserted word); professional accepts it.
         let leanPolish = CleanupOptions(fillers: false, corrections: false, lists: false, punctuation: true, polish: true)

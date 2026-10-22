@@ -492,7 +492,14 @@ enum CleanupGuard {
                 }
                 // "250,000", "2,50,000" and "250000" are the same word.
                 let lower = t.lower.first?.isNumber == true && t.lower.allSatisfy({ $0.isNumber || $0 == "," || $0 == "." }) ? t.lower.replacingOccurrences(of: ",", with: "") : t.lower
-                out.append(Word(text: t.text, lower: lower, sentenceStart: start, commaBefore: commaPending))
+                // "42-dollar" is the two spoken words "42 dollar".
+                let parts = lower.split(separator: "-", maxSplits: 1).map(String.init)
+                if parts.count == 2, parts[0].allSatisfy(\.isNumber), parts[1].first?.isLetter == true {
+                    out.append(Word(text: parts[0], lower: parts[0], sentenceStart: start, commaBefore: commaPending))
+                    out.append(Word(text: String(t.text.dropFirst(parts[0].count + 1)), lower: parts[1], sentenceStart: false, commaBefore: false))
+                } else {
+                    out.append(Word(text: t.text, lower: lower, sentenceStart: start, commaBefore: commaPending))
+                }
                 start = false; lineStart = false; commaPending = false
             } else if t.kind == .punct {
                 if t.isComma || t.isDash {
@@ -2155,6 +2162,11 @@ extension RuleCleaner {
                let p = word(i - 2), !CleanupGuard.grammarWords.contains(p), out.last?.kind == .space {
                 out.removeLast(); out += [CleanupToken(kind: .punct, text: "."), t[n]]
                 changed = true; i = n + 1; continue
+            }
+            // Digits before "percent" too, as the prompt asks: "12 percent" -> "12%".
+            if w.allSatisfy(\.isNumber), let p = after(i), word(p) == "percent" {
+                emit(CleanupToken(kind: .word, text: tok.text + "%"))
+                changed = true; i = p + 1; continue
             }
             // Numbers: with hundred or a scale word, or before "percent". "give me five minutes",
             // "a hundred times", ordinals, years in pairs and digit strings stay words.
