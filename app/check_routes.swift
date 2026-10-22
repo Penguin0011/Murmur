@@ -262,6 +262,7 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         let prepared = CloudAudio.prepare(pcm)
         check(prepared.payload.data.count == 44 + 16_000 * 2 && prepared.payload.mimeType == "audio/wav", "downsampled to 16 kHz mono PCM16")
         check(abs((prepared.peak ?? 0) - 0.5) < 0.01 && abs((prepared.duration ?? 0) - 1) < 0.001, "peak and duration")
+        check(prepared.payload.levels?.count == 10 && prepared.payload.levels!.allSatisfy { abs($0 - 0.5) < 0.01 }, "one peak per 100 ms of the audio sent")
         let stereo = floatStereoWAV(tone(seconds: 0.5, amplitude: 0.8, rate: 44_100), [Float](repeating: 0, count: 22_050), rate: 44_100)
         let floatDecoded = WAVAudio.decode(stereo)
         check(floatDecoded?.samples.count == 22_050 && abs((floatDecoded?.samples.map { abs($0) }.max() ?? 0) - 0.4) < 0.01, "float32 extensible stereo is averaged to mono")
@@ -316,6 +317,8 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         let whisper = SpyTranscriber(.success("  "))
         await checkA(await CloudTranscription.run(provider: whisper, audioData: silence) == .noSpeech(skipped: false), "empty transcript is no speech")
         check(whisper.calls == 1, "no pre-check for a transcriber without one")
+        await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success(" .")), audioData: silence) == .noSpeech(skipped: false), "punctuation-only transcript is no speech")
+        await checkA(await CloudTranscription.run(provider: SpyTranscriber(.success(" 42.")), audioData: silence) == .transcript(" 42."), "a spoken number is speech")
 
         // Vocabulary alone cannot distinguish speech from a prompt echo. Preserve provider text,
         // including names, lists and literal discussion of vocabulary, on every cloud route.

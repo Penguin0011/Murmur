@@ -384,7 +384,8 @@ enum CloudTranscription {
                 text = try await provider.transcribe(prepared.payload)
             }
             if Task.isCancelled { return .cancelled }
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .noSpeech(skipped: false) }
+            // A transcript of only punctuation (" .") is silence too: nothing is pasted.
+            if !text.contains(where: { $0.isLetter || $0.isNumber }) { return .noSpeech(skipped: false) }
             return suspected ? .heldAnswerSuspected(text) : .transcript(text)
         } catch let error as ProviderError {
             if error == .cancelled || Task.isCancelled { return .cancelled }
@@ -426,7 +427,9 @@ enum CloudAudio {
         }
         let rate = decoded.sampleRate > targetRate ? targetRate : decoded.sampleRate
         let samples = trimTrailingSilence(WAVAudio.downsample(decoded.samples, from: decoded.sampleRate, to: targetRate), sampleRate: rate)
-        return Prepared(payload: AudioPayload(data: WAVAudio.encodePCM16(samples, sampleRate: rate)),
+        var payload = AudioPayload(data: WAVAudio.encodePCM16(samples, sampleRate: rate))
+        payload.levels = windowPeaks(samples, sampleRate: rate)
+        return Prepared(payload: payload,
                         peak: min(level(decoded.samples, sampleRate: decoded.sampleRate), 1),
                         duration: Double(decoded.samples.count) / Double(decoded.sampleRate))
     }
@@ -436,11 +439,16 @@ enum CloudAudio {
     /// ponytail: typing or repeated clicks during a silent hold still pass; a per-window energy
     /// measure would catch those but needs calibrating against a real voice.
     static func level(_ samples: [Float], sampleRate: Int) -> Float {
-        let window = max(sampleRate / 10, 1)
-        let peaks = stride(from: 0, to: samples.count, by: window).map { start in
-            samples[start..<min(start + window, samples.count)].reduce(Float(0)) { max($0, $1.isFinite ? abs($1) : 0) }
-        }.sorted(by: >)
+        let peaks = windowPeaks(samples, sampleRate: sampleRate).sorted(by: >)
         return peaks.count > 1 ? peaks[1] : peaks.first ?? 0
+    }
+
+    /// The peak of each 100 ms window, in order.
+    static func windowPeaks(_ samples: [Float], sampleRate: Int) -> [Float] {
+        let window = max(sampleRate / 10, 1)
+        return stride(from: 0, to: samples.count, by: window).map { start in
+            samples[start..<min(start + window, samples.count)].reduce(Float(0)) { max($0, $1.isFinite ? abs($1) : 0) }
+        }
     }
 
     /// Drops the silent tail (below the silence pre-check's level) after the last speech, keeping

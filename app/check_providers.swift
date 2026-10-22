@@ -275,6 +275,19 @@ func checkKeychainStore() {
         check(segmented([(" One.", 0.01, -0.2), (" um", 0.9, -1.5), (" Two.", 0.02, -0.2), (" Thank you.", 0.95, -1.2)]) == "One. um Two.", "only the trailing run is dropped")
         check(segmented([(" Thank you.", 0.9, -1.5), (" Bye.", 0.8, -1.1)]) == "", "all no-speech becomes empty")
         check(segmented([(" Send it.", 0.01, -0.2), (" Thank you.", 0.9, -0.5)]) == " Send it. Thank you.", "high no_speech alone is not enough")
+        // With the sent audio's 100 ms peaks: a trailing segment over quiet audio is dropped, whatever the model's confidence.
+        func timed(_ segments: [(String, Double, Double)], _ levels: [Float]) -> String? {
+            let parts = segments.map { #"{"text": "\#($0.0)", "no_speech_prob": 0.1, "avg_logprob": -0.3, "start": \#($0.1), "end": \#($0.2)}"# }
+            return try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": "\#(segments.map(\.0).joined())", "segments": [\#(parts.joined(separator: ","))]}"#), levels: levels)
+        }
+        let spokeThenQuiet = [Float](repeating: 0.3, count: 10) + [Float](repeating: 0.002, count: 10)
+        check(timed([(" Send the report.", 0, 1), (" Thank you.", 1.2, 1.9)], spokeThenQuiet) == "Send the report.", "confident Thank you. over quiet audio dropped")
+        check(timed([(" Send the report.", 0, 1), (" Thank you.", 1.2, 1.9)], [Float](repeating: 0.3, count: 20)) == " Send the report. Thank you.", "Thank you. over speech kept")
+        check(timed([(" Send the report.", 0, 1), (" Thank you.", 2.5, 3)], spokeThenQuiet) == "Send the report.", "segment past the end of the audio dropped")
+        var clicked = spokeThenQuiet; clicked[15] = 0.6
+        check(timed([(" Send the report.", 0, 1), (" Thank you.", 1.2, 1.9)], clicked) == "Send the report.", "a click under the tail is not speech")
+        check(timed([(" One.", 0, 0.5), (" Two.", 1.2, 1.4), (" Three.", 0.5, 1)], spokeThenQuiet) == " One. Two. Three.", "a quiet middle segment is kept")
+        check(OpenAITranscriptionFormat.loudWindows([0.3, 0.3, 0.002], start: 0, end: 0.25) == 2 && OpenAITranscriptionFormat.loudWindows([0.3], start: 4, end: 5) == 0, "windows under a segment are counted, rounding its end up")
         let partial = #"{"text": " Send it. Thank you.", "segments": [{"text": " Send it.", "start": 0, "end": 1}, {"text": " Thank you.", "no_speech_prob": 0.9, "avg_logprob": -1.5}]}"#
         check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, partial))) == " Send it. Thank you.", "segments without confidence fall back to text")
         check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": " Hi.", "segments": "x"}"#))) == " Hi.", "malformed segments fall back to text")

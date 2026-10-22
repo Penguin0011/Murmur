@@ -1249,7 +1249,7 @@ final class PreStart: @unchecked Sendable {
                   let result = try JSONSerialization.jsonObject(with: Data(last.utf8)) as? [String: Any],
                   let text = result["text"] as? String else { throw CaptureError("No usable transcript") }
             // The model ran and answered, but heard nothing; audio stays until the 24-hour purge.
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw NoSpeech() }
+            guard text.contains(where: { $0.isLetter || $0.isNumber }) else { throw NoSpeech() }
             let savedEntry = HistoryEntry(id: UUID().uuidString, recordedAt: timestamp, rawText: text, finalText: text, insertionStatus: "saved-not-inserted")
             try store.save(savedEntry)
             if let audio { try? FileManager.default.removeItem(at: audio) }
