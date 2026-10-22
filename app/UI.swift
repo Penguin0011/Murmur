@@ -783,8 +783,10 @@ struct SettingsView: View {
                  ? "Also resolves backtracks and false starts, and fixes small grammar slips, keeping your voice: “Let’s meet Thursday at the cafe.”"
                  : "Removes fillers and applies clear spoken corrections, otherwise keeping your wording: “Let’s meet Thursday at the cafe.”")
                 .padding(.top, 8)
-            toggleRow("Trust AI rewrites", "Only in Polish and Professional: accept edits without checking names, numbers and wording against what you said. This can change meaning.", isOn: $controller.cleanupTrustModel)
-                .padding(.top, 12).disabled(controller.cleanupChoice == .localRules || cleanupStyle.wrappedValue < 1)
+            if controller.cleanupChoice != .localRules && controller.cleanupPolish {
+                toggleRow("Protect what I said", "Murmur checks each AI edit against your words and keeps your original if a name, number or “not” changes, or if something you said goes missing or something new appears. Turn off to paste the AI’s version as-is.", isOn: Binding(get: { !controller.cleanupTrustModel }, set: { controller.cleanupTrustModel = !$0 }))
+                    .padding(.top, 12)
+            }
         }
     }
 
