@@ -23,7 +23,7 @@ struct CleanupOptions: Codable, Equatable, Hashable, Sendable {
     /// "at the rate", "hashtag", "ten percent", and the explicit "write an email to X saying" layout
     /// (see `RuleCleaner.spokenCommands`).
     var spoken: Bool
-    /// Opt-in: accept the model's edits without `CleanupGuard.check`; `CleanupPipeline.judge` still
+    /// Opt-in for Polish and Professional: accept edits without `CleanupGuard.check`; `CleanupPipeline.judge` still
     /// rejects an empty output, an answer, or a runaway length.
     var trustModel: Bool
 
@@ -1303,7 +1303,6 @@ enum CleanupPrompt {
         }
         if options.professional && !ops.isEmpty {
             ops.append("- Rewrite into clear, correct, professional written English: fix grammar (subject-verb agreement, verb forms, pronoun case and order, e.g. \"me and John was\" becomes \"John and I were\", \"he don't\" becomes \"he doesn't\"), fix words speech recognition misheard, and smooth awkward or run-on phrasing. Keep the speaker's meaning and first-person voice; do not add content or make it longer.")
-            ops.append("Example: \"um so me and Sarah is meeting at 3 actually no I meant we are meeting at 4 and we need item one the slides item two the budget\" becomes \"Sarah and I are meeting at 4, and we need:\\n1. The slides\\n2. The budget\"")
         } else if options.polish && !ops.isEmpty {
             ops.append("- Fix obvious grammar slips and words speech recognition clearly misheard, changing as few words as possible (\"it go faster\" becomes \"it goes faster\").")
         }
@@ -1473,7 +1472,7 @@ enum CleanupPipeline {
            (try? RuleCleaner().clean(raw, options: CleanupOptions(fillers: true, corrections: false, lists: false)))?
                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { return .cleaned("") }
         // Trusted: only a malfunction is held, not an edit.
-        if options.trustModel {
+        if options.trustModel && (options.polish || options.professional) {
             let reason: CleanupFailureReason? = CleanupGuard.words(output).isEmpty ? .emptyOutput
                 : CleanupGuard.answers(raw: raw, cleaned: output) ? .answerPattern
                 : Double(output.count) > Double(raw.count) * 2 + 10 ? .lengthRatio : nil

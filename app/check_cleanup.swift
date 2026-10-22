@@ -591,6 +591,9 @@ struct EchoAsyncCleaner: AsyncCleaner {
         let professionalPrompt = CleanupPrompt.build(transcript: "x", options: professional, nonce: "n").system
         expect(professionalPrompt.contains("professional") && professionalPrompt.contains("item one") && !professionalPrompt.contains("change tone"), "professional prompt")
         expect(!CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system.contains("professional"), "polish prompt unchanged")
+        for options in [CleanupOptions(corrections: false, professional: true), CleanupOptions(lists: false, professional: true)] {
+            expect(!CleanupPrompt.build(transcript: "x", options: options, nonce: "n").system.contains("Sarah and I are meeting at 4"), "professional omits the combined example when an operation is off")
+        }
         // Polish asks for these edits; strict's prompt is unchanged.
         let polishPrompt = CleanupPrompt.build(transcript: "x", options: polish, nonce: "n").system
         expect(polishPrompt.contains("false starts") && polishPrompt.contains("grammar slips") && !polishPrompt.contains("respell words"), "polish prompt")
@@ -640,6 +643,11 @@ struct EchoAsyncCleaner: AsyncCleaner {
             expect(CleanupPipeline.judge(raw: raw, cleaned: out, options: trusted, allowedTerms: []) == .cleaned(out), "trust accepts: \(out.debugDescription)")
             if raw != edits[0].0 { expect(CleanupPipeline.judge(raw: raw, cleaned: out, options: guarded, allowedTerms: []) != .cleaned(out), "guard still holds without trust: \(out.debugDescription)") }
         }
+        for options in [CleanupOptions(trustModel: true), CleanupOptions(fillers: false, corrections: false, lists: false, trustModel: true)] {
+            expect(CleanupPipeline.judge(raw: "Send the deck to John and Maria by Friday.", cleaned: "Send the deck to Maria by Friday.", options: options, allowedTerms: []) != .cleaned("Send the deck to Maria by Friday."), "Strict and Faithful cannot bypass word checks with trust")
+        }
+        let trustedProfessional = CleanupOptions(professional: true, trustModel: true)
+        expect(CleanupPipeline.judge(raw: "We need three hundred chairs for the event.", cleaned: "We need 250 chairs for the event.", options: trustedProfessional, allowedTerms: []) == .cleaned("We need 250 chairs for the event."), "Professional permits trusted edits")
         let ask = "Can you summarize this email for me?"
         let held: [(String, String, CleanupFailureReason)] = [
             ("Ship the release today.", "  \n", .emptyOutput),
