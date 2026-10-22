@@ -1393,6 +1393,8 @@ final class PreStart: @unchecked Sendable {
     }
     private func complete(_ outcome: ProcessingOutcome, entry savedEntry: HistoryEntry, store: HistoryRouter<HistoryEntry>, done: @escaping () -> Void) {
         var entry = savedEntry
+        // Consumed here for every outcome, so a later retry never measures from an old key release.
+        let released = finishedAt; finishedAt = 0
         entry.cleanupOutcome = processing?.lastOutcome
         entry.timing?.cleanup = ProcessInfo.processInfo.systemUptime - cleanupStartedAt
         if let processing {
@@ -1465,10 +1467,9 @@ final class PreStart: @unchecked Sendable {
                 let inserted = ProcessInfo.processInfo.systemUptime
                 entry.timing?.insertion = inserted - inserting
                 // finishedAt is 0 until a key release is seen (a History retry, Undo); the line would then be uptime.
-                if finishedAt > 0 {
-                    entry.timing?.total = inserted - finishedAt
-                    timingLog.notice("dictation took=\(inserted - self.finishedAt, format: .fixed(precision: 3))")
-                    finishedAt = 0
+                if released > 0 {
+                    entry.timing?.total = inserted - released
+                    timingLog.notice("dictation took=\(inserted - released, format: .fixed(precision: 3))")
                 }
                 if let app = target?.bundleID, !app.isEmpty { recentApps = [app] + recentApps.filter { $0 != app }.prefix(9) }
                 lastDictationText = entry.finalText
@@ -1777,11 +1778,16 @@ final class PreStart: @unchecked Sendable {
         } catch { stopWatching(); try? processing?.ledger.revert(sessionID: session) }
     }
     /// The span as last observed when the window closed, whatever the learning ledger made of it.
+    /// Deferred: the next dictation can end the watch just before its paste, which should not wait on a disk write.
     private func recordAfterPaste(_ w: Watch) {
-        guard !w.entryID.isEmpty, var entry = history.first(where: { $0.id == w.entryID }) else { return }
         let seen = w.observation.edited
-        entry.afterPaste = AfterPaste(text: seen, changed: seen.map { $0 != w.observation.initial }, route: w.route, endReason: w.observation.stopReason)
-        try? records?.save(entry); refreshHistory()
+        let after = AfterPaste(text: seen, changed: seen.map { $0 != w.observation.initial }, route: w.route, endReason: w.observation.stopReason)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !w.entryID.isEmpty, let index = self.history.firstIndex(where: { $0.id == w.entryID }) else { return }
+            var entry = self.history[index]
+            entry.afterPaste = after
+            try? self.records?.save(entry); self.history[index] = entry
+        }
     }
     private func announceLearned(_ entry: DictionaryEntry) {
         bubble.showLearned(entry.preferred, entryID: entry.id, screen: destinationScreen)
@@ -1842,6 +1848,9 @@ final class PreStart: @unchecked Sendable {
     }
     private func deleteTranscript(_ entry: HistoryEntry) throws {
         try records?.delete(entry)
+        if entry.recordingFile != nil, let history = store?.directory {
+            try? FileManager.default.removeItem(at: DiagnosticRecordings.directory(inHistory: history).appendingPathComponent(entry.id + ".wav"))
+        }
         if lastDictationText == entry.finalText { lastDictationText = nil }
         if setupTestTranscript == entry.finalText { setupTestTranscript = "" }
         if recoveryEntryID == entry.id { recoveryEntryID = nil }

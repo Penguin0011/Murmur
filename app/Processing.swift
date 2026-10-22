@@ -370,9 +370,9 @@ final class ProcessingCoordinator {
         for (section, attempt) in zip(sections, results) {
             if let reason = attempt.reason { lastFallback = lastFallback ?? reason }
             if let error = attempt.error { lastProviderError = lastProviderError ?? error }
-            // A rejected output may echo screen context (the guard never checked it against the context), so it
-            // is not kept for History when context was sent. An accepted one passed the word check against the
-            // transcript alone, so it is kept: it is the model's exact output, which the final text no longer is.
+            // A rejected output was never pasted and may echo screen context, so it is not kept for History when
+            // context was sent. An accepted output is what was pasted (before tone and spacing), so keeping it
+            // stores nothing History does not already hold, and it is the model's exact output.
             if context == nil, let rejected = attempt.rejected { lastRejectedOutput = (lastRejectedOutput.map { $0 + "\n\n" } ?? "") + rejected }
             if let accepted = attempt.accepted { lastModelOutput = (lastModelOutput.map { $0 + "\n\n" } ?? "") + accepted }
             lastPromptHash = lastPromptHash ?? attempt.promptHash

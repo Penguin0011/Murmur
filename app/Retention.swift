@@ -72,6 +72,9 @@ enum HistoryCap {
         let fm = FileManager.default
         var total: Int64 = 0
         for name in try fm.contentsOfDirectory(atPath: directory.path) {
+            // Diagnostic recordings are not transcripts: they expire after 7 days on their own, and counting
+            // them would make the cap delete transcript History to make room for audio it cannot remove.
+            if name == DiagnosticRecordings.folderName { continue }
             let file = directory.appendingPathComponent(name)
             let attrs = try fm.attributesOfItem(atPath: file.path)
             if attrs[.type] as? FileAttributeType == .typeDirectory { total += try usage(directory: file); continue }
@@ -150,7 +153,8 @@ enum HistoryCap {
 /// Safe to read from any thread: the transcription callbacks run off the main actor.
 final class DiagnosticRecordings: @unchecked Sendable {
     static let lifetime: TimeInterval = 7 * 24 * 60 * 60
-    static func directory(inHistory history: URL) -> URL { history.appendingPathComponent("recordings", isDirectory: true) }
+    static let folderName = "recordings"
+    static func directory(inHistory history: URL) -> URL { history.appendingPathComponent(folderName, isDirectory: true) }
     private let lock = NSLock()
     private var target: URL?
     var directory: URL? {
