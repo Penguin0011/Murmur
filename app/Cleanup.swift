@@ -1585,12 +1585,18 @@ struct RuleCleaner: Cleaner {
     /// Local punctuation: capitals at sentence starts and for "I". Adding periods or question
     /// marks needs the cloud model; rules cannot tell where an unpunctuated sentence ends.
     static func capitalizeSentences(_ text: String) -> String {
-        // A . ? or ! ends a sentence only before whitespace, so "gmail.com" keeps its case.
-        var out = "", start = true, ended = false
+        // A . ? or ! ends a sentence only before whitespace, so "gmail.com" keeps its case. A period after a
+        // dotted abbreviation or a title does not: "the U.S. at 9 a.m. today", "Dr. Patel".
+        // ponytail: "in the U.S. Next year" stays lowercase; the cloud model punctuates those.
+        let titles: Set<String> = ["mr", "mrs", "ms", "dr", "st", "vs"]
+        var out = "", start = true, ended = false, word = ""
         for c in text {
-            if start, c.isLetter { out += c.uppercased(); start = false; ended = false; continue }
-            if c.isLetter || c.isNumber { start = false; ended = false } else if ".?!".contains(c) { ended = true }
+            if start, c.isLetter { out += c.uppercased(); word = String(c); start = false; ended = false; continue }
+            if c.isLetter || c.isNumber { start = false; ended = false }
+            else if c == "." { if word.last != "." { ended = !word.contains(".") && !titles.contains(word.lowercased()) } }
+            else if "?!".contains(c) { ended = true }
             else if c == "\n" || (c.isWhitespace && ended) { start = true }
+            word = c.isWhitespace ? "" : word + String(c)
             out.append(c)
         }
         return out.replacingOccurrences(of: #"\bi(?=\b|')"#, with: "I", options: .regularExpression)
