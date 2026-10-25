@@ -77,16 +77,21 @@ struct LearningFocusIdentity {
 
 /// Chromium apps (Electron, CEF) leave their web content out of the accessibility tree until a client
 /// asks, so composer fields read as nothing. Asked once per process; recording start captures focus
-/// seconds before the paste, which is time enough for the tree to build. Browsers are left alone.
+/// seconds before the paste, which is time enough for the tree to build. Browsers are left alone, and so
+/// are VS Code-family editors, which switch to screen-reader mode when a client asks.
 private var webAccessibilityAsked = Set<pid_t>()
+private let webAccessibilitySkipped: Set<String> = ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium",
+                                                    "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf"]
 func requestWebAccessibility(pid: pid_t) {
     guard webAccessibilityAsked.insert(pid).inserted,
           let app = NSRunningApplication(processIdentifier: pid), let bundle = app.bundleURL,
-          !browserBundleIDs.contains(app.bundleIdentifier ?? ""), bundleHasChromiumHelpers(bundle) else { return }
+          !browserBundleIDs.contains(app.bundleIdentifier ?? ""), !webAccessibilitySkipped.contains(app.bundleIdentifier ?? ""),
+          bundleHasChromiumHelpers(bundle) else { return }
     let element = AXUIElementCreateApplication(pid)
-    // Electron honours AXManualAccessibility; CEF (the Codex app) only AXEnhancedUserInterface, and
-    // reports an error while applying it. Neither result is meaningful, so both are set and ignored.
-    _ = AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    // Electron honours AXManualAccessibility; CEF (the Codex app) rejects it as unsupported and only
+    // takes AXEnhancedUserInterface, reporting an error while applying it, so that result is ignored.
+    // AXEnhancedUserInterface can upset window managers, so it is only the fallback.
+    guard AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue) != .success else { return }
     if axAttribute(element, "AXEnhancedUserInterface") as? Bool != true {
         _ = AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
     }
