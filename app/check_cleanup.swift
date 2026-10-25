@@ -340,6 +340,20 @@ struct EchoAsyncCleaner: AsyncCleaner {
         // Punctuation added after a dictated "sure" is not an answer phrase.
         expect(CleanupGuard.check(raw: "let's make sure", cleaned: "Let's make sure.", options: .standard) == .pass, "period after dictated sure passes")
         expect(CleanupGuard.check(raw: "i'm sorry but i can't make it", cleaned: "I'm sorry, but I can't make it.", options: .standard) == .pass, "comma inside dictated answer phrase passes")
+        for options in [CleanupOptions.standard, CleanupOptions(punctuation: true, polish: true), CleanupOptions(punctuation: true, professional: true)] {
+            for space in ["\u{00A0}", "\u{2009}", "\u{202F}"] {
+                let output = "Review PR\(space)70."
+                expect(CleanupGuard.check(raw: "Review PR 70.", cleaned: output, options: options) == .pass, "equivalent horizontal Unicode spaces pass")
+                expect(CleanupGuard.check(raw: output, cleaned: "Review PR 70.", options: options) == .pass, "horizontal space comparison works both ways")
+                expect(CleanupPipeline.judge(raw: "Review PR 70.", cleaned: output, options: options, allowedTerms: []) == .cleaned(output), "guard normalization preserves the model's output")
+            }
+            for mark in ["$", "\u{200B}", "\u{2028}", "\u{2029}", "\t"] {
+                expect(CleanupGuard.check(raw: "Review PR 70.", cleaned: "Review PR\(mark)70.", options: options) == .fail(.structureAdded), "space normalization never admits symbols or control separators")
+            }
+            for output in ["Review PR\u{202F}71.", "Review Bob\u{202F}70.", "Do not review PR\u{202F}70."] {
+                expect(CleanupGuard.check(raw: "Review PR 70.", cleaned: output, options: options) != .pass, "Unicode spacing cannot hide a number, name or negation change")
+            }
+        }
         // Paragraph breaks after a sentence end are not added structure, with or without lists.
         let longRaw = "we met on monday. the plan changed twice. then the budget moved. finally we shipped it"
         let paragraphs = "We met on Monday. The plan changed twice.\n\nThen the budget moved.\n\nFinally we shipped it."
