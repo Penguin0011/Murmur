@@ -70,7 +70,7 @@ struct DictationObservation {
         // Text typed after the span stays in it; the ledger's word diff ignores added words.
         let current = text.substring(with: updatedRange)
         // A chat composer empties when Return sends it: keep the fix made before that.
-        if current.isEmpty { return stop("span cleared") }
+        if current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return stop("span cleared") }
         range = updatedRange
         edited = current
         candidate = Self.replacement(initial, current)
@@ -329,6 +329,22 @@ func runObservationChecks() {
     _ = sent.observe(value: "🙂 Akme done", selection: NSRange(location: 7, length: 0), now: 1, sameFocusedField: true, readableNonsecure: true)
     _ = sent.observe(value: "🙂 ", selection: NSRange(location: 3, length: 0), now: 2, sameFocusedField: true, readableNonsecure: true)
     assert(sent.stopped && sent.edited == "Akme done")  // Return sent the message: the fix stands
+    for reset in ["", "\n", " \n\t ", "\r\n", "\u{00A0}"] {
+        for prior in [nil, "Acme done", "Akme done"] as [String?] {
+            var item = tracker()
+            if let prior {
+                _ = item.observe(value: "🙂 " + prior, selection: NSRange(location: 3, length: 0), now: 1,
+                                 sameFocusedField: true, readableNonsecure: true)
+            }
+            _ = item.observe(value: "🙂 " + reset, selection: NSRange(location: 3, length: 0), now: 2,
+                             sameFocusedField: true, readableNonsecure: true)
+            assert(item.stopped && item.stopReason == "span cleared")
+            assert(item.edited == prior && item.candidate == (prior == "Akme done" ? corrected : nil))
+            _ = item.observe(value: "", selection: NSRange(location: 0, length: 0), now: 3,
+                             sameFocusedField: false, readableNonsecure: true)
+            assert(item.edited == prior)
+        }
+    }
     var selection = tracker()
     _ = selection.observe(value: "🙂 Acme done", selection: NSRange(location: 0, length: 0), now: 1,
                           sameFocusedField: true, readableNonsecure: true)
