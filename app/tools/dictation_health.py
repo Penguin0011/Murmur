@@ -2,8 +2,9 @@
 """Content-free dictation health report from local History metadata and Murmur's unified log.
 
 Prints counts only: never rawText, finalText, rejected output or log message bodies.
-Usage: python3 -I app/tools/dictation_health.py [--hours 24] [--json] [--self-check]
+Usage: python3 -I app/tools/dictation_health.py [--hours 24] [--json] [--notify] [--self-check]
 Exit status 1 when a regression flag is raised, so a scheduler can surface it.
+--notify also posts a macOS notification, only on regression (the flags are content-free).
 """
 import collections
 import json
@@ -130,6 +131,10 @@ def main(argv):
               f"no-speech {r['log'].get('noSpeechAllUnsure', 0)}, tail drops {r['log'].get('tailSegmentDropped', 0)}, "
               f"log errors {r['logErrors']}")
         print("REGRESSION: " + "; ".join(r["flags"]) if r["flags"] else "OK: no regression flags")
+    if r["flags"] and "--notify" in argv:
+        subprocess.run(["/usr/bin/osascript", "-e", "on run argv", "-e",
+                        'display notification (item 1 of argv) with title "Murmur dictation regression"',
+                        "-e", "end run", "; ".join(r["flags"])], check=False)
     return 1 if r["flags"] else 0
 
 
