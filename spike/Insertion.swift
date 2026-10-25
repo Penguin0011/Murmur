@@ -72,6 +72,33 @@ struct LearningFocusIdentity {
     }
 }
 
+/// Chromium apps (Electron, CEF) leave their web content out of the accessibility tree until a client
+/// asks, so composer fields read as nothing. Asked once per process; recording start captures focus
+/// seconds before the paste, which is time enough for the tree to build. Browsers are left alone.
+private var webAccessibilityAsked = Set<pid_t>()
+func requestWebAccessibility(pid: pid_t) {
+    guard webAccessibilityAsked.insert(pid).inserted,
+          let app = NSRunningApplication(processIdentifier: pid), let bundle = app.bundleURL,
+          !browserBundleIDs.contains(app.bundleIdentifier ?? ""), bundleHasChromiumHelpers(bundle) else { return }
+    let element = AXUIElementCreateApplication(pid)
+    // Electron honours AXManualAccessibility; CEF (the Codex app) only AXEnhancedUserInterface, and
+    // reports an error while applying it. Neither result is meaningful, so both are set and ignored.
+    _ = AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    if axAttribute(element, "AXEnhancedUserInterface") as? Bool != true {
+        _ = AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    }
+}
+
+/// Electron ships "<App> Helper (Renderer).app" in Frameworks; CEF puts the same helper under a framework's Helpers folder.
+func bundleHasChromiumHelpers(_ bundle: URL) -> Bool {
+    guard let walk = FileManager.default.enumerator(at: bundle.appendingPathComponent("Contents/Frameworks"), includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return false }
+    for case let url as URL in walk {
+        if url.lastPathComponent.hasSuffix("(Renderer).app") { return true }
+        if walk.level >= 5 { walk.skipDescendants() }
+    }
+    return false
+}
+
 func captureFocus() throws -> FocusSnapshot {
     guard AXIsProcessTrusted() else { throw InsertionError.unavailable("Accessibility permission is unavailable; no prompt requested") }
     // frontmostApplication only refreshes when the run loop delivers workspace notifications; polling callers sleep instead.
@@ -79,6 +106,7 @@ func captureFocus() throws -> FocusSnapshot {
     guard let frontmost = NSWorkspace.shared.frontmostApplication else {
         throw InsertionError.unavailable("No frontmost application")
     }
+    requestWebAccessibility(pid: frontmost.processIdentifier)
     let application = AXUIElementCreateApplication(frontmost.processIdentifier)
     func focusedElement(_ owner: AXUIElement) -> (AXUIElement?, AXError) {
         var raw: CFTypeRef?
@@ -306,6 +334,11 @@ func insertionTextRole(_ role: String) -> Bool {
 }
 
 func runInsertionChecks() {
+    let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("chromium-check-\(UUID().uuidString).app")
+    defer { try? FileManager.default.removeItem(at: fixture) }
+    let helper = fixture.appendingPathComponent("Contents/Frameworks/X Framework.framework/Versions/1/Helpers/X (Renderer).app")
+    try? FileManager.default.createDirectory(at: helper, withIntermediateDirectories: true)
+    assert(bundleHasChromiumHelpers(fixture) && !bundleHasChromiumHelpers(fixture.appendingPathComponent("Contents")))
     assert(readbackMatches("Hi there.", "Hi\u{00A0}there.\n") && readbackMatches(" a b", "a\u{200B} b"))
     assert(!readbackMatches("Hi there.", "Hi there. Hi there.") && !readbackMatches("ab", nil) && !readbackMatches(nil, "ab"))
     let element = AXUIElementCreateApplication(123)
