@@ -43,6 +43,8 @@ struct AudioPayload: Sendable {
 struct TranscriptionResult: Sendable, Equatable {
     var text: String
     var segments: [TranscriptSegment]? = nil
+    /// The parser's rejection path, rather than an inference from the dropped flags.
+    var noSpeechReason: String? = nil
 }
 
 /// One Whisper segment: its scores and times, the 100 ms windows under it that reach the silence level,
@@ -626,7 +628,7 @@ enum OpenAITranscriptionFormat {
         if !segments.isEmpty && segments.allSatisfy(\.unsure) {
             logTail("all \(segments.count) segments below logprob \(logprobThreshold): no speech")
             for index in details.indices { details[index].dropped = true }
-            return TranscriptionResult(text: "", segments: details)
+            return TranscriptionResult(text: "", segments: details, noSpeechReason: "lowConfidence")
         }
         // Content-free: scores and times of the trailing segments only, never their words.
         var tail = segments.count - 1
@@ -639,7 +641,8 @@ enum OpenAITranscriptionFormat {
         for index in (tail + 1)..<details.count { details[index].dropped = true }
         while segments.last?.silent == true { segments.removeLast() }
         // Whisper segment text carries its own leading space.
-        return TranscriptionResult(text: segments.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines), segments: details)
+        return TranscriptionResult(text: segments.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines), segments: details,
+                                   noSpeechReason: tail < 0 ? "insufficientLoudness" : nil)
     }
 }
 

@@ -546,6 +546,17 @@ private func floatStereoWAV(_ left: [Float], _ right: [Float], rate: Int) -> Dat
         // The no-speech log line names why and carries scores, never words.
         let invented = await CloudTranscription.runDetailed(provider: VerboseJSONStub(verboseJSON([(" Hello there friend.", 0, 5, -1.4)])), audioData: silence)
         await checkA(invented.detail.noSpeechReason == "lowConfidence" && invented.detail.noSpeechLogLine.contains("segments=1 logprob-min-max=-1.40/-1.40") && !invented.detail.noSpeechLogLine.contains("Hello"), "low-confidence no-speech line has scores, no text")
+        let twoWindows = WAVAudio.encodePCM16(tone(seconds: 0.2, amplitude: 0.3), sampleRate: 48_000)
+        let tooShort = await CloudTranscription.runDetailed(provider: VerboseJSONStub(verboseJSON([(" Hello.", 0, 0.2, -0.259)])), audioData: twoWindows)
+        await checkA(tooShort.outcome == .noSpeech(skipped: false) && tooShort.detail.segments?.first?.loudWindows == 2
+                     && tooShort.detail.noSpeechReason == "insufficientLoudness", "two loud windows at high confidence report the loudness rejection")
+        await checkA(tooShort.detail.noSpeechLogLine.contains("reason=insufficientLoudness") && !tooShort.detail.noSpeechLogLine.contains("Hello"), "loudness rejection log contains the cause without transcript text")
+        let uncertain = await CloudTranscription.runDetailed(provider: VerboseJSONStub(verboseJSON([(" Hello.", 0, 0.2, -1.17)])), audioData: twoWindows)
+        await checkA(uncertain.outcome == .noSpeech(skipped: false) && uncertain.detail.noSpeechReason == "lowConfidence", "all-low-confidence rejection takes precedence even on a short clip")
+        let threeWindows = WAVAudio.encodePCM16(tone(seconds: 0.3, amplitude: 0.3), sampleRate: 48_000)
+        let boundary = await CloudTranscription.runDetailed(provider: VerboseJSONStub(verboseJSON([(" Hello.", 0, 0.3, -0.259)])), audioData: threeWindows)
+        await checkA(boundary.outcome == .transcript(" Hello.") && boundary.detail.segments?.first?.loudWindows == 3
+                     && boundary.detail.noSpeechReason == nil, "three loud windows retain speech without a rejection reason")
         let punctuation = await CloudTranscription.runDetailed(provider: VerboseJSONStub(verboseJSON([(" .", 0, 1, -0.2)])), audioData: speech)
         await checkA(punctuation.detail.noSpeechReason == "punctuationOnly", "punctuation-only reason")
         var precheckProvider = GeminiTranscriptionProvider(apiKey: testKey); precheckProvider.transport = MockTransport(HTTPResult(status: 200, body: geminiBody("unused")))

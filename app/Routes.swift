@@ -363,7 +363,7 @@ struct CloudTranscriptionDetail: Sendable, Equatable {
     /// "passed", "skipped", or "unchecked" when the provider has no pre-check or no level.
     var precheck = "unchecked"
     var segments: [TranscriptSegment]? = nil
-    /// Why the outcome was no speech: "precheck", "lowConfidence" (every segment dropped), "empty" or "punctuationOnly".
+    /// Why the outcome was no speech: "precheck", "lowConfidence", "insufficientLoudness", "empty" or "punctuationOnly".
     var noSpeechReason: String? = nil
 
     /// Content-free line for the unified log: reason, clip loudness and pre-check level, segment scores. Never text.
@@ -415,14 +415,14 @@ enum CloudTranscription {
                 text = result.text; suspected = result.answerSuspected
             } else if let detailed = provider as? DetailedTranscriber {
                 let result = try await detailed.transcribeDetailed(prepared.payload)
-                text = result.text; detail.segments = result.segments
+                text = result.text; detail.segments = result.segments; detail.noSpeechReason = result.noSpeechReason
             } else {
                 text = try await provider.transcribe(prepared.payload)
             }
             if Task.isCancelled { return (.cancelled, detail) }
             // A transcript of only punctuation (" .") is silence too: nothing is pasted.
             if !text.contains(where: { $0.isLetter || $0.isNumber }) {
-                detail.noSpeechReason = !text.isEmpty ? "punctuationOnly" : detail.segments?.isEmpty == false && detail.segments?.allSatisfy(\.dropped) == true ? "lowConfidence" : "empty"
+                detail.noSpeechReason = detail.noSpeechReason ?? (!text.isEmpty ? "punctuationOnly" : "empty")
                 return (.noSpeech(skipped: false), detail)
             }
             return (suspected ? .heldAnswerSuspected(text) : .transcript(text), detail)
