@@ -1,10 +1,11 @@
 // Synthetic live cleanup benchmark. Reads only configured endpoint/model and its bound Keychain key.
 // Compile with the sources listed in tools/measure_cleanup_route.swift, replacing its final file.
-// Usage: /tmp/pl [runs=3] [--runs N] [--model ID] [--prompt baseline|concise|intent|candidate]
+// Usage: /tmp/pl [runs=3] [--runs N] [--model ID] [--prompt baseline|concise|intent] [--candidate PATH]
 //   [--mode professional|polish|strict] [--context on|off] [--cases 0,3,19] [--json PATH]
 //   [--reasoning none|low|medium|high] [--list-models] [--endpoint cleanup|transcription|apple] [--trust on|off] [--corrections on|off] [--retries 0|1|2] [--delay SECONDS] [--self-check]
 //   [--replay PATH]  replays real dictations instead of the built-in cases: a JSON array of
 //     {"raw", "must", "mustNot", "tags"} kept outside the repository ("list" in tags allows numbered lines).
+//   [--show-prompt]  prints the first system prompt and exits, with no model call.
 //   [--rescore PATH]  offline: re-run the guard on a saved --json report; prints only verdicts, never text.
 // Phrase checks are transparent proxies, not semantic accuracy labels; `a|b` accepts alternatives.
 import Foundation
@@ -16,7 +17,7 @@ struct Flags {
     var endpoint = "cleanup", trust = false, listModels = false
     var reasoning: String? = nil
     var retries = 0, corrections = true
-    var subset: Set<Int>? = nil, json: String? = nil, delay = 4.0, selfCheck = false, rescore: String? = nil, replay: String? = nil
+    var subset: Set<Int>? = nil, json: String? = nil, delay = 4.0, selfCheck = false, rescore: String? = nil, replay: String? = nil, candidatePath: String? = nil, showPrompt = false
     init(_ args: [String]) throws {
         var i = 0
         func bad() -> NSError { NSError(domain: "benchmark CLI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid arguments; see usage in source"] ) }
@@ -24,6 +25,7 @@ struct Flags {
             let flag = args[i]; i += 1
             if flag == "--list-models" { listModels = true; continue }
             if flag == "--self-check" { selfCheck = true; continue }
+            if flag == "--show-prompt" { showPrompt = true; continue }
             if let n = Int(flag), i == 1 { runs = n; continue }
             guard i < args.count else { throw bad() }
             let value = args[i]; i += 1
@@ -46,6 +48,7 @@ struct Flags {
             case "--json": json = value
             case "--rescore": rescore = value
             case "--replay": replay = value
+            case "--candidate": candidatePath = value; prompt = "candidate"
             case "--delay": guard let n = Double(value), n.isFinite, n >= 0, n <= 3600 else { throw bad() }; delay = n
             default: throw bad()
             }
@@ -124,10 +127,12 @@ func intent(_ baseline: CleanupMessages, options: CleanupOptions) -> CleanupMess
     }
     return CleanupMessages(system: rules.joined(separator: "\n"), user: baseline.user)
 }
-// The candidate under test: production's prompt with the operation lines that start with a key replaced
+// The candidate under test (--candidate PATH): production's prompt with the operation lines that start with a key replaced
 // (an empty replacement drops the line), so it differs from baseline only where it says.
+/// Set by --candidate PATH: a JSON array of [prefix, replacement] pairs.
+nonisolated(unsafe) var candidateLines: [(String, String)] = []
 func candidate(_ baseline: CleanupMessages, options: CleanupOptions) -> CleanupMessages {
-    let replacements: [(String, String)] = []
+    let replacements = candidateLines
     let lines = baseline.system.components(separatedBy: "\n").compactMap { line -> String? in
         guard let (_, new) = replacements.first(where: { line.hasPrefix($0.0) }) else { return line }
         return new.isEmpty ? nil : new
@@ -183,6 +188,7 @@ final class MeasuredProvider: CleanupProvider, @unchecked Sendable {
             do {
                 let prompt = flags.prompt == "intent" ? intent(messages, options: flags.options) : flags.prompt == "concise" ? concise(messages, options: flags.options)
                     : flags.prompt == "candidate" ? candidate(messages, options: flags.options) : messages
+                if flags.showPrompt { print("system prompt (\(prompt.system.count) chars):\n\(prompt.system)"); exit(0) }
                 let out = try await inner.cleanup(prompt)
                 seconds.append(ProcessInfo.processInfo.systemUptime - start)
                 attemptSucceeded.append(true)
@@ -220,6 +226,9 @@ struct Report: Codable {
 @MainActor static func main() async throws {
 setvbuf(stdout, nil, _IOLBF, 0)
 let flags = try Flags(Array(CommandLine.arguments.dropFirst()))
+if let path = flags.candidatePath {
+    candidateLines = try JSONDecoder().decode([[String]].self, from: Data(contentsOf: URL(fileURLWithPath: path))).map { ($0[0], $0[1]) }
+}
 if flags.selfCheck {
     let parsed = try Flags(["2", "--mode", "strict", "--context", "on"])
     assert(parsed.runs == 2)
@@ -257,7 +266,7 @@ if flags.selfCheck {
     let strictOnly = Case(raw: "", must: [], mustNot: [], modes: ["strict"]), proOnly = Case(raw: "", must: [], mustNot: [], modes: ["professional"])
     assert(applies(strictOnly, "strict") && !applies(strictOnly, "professional") && applies(proOnly, "professional") && !applies(proOnly, "strict") && applies(Case(raw: "", must: [], mustNot: []), "polish"))
     assert((try? Flags(["--rescore", "/x.json"]))?.rescore == "/x.json")
-    assert((try? Flags(["--replay", "/r.json", "--prompt", "candidate", "--endpoint", "apple"]))?.replay == "/r.json")
+    assert((try? Flags(["--replay", "/r.json", "--candidate", "/c.json", "--endpoint", "apple"]))?.prompt == "candidate")
     let plain = CleanupMessages(system: "a\nb", user: "u")
     assert(candidate(plain, options: flags.options) == plain)
     print("self-check passed: CLI, percentiles, case-insensitive quality, independent guard")
