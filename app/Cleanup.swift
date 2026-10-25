@@ -720,6 +720,9 @@ enum CleanupGuard {
     /// ponytail: a model must make the same conversions as the rules, or its output falls back.
     static func check(raw: String, cleaned: String, options: CleanupOptions, allowedTerms: [String] = [],
                       soundsLike: (String, String) -> Bool = { _, _ in false }) -> CleanupGuardResult {
+        // Compare equivalent horizontal spaces without changing the text returned for insertion.
+        let raw = raw.replacingOccurrences(of: "\\p{Zs}", with: " ", options: .regularExpression)
+        let cleaned = cleaned.replacingOccurrences(of: "\\p{Zs}", with: " ", options: .regularExpression)
         let result = checkWords(raw: raw, cleaned: cleaned, options: options, allowedTerms: allowedTerms, soundsLike: soundsLike)
         if result != .pass, options.corrections, options.polish {
             let repaired = RuleCleaner.applyInsteadCorrections(raw)
