@@ -1543,7 +1543,8 @@ enum CleanupPipeline {
                       soundsLike: (String, String) -> Bool = { _, _ in false }) -> CleanupOutcome {
         // A lone layout command ("new paragraph") is only whitespace, which trimming would drop.
         if options.spoken, !cleaned.isEmpty, !cleaned.contains(where: { $0.isLetter || $0.isNumber }), cleaned == RuleCleaner.spokenCommands(raw) { return .cleaned(cleaned) }
-        let output = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Spaces before a line break are markdown hard breaks some models add; pasted text never wants them.
+        let output = cleaned.replacingOccurrences(of: #"[ \t]+\n"#, with: "\n", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
         if output == raw.trimmingCharacters(in: .whitespacesAndNewlines) { return .cleaned(output) }
         // Only filler words ("Um."): nothing to insert, which is not a cleanup failure.
         if output.isEmpty, options.fillers,
