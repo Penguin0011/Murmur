@@ -297,6 +297,12 @@ struct EchoAsyncCleaner: AsyncCleaner {
         expect(CleanupPipeline.process(raw: "Um, she said \"Monday. Actually, Thursday. Bring notes\".", options: .standard, cleaner: RuleCleaner()) == .cleaned("She said \"Monday. Actually, Thursday. Bring notes\"."), "split actually inside a quote does not reject unrelated filler removal")
         expect(CleanupGuard.check(raw: "It is ready. Actually, maybe.", cleaned: "It is maybe.", options: .standard) != .pass, "unrecognized actually fragment never widens guard deletions")
         // Synthetic alternatives: a known single slot is repairable; generic nouns lack safe scope.
+        expect(CleanupPipeline.judge(raw: "buy milk and eggs", cleaned: "Buy:  \n1. Milk  \n2. Eggs  ", options: CleanupOptions(punctuation: true, professional: true, trustModel: true), allowedTerms: []) == .cleaned("Buy:\n1. Milk\n2. Eggs"), "markdown hard-break spaces are stripped")
+        // Abbreviation periods do not start a sentence; real sentence ends and ellipses still do.
+        for (input, output) in [("the U.S. at 9 a.m. today. then Dr. Patel calls", "The U.S. at 9 a.m. today. Then Dr. Patel calls"),
+                                ("wait... then e.g. this. done? yes", "Wait... Then e.g. this. Done? Yes")] {
+            expect(RuleCleaner.capitalizeSentences(input) == output, "capitalization after abbreviations: \(input)")
+        }
         let alternatives = [("Meet on Monday. Thursday instead.", "Meet on Thursday."),
                             ("Paint it red. Blue instead.", "Paint it blue."),
                             ("Book it in March. June instead.", "Book it in June."),
