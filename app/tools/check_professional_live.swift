@@ -2,7 +2,8 @@
 // Compile with the sources listed in tools/measure_cleanup_route.swift, replacing its final file.
 // Usage: /tmp/pl [runs=3] [--runs N] [--model ID] [--prompt baseline|concise|intent] [--candidate PATH]
 //   [--mode professional|polish|strict] [--context on|off] [--cases 0,3,19] [--json PATH]
-//   [--reasoning none|low|medium|high] [--list-models] [--endpoint cleanup|transcription|apple] [--trust on|off] [--corrections on|off] [--retries 0|1|2] [--delay SECONDS] [--self-check]
+//   [--reasoning none|low|medium|high] [--list-models] [--endpoint cleanup|transcription|apple] [--trust on|off] [--corrections on|off] [--retries 0|1|2] [--delay SECONDS] [--timeout SECONDS] [--self-check]
+//   [--timeout SECONDS]  fails an attempt that takes longer (default 20); a timeout is a provider error, not retried.
 //   [--replay PATH]  replays real dictations instead of the built-in cases: a JSON array of
 //     {"raw", "must", "mustNot", "tags"} kept outside the repository ("list" in tags allows numbered lines).
 //   [--show-prompt]  prints the first system prompt and exits, with no model call.
@@ -17,7 +18,7 @@ struct Flags {
     var endpoint = "cleanup", trust = false, listModels = false
     var reasoning: String? = nil
     var retries = 0, corrections = true
-    var subset: Set<Int>? = nil, json: String? = nil, delay = 4.0, selfCheck = false, rescore: String? = nil, replay: String? = nil, candidatePath: String? = nil, showPrompt = false
+    var subset: Set<Int>? = nil, json: String? = nil, delay = 4.0, timeout = 20.0, selfCheck = false, rescore: String? = nil, replay: String? = nil, candidatePath: String? = nil, showPrompt = false
     init(_ args: [String]) throws {
         var i = 0
         func bad() -> NSError { NSError(domain: "benchmark CLI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid arguments; see usage in source"] ) }
@@ -50,6 +51,7 @@ struct Flags {
             case "--replay": replay = value
             case "--candidate": candidatePath = value; prompt = "candidate"
             case "--delay": guard let n = Double(value), n.isFinite, n >= 0, n <= 3600 else { throw bad() }; delay = n
+            case "--timeout": guard let n = Double(value), n.isFinite, n > 0, n <= 3600 else { throw bad() }; timeout = n
             default: throw bad()
             }
         }
@@ -172,6 +174,15 @@ func errorKind(_ error: Error) -> String {
     case .cancelled: return "cancelled"
     }
 }
+/// Fails with `.timeout` after `seconds` without waiting for the stuck call, which is cancelled and left behind.
+func withDeadline<T: Sendable>(_ seconds: Double, id: ProviderID, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+    let lock = NSLock(); var done = false
+    func claim() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
+    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+        let task = Task { do { let value = try await work(); if claim() { continuation.resume(returning: value) } } catch { if claim() { continuation.resume(throwing: error) } } }
+        Task { try? await Task.sleep(nanoseconds: UInt64(seconds * 1e9)); if claim() { task.cancel(); continuation.resume(throwing: ProviderError.timeout(id)) } }
+    }
+}
 final class MeasuredProvider: CleanupProvider, @unchecked Sendable {
     let inner: CleanupProvider, flags: Flags
     var output: String?, seconds: [Double] = [], errorKinds: [String] = [], totalSeconds = 0.0
@@ -189,7 +200,8 @@ final class MeasuredProvider: CleanupProvider, @unchecked Sendable {
                 let prompt = flags.prompt == "intent" ? intent(messages, options: flags.options) : flags.prompt == "concise" ? concise(messages, options: flags.options)
                     : flags.prompt == "candidate" ? candidate(messages, options: flags.options) : messages
                 if flags.showPrompt { print("system prompt (\(prompt.system.count) chars):\n\(prompt.system)"); exit(0) }
-                let out = try await inner.cleanup(prompt)
+                let inner = inner
+                let out = try await withDeadline(flags.timeout, id: inner.id) { try await inner.cleanup(prompt) }
                 seconds.append(ProcessInfo.processInfo.systemUptime - start)
                 attemptSucceeded.append(true)
                 output = out; return out
@@ -245,6 +257,11 @@ if flags.selfCheck {
     assert((try? Flags(["--context", "maybe"])) == nil)
     assert((try? Flags(["--cases", "1,x"])) == nil)
     assert((try? Flags(["--delay", "nan"])) == nil)
+    assert((try? Flags(["--timeout", "0"])) == nil && (try? Flags(["--timeout", "5"]))?.timeout == 5 && (try? Flags([]))?.timeout == 20)
+    do { _ = try await withDeadline(0.05, id: .customCleanup) { try await Task.sleep(nanoseconds: 5_000_000_000); return 1 }; assert(false) }
+    catch { assert(errorKind(error) == "timeout") }
+    let seven = try? await withDeadline(5, id: .customCleanup) { 7 }
+    assert(seven == 7)
     let experimental = try Flags(["--endpoint", "transcription", "--reasoning", "low", "--trust", "on"])
     assert(experimental.endpoint == "transcription" && experimental.reasoning == "low" && experimental.options.trustModel)
     assert(percentile([1, 2, 3, 4], 0.5) == 2.5)
