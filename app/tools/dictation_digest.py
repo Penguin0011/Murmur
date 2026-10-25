@@ -62,8 +62,10 @@ def block(e):
                f"terms={', '.join(c['dictionaryTerms']) if c.get('dictionaryTerms') else '-'}")
     out.append(f"  clip: {num(t.get('clipSeconds'), '.1f', 's')}  peak p50={num(t.get('peakP50'), '.4f')} p90={num(t.get('peakP90'), '.4f')}  "
                f"silence peak={num(t.get('silencePeak'), '.4f')}/{num(t.get('silenceThreshold'), '.4f')}  precheck={t.get('precheck') or '-'}")
-    out.append(f"  timing: stt={num(tm.get('transcription'), '.2f', 's')} cleanup={num(tm.get('cleanup'), '.2f', 's')} "
-               f"insert={num(tm.get('insertion'), '.2f', 's')} total={num(tm.get('total'), '.2f', 's')}")
+    # Entries from 0.2.3 and earlier have no capture/handoff/done, and their insert and total include a fixed 0.5 s clipboard wait.
+    out.append(f"  timing: capture={num(tm.get('capture'), '.2f', 's')} stt={num(tm.get('transcription'), '.2f', 's')} cleanup={num(tm.get('cleanup'), '.2f', 's')} "
+               f"handoff={num(tm.get('handoff'), '.2f', 's')} insert={num(tm.get('insertion'), '.2f', 's')} (call {num(tm.get('insertionDone'), '.2f', 's')}) "
+               f"total={num(tm.get('total'), '.2f', 's')}")
     out.append(f"  raw     : {e.get('rawText')!r}")
     if c.get("input"):
         out.append(f"  dict    : {c['input']!r}")
@@ -110,9 +112,9 @@ def self_check():
     old = block(rows[0])
     assert "raw     : 'hi'" in old and "prompt=-" in old and "pasted" not in old, old
     rich = dict(rows[1], cleanup={"modelOutput": "Hi.", "guardVerdict": "cleaned", "promptHash": "0123abcd"}, afterPaste={"text": "Hi!", "changed": True, "route": "ax"},
-                transcription={"segments": [{"start": 0, "end": 1, "avgLogprob": -0.3, "noSpeechProb": 0.1, "loudWindows": 4, "dropped": True, "text": " Thanks."}]}, timing={"total": 1.5})
+                transcription={"segments": [{"start": 0, "end": 1, "avgLogprob": -0.3, "noSpeechProb": 0.1, "loudWindows": 4, "dropped": True, "text": " Thanks."}]}, timing={"capture": 0.44, "total": 1.5})
     text = block(rich)
-    assert "model   : 'Hi.'" in text and "CHANGED" in text and "DROPPED" in text and "total=1.50s" in text, text
+    assert "model   : 'Hi.'" in text and "CHANGED" in text and "DROPPED" in text and "total=1.50s" in text and "capture=0.44s" in text, text
     assert len(select(rows, 2, None)) == 2 and len(select(rows, 9, now - 250)) == 3
     assert parse_since("2h", now) == now - 7200 and window_for(None, now) == "1d" and window_for(now - 7200, now) == "7200s"
     print("dictation_digest self-check passed")

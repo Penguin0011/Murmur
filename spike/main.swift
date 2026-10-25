@@ -113,6 +113,7 @@ do {
         if arguments.contains("--observe"), result.status == .verified, let selection = destination.selection {
             try observe(result, insertedText: text, insertionOffset: selection.location)
         }
+        flushClipboardRestore()
     } else {
         throw InsertionError.unavailable("Use --check, --inspect [--delay 3], --listen [--binding right-option|fn|ctrl-option-space], or --insert-test --expected-app BUNDLE_ID [--observe] [--delay 3]")
     }

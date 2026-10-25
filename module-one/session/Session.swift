@@ -18,6 +18,10 @@ final class CaptureSession {
     /// Capture keeps running this long after release so the last word, still in the input
     /// pipeline when the key comes up, is not cut off. 0 stops synchronously (checks).
     var releaseTail: TimeInterval = 0
+    /// Uptime of the key-release event for the next `.finish`, when it is known earlier than the
+    /// main thread handled it. The tail then runs to release + `releaseTail`, not handled + `releaseTail`
+    /// (capture drops audio after that cut-off anyway, so waiting longer recorded nothing). Consumed by `.finish`.
+    var releasedAt: TimeInterval?
     private var pendingTail: (() -> Void)?
     /// Capture started by a press during processing; the next .start adopts it.
     private(set) var early: URL?
@@ -74,7 +78,9 @@ final class CaptureSession {
             }
             if releaseTail > 0 {
                 pendingTail = stopAndProcess
-                DispatchQueue.main.asyncAfter(deadline: .now() + releaseTail) { [weak self] in self?.runTail() }
+                let remaining = releasedAt.map { max(0, $0 + releaseTail - ProcessInfo.processInfo.systemUptime) } ?? releaseTail
+                releasedAt = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + remaining) { [weak self] in self?.runTail() }
             } else { stopAndProcess() }
         case .cancel:
             if state == .listening {

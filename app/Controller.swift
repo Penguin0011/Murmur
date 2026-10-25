@@ -522,6 +522,15 @@ final class PreStart: @unchecked Sendable {
     private let prestart = PreStart()
     /// Recording continues this long after release so the last word survives.
     nonisolated static let releaseTail: TimeInterval = 0.4
+    /// Uptime of the last hold's key-release event, stamped on the tap thread and consumed by the main
+    /// thread's finish, so timing and the tail start at the release, not when a busy main thread got to it.
+    nonisolated static let holdRelease = ReleaseStamp()
+    final class ReleaseStamp: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: TimeInterval?
+        func set(_ uptime: TimeInterval) { lock.withLock { value = uptime } }
+        func take() -> TimeInterval? { lock.withLock { defer { value = nil }; return value } }
+    }
     private let warm = WarmRunner()
     /// Chunk transcripts of local recordings, keyed by each recording's audio file.
     private var chunkJobs: [URL: ChunkJob] = [:]
@@ -881,7 +890,10 @@ final class PreStart: @unchecked Sendable {
         }
         listener = next; source = nextSource
         // A stalled main thread must not keep recording after a hold's release.
-        next.onHoldRelease = { released in Capture.current?.cut(after: released + AppController.releaseTail) }
+        next.onHoldRelease = { released in
+            Self.holdRelease.set(released)
+            Capture.current?.cut(after: released + AppController.releaseTail)
+        }
         if let retry {
             next.onPressFromIdle = { [prestart] in prestart.begin(store: retry) }
             next.onPressWithoutStart = { [prestart] in prestart.discard(store: retry) }
@@ -955,6 +967,12 @@ final class PreStart: @unchecked Sendable {
             captureModeAndContext(aiCleanup: plan.cleaner != nil)
         }
         let wasListening = session.state == .listening
+        if wasListening, action == .finish {
+            // A hold's release event time when the tap thread saw one just now, else now (toggle mode).
+            let now = ProcessInfo.processInfo.systemUptime
+            finishedAt = Self.holdRelease.take().flatMap { now - $0 < 3 ? $0 : nil } ?? now
+            session.releasedAt = finishedAt
+        }
         // An early capture already played its start sound when it began (onQueuedPress).
         let adoptsEarly = session.early != nil
         session.receive(action, completed: done)
@@ -962,7 +980,6 @@ final class PreStart: @unchecked Sendable {
         if action == .start, session.state == .listening { startLiveWords() }
         if session.state != .listening { stopLiveWords() }
         if wasListening, action == .finish || (action == .cancel && listener?.cancelIsExplicit == true) { cue(.stop) }
-        if wasListening, action == .finish { finishedAt = ProcessInfo.processInfo.systemUptime }
         if action == .start, session.state == .listening, sessionTranscriber == nil, let capture, let audio = session.audio { attachChunks(capture, audio: audio) }
         if action == .cancel {
             destination = nil
@@ -1333,6 +1350,12 @@ final class PreStart: @unchecked Sendable {
         // Saved with the next write of this entry; no extra disk write before insertion.
         var savedEntry = savedEntry; savedEntry.seconds = sessionSeconds
         savedEntry.timing = StageTiming(transcription: cleanupStartedAt - transcribeStartedAt)
+        // finishedAt is 0 until a key release is seen (a History retry, Undo): no release stage then.
+        if finishedAt > 0 {
+            let waited = max(0, transcribeStartedAt - finishedAt)
+            savedEntry.timing?.capture = waited
+            timingLog.notice("release-to-transcribe took=\(waited, format: .fixed(precision: 3))")
+        }
         recoveryEntryID = savedEntry.id
         // A trigger word beats the app or website matched at start; it is cut from the text, not from History's raw transcript.
         let trigger = WritingModes.trigger(writingModes, in: savedEntry.rawText)
@@ -1462,15 +1485,22 @@ final class PreStart: @unchecked Sendable {
                 // A readable text field is pasted into and read back; anything else (a web editor, a
                 // custom text view, no accessible focus) gets a plain paste.
                 let readable = target.map { insertionTextRole($0.role) && $0.value != nil && $0.selection != nil } ?? false
+                let cleanupTook = entry.timing?.cleanup ?? 0
+                entry.timing?.handoff = inserting - (cleanupStartedAt + cleanupTook)
                 let insertion = readable ? insertText(entry.finalText, into: target!) : pasteIntoFrontmostApp(entry.finalText)
                 timingLog.notice("insert app=\(target?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none", privacy: .public) role=\(target?.role ?? "none", privacy: .public) status=\(insertion.status.rawValue, privacy: .public) took=\(ProcessInfo.processInfo.systemUptime - inserting, format: .fixed(precision: 3)) detail=\(insertion.detail, privacy: .public)")
                 attempted = true
                 let inserted = ProcessInfo.processInfo.systemUptime
-                entry.timing?.insertion = inserted - inserting
+                // The text is visible when ⌘V is posted or the field first reads back matching; the
+                // read-back's remaining wait and the clipboard restore come after and are not the user's wait.
+                let visible = insertion.visibleAt ?? inserted
+                entry.timing?.insertion = visible - inserting
+                entry.timing?.insertionDone = inserted - inserting
+                timingLog.notice("text-visible took=\(visible - inserting, format: .fixed(precision: 3))")
                 // finishedAt is 0 until a key release is seen (a History retry, Undo); the line would then be uptime.
                 if released > 0 {
-                    entry.timing?.total = inserted - released
-                    timingLog.notice("dictation took=\(inserted - released, format: .fixed(precision: 3))")
+                    entry.timing?.total = visible - released
+                    timingLog.notice("dictation took=\(visible - released, format: .fixed(precision: 3))")
                 }
                 if let app = target?.bundleID, !app.isEmpty { recentApps = [app] + recentApps.filter { $0 != app }.prefix(9) }
                 lastDictationText = entry.finalText
@@ -2364,6 +2394,7 @@ final class PreStart: @unchecked Sendable {
         undo.discard(); stopLiveWords(); liveWordsDownloader?.cancel()
         generation = UUID(); cloudRequest.cancel(); monitor?.invalidate(); expiry?.invalidate(); removeShortcut()
         watchTick(ending: true)
+        flushClipboardRestore()
         downloader?.cancel()  // Verified and partial files stay staged; Retry resumes them.
         dictionaryDownloader?.cancel()
         if sessionAvailable { session.shutdown() }

@@ -41,7 +41,9 @@ import Darwin
         diagnosed.cleanup = CleanupDetail(modelOutput: "Hi.", guardVerdict: "cleaned", promptHash: "0123abcd", dictionaryTerms: ["Akme"], input: "hi", contextUsed: true,
                                           contextApp: "com.apple.Notes", contextChars: ["selected": 0, "clipboard": 12, "window": 40])
         diagnosed.afterPaste = AfterPaste(text: "Hi there.", changed: true, route: "ax", endReason: "focus departed")
-        diagnosed.timing = StageTiming(transcription: 0.4, cleanup: 0.9, insertion: 0.1, total: 1.6)
+        diagnosed.timing = StageTiming(transcription: 0.4, cleanup: 0.9, insertion: 0.1, total: 1.6, capture: 0.44, handoff: 0.01, insertionDone: 0.2)
+        let olderTiming = try JSONDecoder().decode(StageTiming.self, from: Data(#"{"transcription":0.4,"cleanup":0.4,"insertion":0.51,"total":1.8}"#.utf8))
+        precondition(olderTiming.capture == nil && olderTiming.handoff == nil && olderTiming.insertionDone == nil && olderTiming.total == 1.8, "timing from 0.2.3 decodes")
         diagnosed.recordingFile = diagnosed.id + ".wav"
         let diagnosedTrip = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(diagnosed.with(finalText: "Hi.", status: "verified")))
         precondition(diagnosedTrip.transcription == diagnosed.transcription && diagnosedTrip.cleanup == diagnosed.cleanup && diagnosedTrip.afterPaste == diagnosed.afterPaste

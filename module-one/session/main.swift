@@ -45,6 +45,16 @@ func sessionCheck() throws {
     RunLoop.main.run(until: Date().addingTimeInterval(0.2))
     assert(tailStops == 1 && tailProcessed && tail.state == .idle)
 
+    // A release the main thread handled late still ends capture at release + tail, not handled + tail.
+    var lateStops = 0
+    let late = CaptureSession(store: store, start: { _ in }, stop: { lateStops += 1; return true }, process: { _, done in done() })
+    late.releaseTail = 10
+    late.receive(.start) {}
+    late.releasedAt = ProcessInfo.processInfo.systemUptime - 10  // released 10 s ago: the tail is already over
+    late.receive(.finish) {}
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+    assert(lateStops == 1 && late.releasedAt == nil)
+
     // Back-to-back: a press while #1 processes records at once and is adopted when #1 finishes.
     func fnEvent(_ down: Bool, _ t: Double) -> CGEvent {
         let e = CGEvent(keyboardEventSource: nil, virtualKey: 63, keyDown: down)!
