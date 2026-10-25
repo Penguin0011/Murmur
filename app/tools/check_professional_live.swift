@@ -1,8 +1,10 @@
 // Synthetic live cleanup benchmark. Reads only configured endpoint/model and its bound Keychain key.
 // Compile with the sources listed in tools/measure_cleanup_route.swift, replacing its final file.
-// Usage: /tmp/pl [runs=3] [--runs N] [--model ID] [--prompt baseline|concise|intent]
+// Usage: /tmp/pl [runs=3] [--runs N] [--model ID] [--prompt baseline|concise|intent|candidate]
 //   [--mode professional|polish|strict] [--context on|off] [--cases 0,3,19] [--json PATH]
-//   [--reasoning none|low|medium|high] [--list-models] [--endpoint cleanup|transcription] [--trust on|off] [--corrections on|off] [--retries 0|1|2] [--delay SECONDS] [--self-check]
+//   [--reasoning none|low|medium|high] [--list-models] [--endpoint cleanup|transcription|apple] [--trust on|off] [--corrections on|off] [--retries 0|1|2] [--delay SECONDS] [--self-check]
+//   [--replay PATH]  replays real dictations instead of the built-in cases: a JSON array of
+//     {"raw", "must", "mustNot", "tags"} kept outside the repository ("list" in tags allows numbered lines).
 //   [--rescore PATH]  offline: re-run the guard on a saved --json report; prints only verdicts, never text.
 // Phrase checks are transparent proxies, not semantic accuracy labels; `a|b` accepts alternatives.
 import Foundation
@@ -14,7 +16,7 @@ struct Flags {
     var endpoint = "cleanup", trust = false, listModels = false
     var reasoning: String? = nil
     var retries = 0, corrections = true
-    var subset: Set<Int>? = nil, json: String? = nil, delay = 4.0, selfCheck = false, rescore: String? = nil
+    var subset: Set<Int>? = nil, json: String? = nil, delay = 4.0, selfCheck = false, rescore: String? = nil, replay: String? = nil
     init(_ args: [String]) throws {
         var i = 0
         func bad() -> NSError { NSError(domain: "benchmark CLI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid arguments; see usage in source"] ) }
@@ -43,11 +45,12 @@ struct Flags {
                 subset = Set(indices)
             case "--json": json = value
             case "--rescore": rescore = value
+            case "--replay": replay = value
             case "--delay": guard let n = Double(value), n.isFinite, n >= 0, n <= 3600 else { throw bad() }; delay = n
             default: throw bad()
             }
         }
-        guard ["cleanup", "transcription"].contains(endpoint), runs > 0, runs <= 100, ["baseline", "concise", "intent"].contains(prompt), ["strict", "polish", "professional"].contains(mode) else { throw bad() }
+        guard ["cleanup", "transcription", "apple"].contains(endpoint), runs > 0, runs <= 100, ["baseline", "concise", "intent", "candidate"].contains(prompt), ["strict", "polish", "professional"].contains(mode) else { throw bad() }
     }
     var options: CleanupOptions { CleanupOptions(corrections: corrections, punctuation: true, polish: mode != "strict", professional: mode == "professional", spoken: true, trustModel: trust) }
 }
@@ -121,6 +124,16 @@ func intent(_ baseline: CleanupMessages, options: CleanupOptions) -> CleanupMess
     }
     return CleanupMessages(system: rules.joined(separator: "\n"), user: baseline.user)
 }
+// The candidate under test: production's prompt with the operation lines that start with a key replaced
+// (an empty replacement drops the line), so it differs from baseline only where it says.
+func candidate(_ baseline: CleanupMessages, options: CleanupOptions) -> CleanupMessages {
+    let replacements: [(String, String)] = []
+    let lines = baseline.system.components(separatedBy: "\n").compactMap { line -> String? in
+        guard let (_, new) = replacements.first(where: { line.hasPrefix($0.0) }) else { return line }
+        return new.isEmpty ? nil : new
+    }
+    return CleanupMessages(system: lines.joined(separator: "\n"), user: baseline.user)
+}
 // Experimental request option only; the normal provider transport retains its security behavior.
 struct ReasoningTransport: HTTPTransport {
     var effort: String
@@ -168,7 +181,8 @@ final class MeasuredProvider: CleanupProvider, @unchecked Sendable {
         for attempt in 0...flags.retries {
             let start = ProcessInfo.processInfo.systemUptime
             do {
-                let prompt = flags.prompt == "intent" ? intent(messages, options: flags.options) : flags.prompt == "concise" ? concise(messages, options: flags.options) : messages
+                let prompt = flags.prompt == "intent" ? intent(messages, options: flags.options) : flags.prompt == "concise" ? concise(messages, options: flags.options)
+                    : flags.prompt == "candidate" ? candidate(messages, options: flags.options) : messages
                 let out = try await inner.cleanup(prompt)
                 seconds.append(ProcessInfo.processInfo.systemUptime - start)
                 attemptSucceeded.append(true)
@@ -243,6 +257,9 @@ if flags.selfCheck {
     let strictOnly = Case(raw: "", must: [], mustNot: [], modes: ["strict"]), proOnly = Case(raw: "", must: [], mustNot: [], modes: ["professional"])
     assert(applies(strictOnly, "strict") && !applies(strictOnly, "professional") && applies(proOnly, "professional") && !applies(proOnly, "strict") && applies(Case(raw: "", must: [], mustNot: []), "polish"))
     assert((try? Flags(["--rescore", "/x.json"]))?.rescore == "/x.json")
+    assert((try? Flags(["--replay", "/r.json", "--prompt", "candidate", "--endpoint", "apple"]))?.replay == "/r.json")
+    let plain = CleanupMessages(system: "a\nb", user: "u")
+    assert(candidate(plain, options: flags.options) == plain)
     print("self-check passed: CLI, percentiles, case-insensitive quality, independent guard")
     return
 }
@@ -310,22 +327,35 @@ for index in 0...2 {
 }
 for index in [0, 1, 2, 3, 7, 14] { cases[index].modes = ["professional"] }
 for index in [4, 13, 26] { cases[index].modes = ["polish", "professional"] }
+if let path = flags.replay {
+    struct Replayed: Decodable { var raw: String; var must: [String]; var mustNot: [String]; var tags: [String] }
+    cases = try JSONDecoder().decode([Replayed].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        .map { Case(raw: $0.raw, must: $0.must, mustNot: $0.mustNot, forbidNumberedList: !$0.tags.contains("list")) }
+}
 if let subset = flags.subset, !subset.allSatisfy({ cases.indices.contains($0) }) {
     throw NSError(domain: "benchmark CLI", code: 2, userInfo: [NSLocalizedDescriptionKey: "Case index outside available range 0..<\(cases.count)"])
 }
 let defaults = UserDefaults(suiteName: "cc.clouddev.dictation.development")!
+var provider: CleanupProvider, model: String
+if flags.endpoint == "apple" {
+    let apple = AppleCleanupProvider()
+    if let reason = apple.status() { print("Apple Intelligence unavailable: \(reason.userMessage)"); exit(2) }
+    apple.prewarm(); provider = apple; model = "apple-on-device"
+} else {
 let endpointKey = flags.endpoint == "cleanup" ? "customAPIBaseURL" : "customTranscriptionAPIBaseURL"
 let modelKey = flags.endpoint == "cleanup" ? "customAPIModel" : "customTranscriptionModel"
 let credential: ProviderID = flags.endpoint == "cleanup" ? .customCleanup : .customTranscription
 guard let base = defaults.string(forKey: endpointKey),
-      let model = flags.model ?? defaults.string(forKey: modelKey),
-      var provider = makeCleanupProvider(.customAPI, key: try CustomAPIKeyBinding.read(at: base, defaults: defaults, credentials: KeychainCredentialStore(), provider: credential), apiBaseURL: base, model: model) else {
+      let configured = flags.model ?? defaults.string(forKey: modelKey),
+      let made = makeCleanupProvider(.customAPI, key: try CustomAPIKeyBinding.read(at: base, defaults: defaults, credentials: KeychainCredentialStore(), provider: credential), apiBaseURL: base, model: configured) else {
     print("No Custom Provider cleanup configured"); exit(2)
 }
+provider = made; model = configured
 if var compatible = provider as? OpenAICompatibleCleanupProvider {
     if let effort = flags.reasoning { compatible.transport = ReasoningTransport(effort: effort) }
     if flags.listModels { for id in try await compatible.discoverModels() { print(id) }; return }
     provider = compatible
+}
 }
 let directory = FileManager.default.temporaryDirectory.appendingPathComponent("murmur-live-\(UUID())")
 let suite = "murmur-live-\(UUID())"
