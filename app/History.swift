@@ -101,9 +101,17 @@ struct AfterPaste: Codable, Equatable {
     var endReason: String? = nil
 }
 
-/// Seconds per stage; total runs from the key release to the end of insertion.
+/// Seconds per stage, in pipeline order, from the key release: `capture` (release until transcription
+/// starts: the release tail plus stopping the recording), `transcription`, `cleanup`, `handoff` (cleanup
+/// done until insertion starts: saving the entry, reading the focused field), `insertion`, then `total`.
+/// `insertion` ends when the text is visible (⌘V posted, or the field first read back as matching) and
+/// `total` is release to that moment. `insertionDone` is the insertion call's whole duration, which
+/// also covers the read-back's wait; the clipboard restore runs after both and is in neither.
+/// Entries from 0.2.3 and earlier lack `capture`, `handoff` and `insertionDone`, and their `insertion`
+/// and `total` run to the end of a fixed 0.5 s clipboard wait, so they read about 0.5 s higher.
 struct StageTiming: Codable, Equatable {
     var transcription: Double? = nil, cleanup: Double? = nil, insertion: Double? = nil, total: Double? = nil
+    var capture: Double? = nil, handoff: Double? = nil, insertionDone: Double? = nil
 }
 
 struct HistoryStore {
