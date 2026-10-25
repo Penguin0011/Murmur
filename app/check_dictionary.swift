@@ -179,6 +179,15 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         check(CorrectionFilter.evaluate(source: "jira", target: "Jira") == .rejected(.caseOnly), "no lexicon: case fix skipped")
         check(CorrectionFilter.evaluate(source: "git hub", target: "GitHub") == .rejected(.punctuationOnly), "no lexicon: spacing fix skipped")
         check(CorrectionFilter.evaluate(source: "Jon", target: "John") == .rejected(.tooShort), "no lexicon: short word skipped")
+        // History, October 2026: garbled names whose consonants shift (similarity 0.57 and 0.71).
+        let names: (String) -> Bool = { ["codecs", "codex", "claud", "claude", "buzzard", "lunch", "launch"].contains($0) }
+        check(CorrectionFilter.evaluate(source: "ChadJuT", target: "ChatGPT", isCommonWord: names) == .accepted(source: "ChadJuT", target: "ChatGPT"), "garbled product name learned with a lexicon")
+        check(CorrectionFilter.evaluate(source: "In Buzari's", target: "In Buzzati's", isCommonWord: names) == .accepted(source: "Buzari", target: "Buzzati"), "possessive name learned as its stem")
+        check(CorrectionFilter.evaluate(source: "ChadJuT", target: "ChatGPT") == .rejected(.notRespelling), "no lexicon: loose respelling skipped")
+        check(CorrectionFilter.evaluate(source: "Buzari", target: "buzzard", isCommonWord: names) == .rejected(.notRespelling), "loose respelling never lands on an ordinary word")
+        check(CorrectionFilter.evaluate(source: "codecs", target: "Codex", isCommonWord: names) == .rejected(.ordinaryWords), "codecs -> Codex stays unlearned")
+        check(CorrectionFilter.evaluate(source: "claud", target: "Claude", isCommonWord: names) == .rejected(.ordinaryWords), "claud -> Claude stays unlearned")
+        check(CorrectionFilter.evaluate(source: "Quorbix", target: "Fredlin", isCommonWord: names) == .rejected(.notRespelling), "dissimilar unfamiliar words skipped")
     }
 
     static func learningChecks(_ dir: URL) throws {
@@ -501,6 +510,16 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             let s = UUID()
             try check(try ledger.record(obs(s, "lunch", "launch")) == .rejected(.ordinaryWords), "ledger uses lexicon")
             try check(ledger.settle(sessionID: s).isEmpty && learned(dict).isEmpty, "ordinary-word swap rejected under one-fix learning")
+        }
+
+        // History, October 2026: one fix of a garbled name in pasted text.
+        do {
+            let (dict, ledger) = try fresh("garbled")
+            ledger.isCommonWord = { ["errors", "across", "the", "or", "codex", "app", "latest", "version"].contains($0) }
+            let s = UUID()
+            try ledger.record(obs(s, "errors across the ChadJuT or Codex app", "errors across the ChatGPT or Codex app"))
+            try check(try ledger.settle(sessionID: s).map(\.preferred) == ["ChatGPT"], "ChadJuT fix learned from one edit")
+            check(dict.apply(to: "the ChadJuT app", isCommonWord: ledger.isCommonWord) == "the ChatGPT app", "learned form replaced")
         }
 
         // Learning off records nothing.
