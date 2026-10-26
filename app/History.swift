@@ -35,6 +35,14 @@ struct HistoryEntry: Codable, Identifiable {
     var cleanupOutcome: CleanupPath? = nil
     /// True once the user edits `finalText` in History.
     var edited: Bool? = nil
+    // Diagnostics (October 22, 2026): what a developer needs to see why a dictation came out as it did.
+    // Dictation text lives only here, with the entry's permissions and retention, never in the unified log. Nil before then.
+    var transcription: TranscriptionDetail? = nil
+    var cleanup: CleanupDetail? = nil
+    var afterPaste: AfterPaste? = nil
+    var timing: StageTiming? = nil
+    /// File name in `history/recordings` when "Keep recordings for diagnostics" was on; purged after 7 days.
+    var recordingFile: String? = nil
 
     /// The same dictation with new text and status; the recording facts carry over.
     func with(finalText: String, status: String, fallback: String? = nil, rejected: String? = nil) -> HistoryEntry {
@@ -42,6 +50,90 @@ struct HistoryEntry: Codable, Identifiable {
         next.finalText = finalText; next.insertionStatus = status; next.cleanupFallback = fallback; next.cleanupRejectedOutput = rejected
         return next
     }
+}
+
+/// One Whisper segment as parsed, with the loud-window count under it and whether the parser dropped it.
+struct SegmentDetail: Codable, Equatable {
+    var text: String
+    var start: Double? = nil, end: Double? = nil
+    var avgLogprob: Double? = nil, noSpeechProb: Double? = nil, compressionRatio: Double? = nil
+    var loudWindows: Int? = nil
+    var dropped = false
+}
+
+/// What the transcriber heard and how loud the clip was. Segments only for Whisper verbose_json.
+struct TranscriptionDetail: Codable, Equatable {
+    var segments: [SegmentDetail]? = nil
+    var clipSeconds: Double? = nil
+    /// Median and 90th-percentile peak of the clip's 100 ms windows.
+    var peakP50: Double? = nil, peakP90: Double? = nil
+    /// The silence pre-check's level (second-highest window peak) and the threshold it was held against.
+    var silencePeak: Double? = nil, silenceThreshold: Double? = nil
+    /// "passed", or "unchecked" when the provider has no pre-check or the audio could not be decoded.
+    var precheck: String? = nil
+}
+
+/// The cleanup model's exchange, without any screen text.
+struct CleanupDetail: Codable, Equatable {
+    /// The model's exact output where the guard accepted it. A rejected output is `cleanupRejectedOutput`.
+    var modelOutput: String? = nil
+    /// "cleaned", "unchanged", "rejected" or "provider-error", one per section, comma-separated.
+    var guardVerdict: String? = nil
+    var providerError: String? = nil
+    /// Short hash of the system prompt, to correlate prompt changes with results.
+    var promptHash: String? = nil
+    var dictionaryTerms: [String]? = nil
+    /// The text sent for cleanup when the dictionary changed it from `rawText`.
+    var input: String? = nil
+    var contextUsed: Bool? = nil
+    /// Bundle ID of the app dictated into, and the characters of each context part sent. Never the context.
+    var contextApp: String? = nil
+    var contextChars: [String: Int]? = nil
+}
+
+/// The pasted span as last observed when the correction watch closed. Text and `changed` are nil when
+/// the watch lost the span (the reason is in `endReason`), so "unchanged" is never claimed without evidence.
+struct AfterPaste: Codable, Equatable {
+    var text: String? = nil
+    var changed: Bool? = nil
+    /// "ax" (read back from the field) or "keys" (followed by keystrokes).
+    var route: String? = nil
+    var endReason: String? = nil
+
+    /// The span as the user left it, minus words typed after the dictation. Those are not an edit of it
+    /// and can be anything, such as a password typed into the same composer, so History never keeps them.
+    /// Replaced words stay, one for one; `changed` is by words, so whitespace alone is not an edit.
+    /// ponytail: word alignment only; a dictation replaced wholesale is kept as typed.
+    static func trimmingAppended(initial: String, edited: String) -> (text: String, changed: Bool) {
+        let said = initial.split(whereSeparator: \.isWhitespace).map(String.init)
+        let seen = edited.split(whereSeparator: \.isWhitespace).map(String.init)
+        var inserted = Set<Int>(), removed = Set<Int>()
+        for change in seen.difference(from: said) {
+            switch change {
+            case .insert(let offset, _, _): inserted.insert(offset)
+            case .remove(let offset, _, _): removed.insert(offset)
+            }
+        }
+        let lastKeptSeen = seen.indices.last { !inserted.contains($0) } ?? -1
+        let lastKeptSaid = said.indices.last { !removed.contains($0) } ?? -1
+        // Dictated words after the last kept one were replaced; as many typed words stand in for them.
+        let replacedTail = said.count - 1 - lastKeptSaid
+        let kept = Array(seen.prefix(lastKeptSeen + 1 + min(replacedTail, seen.count - lastKeptSeen - 1)))
+        return (kept.joined(separator: " "), kept != said)
+    }
+}
+
+/// Seconds per stage, in pipeline order, from the key release: `capture` (release until transcription
+/// starts: the release tail plus stopping the recording), `transcription`, `cleanup`, `handoff` (cleanup
+/// done until insertion starts: saving the entry, reading the focused field), `insertion`, then `total`.
+/// `insertion` ends when the text is visible (⌘V posted, or the field first read back as matching) and
+/// `total` is release to that moment. `insertionDone` is the insertion call's whole duration, which
+/// also covers the read-back's wait; the clipboard restore runs after both and is in neither.
+/// Entries from 0.2.3 and earlier lack `capture`, `handoff` and `insertionDone`, and their `insertion`
+/// and `total` run to the end of a fixed 0.5 s clipboard wait, so they read about 0.5 s higher.
+struct StageTiming: Codable, Equatable {
+    var transcription: Double? = nil, cleanup: Double? = nil, insertion: Double? = nil, total: Double? = nil
+    var capture: Double? = nil, handoff: Double? = nil, insertionDone: Double? = nil
 }
 
 struct HistoryStore {

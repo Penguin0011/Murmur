@@ -28,6 +28,9 @@ final class Capture {
     /// Uptime after which buffers are dropped (queue-owned). Set from the shortcut thread at a hold's
     /// release, so a late main thread cannot extend the recording past release plus tail.
     private var cutoff = TimeInterval.infinity
+    /// Queue-owned: when the last buffer with a peak at the silence pre-check's level (0.01) arrived.
+    /// At stop, `cutoff - lastLoud` is how much of the release tail was silence (the `tail-quiet` log).
+    private var lastLoud: TimeInterval?
     private static let currentLock = NSLock()
     nonisolated(unsafe) private static var _current: Capture?
     /// The capture that is recording now, for the shortcut thread.
@@ -178,9 +181,10 @@ final class Capture {
                 // The converter keeps resampler state, so it runs only here, in order.
                 guard let copy = converter.map({ Self.convert(copy, with: $0) }) ?? copy else { return }
                 if let samples = copy.floatChannelData, copy.frameLength > 0 {
-                    var energy = 0.0
-                    for index in 0..<Int(copy.frameLength) { energy += Double(samples[0][index]) * Double(samples[0][index]) }
+                    var energy = 0.0, peak: Float = 0
+                    for index in 0..<Int(copy.frameLength) { energy += Double(samples[0][index]) * Double(samples[0][index]); peak = max(peak, abs(samples[0][index])) }
                     level = min(1, sqrt(energy / Double(copy.frameLength)) * 8)
+                    if peak >= 0.01 { lastLoud = received }
                 }
                 if firstBuffer == nil {
                     firstBuffer = received - started
@@ -235,6 +239,9 @@ final class Capture {
         let now = ProcessInfo.processInfo.systemUptime
         let rate = format?.sampleRate ?? 0
         let recorded = rate > 0 ? Double(frames) / rate : 0
+        // How much of the release tail was silent at its end; the whole tail (>= 0.4) means a shorter tail would lose nothing.
+        let quiet = queue.sync { () -> TimeInterval? in cutoff.isFinite ? cutoff - (lastLoud ?? started) : nil }
+        if let quiet { timingLog.notice("tail-quiet took=\(max(0, quiet), format: .fixed(precision: 3))") }
         timingLog.notice("capture-stop at=\(now, format: .fixed(precision: 3)) wall=\(now - self.started, format: .fixed(precision: 3)) recorded=\(recorded, format: .fixed(precision: 3))")
     }
 }

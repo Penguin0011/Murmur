@@ -122,6 +122,11 @@ import SwiftUI
                 controller.addDictionaryEntry(preferred: "Siobhan", variants: "shivon")
                 if let entry = controller.dictionaryEntries.last { controller.updateDictionaryEntry(entry, preferred: entry.preferred, variants: "shivon", enabled: false) }
                 controller.blockedWords = [.heard("versel"), .spelling("Akme")]
+                // After the page's own refresh (fixture History has none), before the 2 s snapshot.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    controller.dictionarySuggestions = [DictionarySuggestion(preferred: "Cerebras", heard: ["Serbrass", "Serebrass", "Serobrass"], dictations: 7),
+                                                        DictionarySuggestion(preferred: "Proxmox", heard: ["Proxmox", "Proxmonk"], dictations: 6)]
+                }
             }
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }

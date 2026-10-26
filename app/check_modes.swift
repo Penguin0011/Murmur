@@ -198,6 +198,22 @@ private final class MockCloudCleaner: CleanupProvider, @unchecked Sendable {
         let modeOn = await p.processAsync("we ship it on friday", style: DictationStyle(mode: WritingMode(options: .standard), settings: p.settings))
         check(modeOn == .insert("We ship it on Friday."), "a mode's cleanup options apply over faithful settings: \(modeOn)")
 
+        let faithfulSpy = MockCloudCleaner { _ in "Changed." }
+        p.cloudCleaner = faithfulSpy
+        for route in [CleanupRoute.local, .cloud] {
+            faithful.route = route
+            try p.update(faithful)
+            for tone in Tone.allCases {
+                let mode = WritingMode(options: .faithful, tone: tone)
+                let style = DictationStyle(mode: mode, settings: p.settings)
+                let output = await p.processAsync("Hello Sam, we ship Friday.", style: style)
+                check(output == .insert("Hello Sam, we ship Friday."), "Faithful preserves wording and punctuation with \(tone) on \(route)")
+                let direct = p.process("Hello Sam, we ship Friday.", style: DictationStyle(options: .faithful, tone: tone))
+                check(direct == .insert("Hello Sam, we ship Friday."), "direct Faithful style ignores \(tone) on \(route)")
+            }
+        }
+        check(faithfulSpy.messages.isEmpty, "Faithful never invokes AI cleanup")
+
         print(failures == 0 ? "\(passes) checks passed, 0 failed" : "\(passes) passed, \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }
