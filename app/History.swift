@@ -99,6 +99,28 @@ struct AfterPaste: Codable, Equatable {
     /// "ax" (read back from the field) or "keys" (followed by keystrokes).
     var route: String? = nil
     var endReason: String? = nil
+
+    /// The span as the user left it, minus words typed after the dictation. Those are not an edit of it
+    /// and can be anything, such as a password typed into the same composer, so History never keeps them.
+    /// Replaced words stay, one for one; `changed` is by words, so whitespace alone is not an edit.
+    /// ponytail: word alignment only; a dictation replaced wholesale is kept as typed.
+    static func trimmingAppended(initial: String, edited: String) -> (text: String, changed: Bool) {
+        let said = initial.split(whereSeparator: \.isWhitespace).map(String.init)
+        let seen = edited.split(whereSeparator: \.isWhitespace).map(String.init)
+        var inserted = Set<Int>(), removed = Set<Int>()
+        for change in seen.difference(from: said) {
+            switch change {
+            case .insert(let offset, _, _): inserted.insert(offset)
+            case .remove(let offset, _, _): removed.insert(offset)
+            }
+        }
+        let lastKeptSeen = seen.indices.last { !inserted.contains($0) } ?? -1
+        let lastKeptSaid = said.indices.last { !removed.contains($0) } ?? -1
+        // Dictated words after the last kept one were replaced; as many typed words stand in for them.
+        let replacedTail = said.count - 1 - lastKeptSaid
+        let kept = Array(seen.prefix(lastKeptSeen + 1 + min(replacedTail, seen.count - lastKeptSeen - 1)))
+        return (kept.joined(separator: " "), kept != said)
+    }
 }
 
 /// Seconds per stage, in pipeline order, from the key release: `capture` (release until transcription

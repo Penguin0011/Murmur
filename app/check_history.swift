@@ -41,6 +41,13 @@ import Darwin
         diagnosed.cleanup = CleanupDetail(modelOutput: "Hi.", guardVerdict: "cleaned", promptHash: "0123abcd", dictionaryTerms: ["Akme"], input: "hi", contextUsed: true,
                                           contextApp: "com.apple.Notes", contextChars: ["selected": 0, "clipboard": 12, "window": 40])
         diagnosed.afterPaste = AfterPaste(text: "Hi there.", changed: true, route: "ax", endReason: "focus departed")
+        // Words typed after the dictation are never kept; edits of it and wholesale replacements are.
+        let said = "Send it to Akme today."
+        precondition(AfterPaste.trimmingAppended(initial: said, edited: said + "\nuser@host secret: x1") == (said, false), "append-only is no edit and keeps nothing typed")
+        precondition(AfterPaste.trimmingAppended(initial: said, edited: "Send it to Acme today. secret: x1") == ("Send it to Acme today.", true), "an edit keeps the fix, drops the append")
+        precondition(AfterPaste.trimmingAppended(initial: said, edited: "Send it to Akme tomorrow. secret: x1") == ("Send it to Akme tomorrow.", true), "a fixed last word stays, the append goes")
+        precondition(AfterPaste.trimmingAppended(initial: "TrueNASDOTCloud doesn't get that.", edited: "truenas.clouddev.dad") == ("truenas.clouddev.dad", true), "a wholesale replacement is kept")
+        precondition(AfterPaste.trimmingAppended(initial: said, edited: said + "\n") == (said, false), "whitespace alone is no edit")
         diagnosed.timing = StageTiming(transcription: 0.4, cleanup: 0.9, insertion: 0.1, total: 1.6, capture: 0.44, handoff: 0.01, insertionDone: 0.2)
         let olderTiming = try JSONDecoder().decode(StageTiming.self, from: Data(#"{"transcription":0.4,"cleanup":0.4,"insertion":0.51,"total":1.8}"#.utf8))
         precondition(olderTiming.capture == nil && olderTiming.handoff == nil && olderTiming.insertionDone == nil && olderTiming.total == 1.8, "timing from 0.2.3 decodes")

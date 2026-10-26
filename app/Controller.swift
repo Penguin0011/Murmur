@@ -1811,8 +1811,8 @@ final class PreStart: @unchecked Sendable {
     /// The span as last observed when the window closed, whatever the learning ledger made of it.
     /// Deferred: the next dictation can end the watch just before its paste, which should not wait on a disk write.
     private func recordAfterPaste(_ w: Watch) {
-        let seen = w.observation.edited
-        let after = AfterPaste(text: seen, changed: seen.map { $0 != w.observation.initial }, route: w.route, endReason: w.observation.stopReason)
+        let seen = w.observation.edited.map { AfterPaste.trimmingAppended(initial: w.observation.initial, edited: $0) }
+        let after = AfterPaste(text: seen?.text, changed: seen?.changed, route: w.route, endReason: w.observation.stopReason)
         DispatchQueue.main.async { [weak self] in
             guard let self, !w.entryID.isEmpty, let index = self.history.firstIndex(where: { $0.id == w.entryID }) else { return }
             var entry = self.history[index]
