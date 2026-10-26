@@ -81,8 +81,31 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try learningChecks(root.appendingPathComponent("learn"), defaults)
         try await sectionChecks(ProcessingCoordinator(directory: root.appendingPathComponent("sections"), defaults: defaults))
         try editorChecks(ProcessingCoordinator(directory: root.appendingPathComponent("editor"), defaults: defaults))
+        try recordingChecks(root.appendingPathComponent("recordings"))
         print("\(passes) checks passed, \(failures) failed")
         if failures > 0 { exit(1) }
+    }
+
+    /// Off keeps nothing, so the caller deletes the audio exactly as before; on keeps an owner-only copy for 7 days.
+    static func recordingChecks(_ history: URL) throws {
+        let audio = history.deletingLastPathComponent().appendingPathComponent("retry-\(UUID()).wav")
+        try FileManager.default.createDirectory(at: history, withIntermediateDirectories: true)
+        try Data("RIFF".utf8).write(to: audio)
+        let recordings = DiagnosticRecordings(), id = UUID().uuidString
+        check(recordings.keep(audio, entryID: id) == nil && !FileManager.default.fileExists(atPath: DiagnosticRecordings.directory(inHistory: history).path), "off keeps nothing and creates nothing")
+        recordings.directory = DiagnosticRecordings.directory(inHistory: history)
+        let name = recordings.keep(audio, entryID: id)
+        let kept = DiagnosticRecordings.directory(inHistory: history).appendingPathComponent(id + ".wav")
+        let mode = (try? FileManager.default.attributesOfItem(atPath: kept.path)[.posixPermissions] as? NSNumber)?.intValue
+        check(name == id + ".wav" && FileManager.default.fileExists(atPath: audio.path) && mode == 0o600, "on copies the audio, owner-only, and leaves the original for the caller")
+        check(recordings.keep(audio, entryID: "../x") == nil, "only entry ids name recordings")
+        let usage = try HistoryCap.usage(directory: history)
+        check(usage == 0, "recordings do not count toward the History size cap")
+        try DiagnosticRecordings.purge(history: history, now: Date().addingTimeInterval(6 * 86400))
+        check(FileManager.default.fileExists(atPath: kept.path), "kept for 7 days")
+        try DiagnosticRecordings.purge(history: history, now: Date().addingTimeInterval(8 * 86400))
+        check(!FileManager.default.fileExists(atPath: kept.path), "purged after 7 days")
+        try? FileManager.default.removeItem(at: audio)
     }
 
     static func settingsChecks(_ defaults: UserDefaults) throws {
@@ -121,6 +144,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(p.process("Um, I called acme today.") == .insert("Um, I called Akme today."), "faithful applies dictionary only")
         check(p.process("so, um, ack me and the like") == .insert("so, um, Akme and the like"), "faithful multiword variant")
         check(spy.calls == 0, "faithful never calls the cleaner")
+        check(p.lastOutcome == .off, "faithful outcome is off")
         check(p.process("No terms here, um.") == .insert("No terms here, um."), "faithful without terms is raw")
 
         // Standard options through RuleCleaner, dictionary before cleanup.
@@ -128,6 +152,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try p.update(settings)
         p.localCleaner = RuleCleaner()
         check(p.process("Um, I called acme today.") == .insert("I called Akme today."), "RuleCleaner + dictionary")
+        check(p.lastOutcome == .localRoute, "local route outcome")
         check(p.process("Meet Tuesday, sorry, Thursday at three.") == .insert("Meet Thursday at three."), "correction")
 
         // One option alone.
@@ -282,12 +307,14 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         // Not configured: local rules.
         await expect(p, "Um, call acme.", .insert("Um, call Akme."), "unconfigured cloud uses local rules")
         check(local.calls == 1, "unconfigured cloud ran local rules")
+        check(p.lastOutcome == .localRules, "unconfigured cloud outcome is local rules")
 
         // Success, guarded.
         let good = MockCloudCleaner(.success("Call Akme."))
         p.cloudCleaner = good
         await expect(p, "Um, call acme.", .insert("Call Akme."), "cloud success")
         check(good.messages.count == 1, "one provider call")
+        check(p.lastOutcome == .modelAccepted, "accepted model outcome")
         let prompt = good.messages.first
         check(prompt?.user.contains("Um, call Akme.") == true, "provider receives dictionary-applied text")
         check(prompt?.system.contains("Akme") == true, "relevant term in prompt")
@@ -336,6 +363,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         await expect(p, "Um, call acme.", .insert("Um, call Akme."), "cloud failure uses local rules")
         check(timeout.messages.count == 1, "a provider error is not retried")
         check(p.lastProviderError == .timeout(.gemini) && p.lastFallback == .cleanerFailed, "provider error kept")
+        check(p.lastOutcome == .localRules, "provider error outcome is local rules")
         p.cloudCleaner = MockCloudCleaner(.failure(.network(.gemini)))
         await expect(p, "Um, call acme.", .insert("Um, call Akme."), "network failure uses local rules")
         check(local.calls == localBefore + 2, "local rules ran for each failure")
@@ -347,9 +375,25 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         check(dropped.messages.count == 1, "no retry call")
         check(p.lastFallback == .unexplainedDeletion && p.lastProviderError == nil, "rejection reason kept, no provider error")
         check(p.lastRejectedOutput == "Every give or take twenty seconds. Okay?", "rejected model output kept for debugging")
+        check(p.lastOutcome == .modelPunctuationOnLocal, "rejected words, model punctuation outcome")
+        settings.options.punctuation = false
+        try p.update(settings)
+        await expect(p, "every like give or take twenty seconds okay", .insert("every like give or take twenty seconds okay"), "rejection without punctuation uses local rules")
+        check(p.lastFallback != nil && p.lastOutcome == .localRules, "rejected without punctuation outcome is local rules")
+        settings.options = .standard
+        try p.update(settings)
         p.cloudCleaner = MockCloudCleaner(.success("Call Akme."))
         await expect(p, "Um, call acme.", .insert("Call Akme."), "next dictation passes")
         check(p.lastRejectedOutput == nil, "rejected output cleared per dictation")
+        // Diagnostics: the accepted output as returned, the verdict, and a prompt hash that ignores the nonce and the terms.
+        check(p.lastModelOutput == "Call Akme." && p.lastGuardVerdict == "cleaned" && p.lastTerms == ["Akme"], "accepted output, verdict and terms kept")
+        let hashed = p.lastPromptHash
+        p.cloudCleaner = MockCloudCleaner(.success("Nothing special here."))
+        _ = await p.processAsync("Um, nothing special here.")
+        check(hashed != nil && hashed?.count == 8 && p.lastPromptHash == hashed && p.lastTerms.isEmpty, "prompt hash is stable across nonces and dictionary terms")
+        p.cloudCleaner = MockCloudCleaner(.success("Call Akme."))
+        _ = await p.processAsync("every like give or take twenty seconds okay")
+        check(p.lastGuardVerdict == "rejected" && p.lastModelOutput == nil, "a rejected output is a verdict, not a model output")
 
         // Reject an invented number without undoing an independently safe spoken correction.
         let correctionRaw = "Move the appointment to Monday. Actually, Thursday. Send the agenda afterward."
@@ -385,6 +429,27 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try p.update(settings)
         p.cloudCleaner = MockCloudCleaner(.failure(.network(.gemini)))
         await expect(p, "Meet on Monday period Thursday instead period", .insert("Meet on Thursday."), "spoken punctuation precedes local instead repair")
+
+        // A rejected rewrite still gets every enabled local operation, not just corrections.
+        settings.options = CleanupOptions(punctuation: true, professional: true, spoken: true)
+        try p.update(settings)
+        let spyCleaner = p.localCleaner; p.localCleaner = RuleCleaner()
+        p.cloudCleaner = MockCloudCleaner(.success("Please send the report on Monday at 9."))
+        await expect(p, "Um, please send the report on Friday, sorry, Monday.", .insert("Please send the report on Monday."), "fillers and repair survive rejected number")
+        check(p.lastFallback == .numberAdded, "rejection reason kept with local operations")
+        p.cloudCleaner = MockCloudCleaner(.success("Send the report, please. Thank you."))
+        await expect(p, "Send the report comma please period", .insert("Send the report, please."), "spoken commands survive rejected rewrite")
+        p.cloudCleaner = MockCloudCleaner(.success("Meet on Thursday at 9."))
+        await expect(p, "Meet on Monday period Thursday instead period", .insert("Meet on Thursday."), "spoken instead repair survives rejected rewrite")
+        p.cloudCleaner = MockCloudCleaner(.success("Shopping list: apples, milk and 9 bread."))
+        await expect(p, "Shopping list: first apples, second milk, third bread.", .insert("Shopping list:\n1. Apples\n2. Milk\n3. Bread"), "local list survives rejected rewrite")
+        p.cloudCleaner = MockCloudCleaner(.success("Um, she said \"ship it\" on Monday at 9."))
+        await expect(p, "Um, she said \"ship it\" on Monday.", .insert("She said \"ship it\" on Monday."), "quotes skip punctuation transfer, keep local cleanup")
+        settings.options.fillers = false; settings.options.spoken = false
+        try p.update(settings)
+        p.cloudCleaner = MockCloudCleaner(.success("Please send the report comma on Monday at 9."))
+        await expect(p, "Um, please send the report comma on Monday.", .insert("Um, please send the report comma on Monday."), "fallback respects fillers and spoken commands off")
+        p.localCleaner = spyCleaner
         settings.options = .standard
         try p.update(settings)
 
@@ -403,6 +468,7 @@ private func expect(_ p: ProcessingCoordinator, _ raw: String, _ expected: Proce
         try p.update(settings)
         await expect(p, "Um, call acme.", .insert("Um, call Akme."), "cloud faithful applies dictionary only")
         check(idle.messages.isEmpty, "faithful never calls the provider")
+        check(p.lastOutcome == .off, "cloud faithful outcome is off")
 
         // Local route through the async entry point uses the local cleaner.
         settings.route = .local; settings.options = .standard

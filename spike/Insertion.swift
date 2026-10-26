@@ -23,6 +23,9 @@ struct InsertionResult {
     let status: Status
     let detail: String
     let snapshot: FocusSnapshot?
+    /// Uptime when the text became visible: ⌘V posted, or the first read-back that matched the field.
+    /// The clipboard restore and the read-back's remaining wait come after it. Nil when nothing was pasted.
+    var visibleAt: TimeInterval? = nil
 }
 
 enum InsertionError: Error, CustomStringConvertible {
@@ -72,6 +75,38 @@ struct LearningFocusIdentity {
     }
 }
 
+/// Chromium apps (Electron, CEF) leave their web content out of the accessibility tree until a client
+/// asks, so composer fields read as nothing. Asked once per process; recording start captures focus
+/// seconds before the paste, which is time enough for the tree to build. Browsers are left alone, and so
+/// are VS Code-family editors, which switch to screen-reader mode when a client asks.
+private var webAccessibilityAsked = Set<pid_t>()
+private let webAccessibilitySkipped: Set<String> = ["com.microsoft.VSCode", "com.microsoft.VSCodeInsiders", "com.vscodium",
+                                                    "com.todesktop.230313mzl4w4u92", "com.exafunction.windsurf"]
+func requestWebAccessibility(pid: pid_t) {
+    guard webAccessibilityAsked.insert(pid).inserted,
+          let app = NSRunningApplication(processIdentifier: pid), let bundle = app.bundleURL,
+          !browserBundleIDs.contains(app.bundleIdentifier ?? ""), !webAccessibilitySkipped.contains(app.bundleIdentifier ?? ""),
+          bundleHasChromiumHelpers(bundle) else { return }
+    let element = AXUIElementCreateApplication(pid)
+    // Electron honours AXManualAccessibility; CEF (the Codex app) rejects it as unsupported and only
+    // takes AXEnhancedUserInterface, reporting an error while applying it, so that result is ignored.
+    // AXEnhancedUserInterface can upset window managers, so it is only the fallback.
+    guard AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue) != .success else { return }
+    if axAttribute(element, "AXEnhancedUserInterface") as? Bool != true {
+        _ = AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    }
+}
+
+/// Electron ships "<App> Helper (Renderer).app" in Frameworks; CEF puts the same helper under a framework's Helpers folder.
+func bundleHasChromiumHelpers(_ bundle: URL) -> Bool {
+    guard let walk = FileManager.default.enumerator(at: bundle.appendingPathComponent("Contents/Frameworks"), includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return false }
+    for case let url as URL in walk {
+        if url.lastPathComponent.hasSuffix("(Renderer).app") { return true }
+        if walk.level >= 5 { walk.skipDescendants() }
+    }
+    return false
+}
+
 func captureFocus() throws -> FocusSnapshot {
     guard AXIsProcessTrusted() else { throw InsertionError.unavailable("Accessibility permission is unavailable; no prompt requested") }
     // frontmostApplication only refreshes when the run loop delivers workspace notifications; polling callers sleep instead.
@@ -79,6 +114,7 @@ func captureFocus() throws -> FocusSnapshot {
     guard let frontmost = NSWorkspace.shared.frontmostApplication else {
         throw InsertionError.unavailable("No frontmost application")
     }
+    requestWebAccessibility(pid: frontmost.processIdentifier)
     let application = AXUIElementCreateApplication(frontmost.processIdentifier)
     func focusedElement(_ owner: AXUIElement) -> (AXUIElement?, AXError) {
         var raw: CFTypeRef?
@@ -172,31 +208,57 @@ func insertText(_ text: String, into destination: FocusSnapshot) -> InsertionRes
     guard let expected = expectedInsertedValue(current.value, selection: current.selection, text: text) else {
         return result(.failed, "Invalid UTF16 selection; no insertion attempted")
     }
-    if let failure = pasteThroughClipboard(text, restore: true, settle: 0.5, stillTarget: {
+    let pasted = pasteThroughClipboard(text, restore: true, lease: clipboardLease, stillTarget: {
         (try? captureFocus()).map { sameDestination(current, $0) } ?? false
-    }) { return result(.failed, failure) }
-    return verifyInsertion(current, expected: expected, method: "clipboard paste")
+    })
+    if let failure = pasted.failure { return result(.failed, failure) }
+    return verifyInsertion(current, expected: expected, method: "clipboard paste", postedAt: pasted.postedAt)
 }
 
-/// Stages `text` on the clipboard and posts ⌘V, then waits `settle` seconds for the app to read it.
-/// `restore` puts the previous clipboard back; otherwise the text stays there for a manual paste.
-/// `stillTarget` is checked once more after staging. Returns why nothing was pasted, or nil.
-func pasteThroughClipboard(_ text: String, restore: Bool, settle: TimeInterval, stillTarget: () -> Bool) -> String? {
+/// How long the staged text stays on the clipboard after ⌘V, for the app to read it, and the longest
+/// the read-back waits for the field to show it.
+let clipboardLease: TimeInterval = 0.5
+
+/// The restore of the user's clipboard that follows a paste. It runs once, on a timer after the lease
+/// or earlier through `flushClipboardRestore`, so a paste never waits for it.
+private final class ClipboardRestore {
+    private let lock = NSLock()
+    private var action: (() -> Void)?
+    init(_ action: @escaping () -> Void) { self.action = action }
+    func run() { lock.withLock { defer { action = nil }; return action }?() }
+}
+private let pendingRestoreLock = NSLock()
+nonisolated(unsafe) private var pendingRestore: ClipboardRestore?
+
+/// Restores the clipboard now if a paste's restore is still waiting. Called before the next paste
+/// (which would otherwise save our own staged text as "the user's clipboard") and when Murmur quits.
+func flushClipboardRestore() {
+    pendingRestoreLock.withLock { defer { pendingRestore = nil }; return pendingRestore }?.run()
+}
+
+/// Stages `text` on the clipboard and posts ⌘V, then returns without waiting. `restore` puts the
+/// previous clipboard back `lease` seconds after the post, on a background timer, only if the clipboard
+/// still holds this paste's staged item; otherwise the text stays there for a manual paste.
+/// `stillTarget` is checked once more after staging. Returns why nothing was pasted (nil if it was)
+/// and the uptime at which ⌘V was posted.
+func pasteThroughClipboard(_ text: String, restore: Bool, lease: TimeInterval, stillTarget: () -> Bool) -> (failure: String?, postedAt: TimeInterval) {
+    flushClipboardRestore()
+    func refused(_ why: String) -> (failure: String?, postedAt: TimeInterval) { (why, 0) }
     let clipboard = NSPasteboard.general
     var saved: [NSPasteboardItem] = []
     let oldCount = clipboard.changeCount
     for item in clipboard.pasteboardItems ?? [] {
         let copy = NSPasteboardItem()
         for type in item.types {
-            guard let data = item.data(forType: type) else { return "Clipboard could not be preserved; no paste attempted" }
+            guard let data = item.data(forType: type) else { return refused("Clipboard could not be preserved; no paste attempted") }
             copy.setData(data, forType: type)
         }
         saved.append(copy)
     }
-    guard clipboard.changeCount == oldCount else { return "Clipboard changed during preservation; no paste attempted" }
+    guard clipboard.changeCount == oldCount else { return refused("Clipboard changed during preservation; no paste attempted") }
     guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true),
           let up = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false) else {
-        return "Cannot create paste events"
+        return refused("Cannot create paste events")
     }
     let stagedItem = NSPasteboardItem()
     let ownershipType = NSPasteboard.PasteboardType("org.dictation.spike.clipboard-owner")
@@ -207,7 +269,7 @@ func pasteThroughClipboard(_ text: String, restore: Bool, settle: TimeInterval, 
           stagedItem.setString(ownershipToken, forType: ownershipType),
           stagedItem.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType")),
           stagedItem.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.AutoGeneratedType")) else {
-        return "Cannot prepare clipboard text"
+        return refused("Cannot prepare clipboard text")
     }
     func ownsClipboard(_ expectedCount: Int) -> Bool {
         let before = clipboard.changeCount
@@ -215,9 +277,9 @@ func pasteThroughClipboard(_ text: String, restore: Bool, settle: TimeInterval, 
         return clipboardOwnershipVerified(expectedCount: expectedCount, beforeCount: before,
                                           afterCount: clipboard.changeCount, expectedToken: ownershipToken, actualToken: token)
     }
-    guard clipboard.changeCount == oldCount else { return "Clipboard changed before staging; no paste attempted" }
+    guard clipboard.changeCount == oldCount else { return refused("Clipboard changed before staging; no paste attempted") }
     let clearedCount = clipboard.clearContents()
-    guard clipboard.changeCount == clearedCount else { return "Clipboard changed after clearing; no paste attempted" }
+    guard clipboard.changeCount == clearedCount else { return refused("Clipboard changed after clearing; no paste attempted") }
     guard clipboard.writeObjects([stagedItem]) else {
         // Restore only our unchanged empty clear or a partial write carrying our unique token.
         let failureCount = clipboard.changeCount
@@ -227,26 +289,35 @@ func pasteThroughClipboard(_ text: String, restore: Bool, settle: TimeInterval, 
             clipboard.clearContents()
             if !saved.isEmpty { clipboard.writeObjects(saved) }
         }
-        return "Could not stage clipboard text"
+        return refused("Could not stage clipboard text")
     }
     // NSPasteboard has no atomic compare-and-restore; another writer can race this bounded check.
     let stagedCount = clipboard.changeCount
-    defer {
+    let restoreNow = {
         if restore, ownsClipboard(stagedCount) {
             clipboard.clearContents()
             if !saved.isEmpty { clipboard.writeObjects(saved) }
         }
     }
-    guard stillTarget() else { return "Destination changed after clipboard staging; no paste attempted" }
+    var posted = false
+    defer { if !posted { restoreNow() } }
+    guard stillTarget() else { return refused("Destination changed after clipboard staging; no paste attempted") }
     guard ownsClipboard(stagedCount) else {
-        return "Clipboard ownership changed; no paste attempted"
+        return refused("Clipboard ownership changed; no paste attempted")
     }
     down.flags = .maskCommand; up.flags = .maskCommand
     down.post(tap: .cghidEventTap); up.post(tap: .cghidEventTap)
-    // ponytail: bounded clipboard lease; apps taking longer than `settle` may miss the paste.
+    let postedAt = ProcessInfo.processInfo.systemUptime
+    posted = true
+    // ponytail: bounded clipboard lease; apps taking longer than `lease` may miss the paste.
     // Focus checking, posting, and clipboard restoration cannot be atomic on macOS.
-    Thread.sleep(forTimeInterval: settle)
-    return nil
+    let pending = ClipboardRestore(restoreNow)
+    pendingRestoreLock.withLock { pendingRestore = pending }
+    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + lease) {
+        pendingRestoreLock.withLock { if pendingRestore === pending { pendingRestore = nil } }
+        pending.run()
+    }
+    return (nil, postedAt)
 }
 
 /// For a focused field that cannot be read back (web editors, custom text views, no accessible
@@ -261,24 +332,37 @@ func pasteIntoFrontmostApp(_ text: String) -> InsertionResult {
     guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier, pid != getpid() else { return failed("No other app is frontmost") }
     let focus = LearningFocusIdentity.capture(pid: pid)
     guard !focus.secure else { return failed("Secure field rejected") }
-    if let failure = pasteThroughClipboard(text, restore: true, settle: 0.5, stillTarget: {
+    let pasted = pasteThroughClipboard(text, restore: true, lease: clipboardLease, stillTarget: {
         RunLoop.current.run(until: Date())
         return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid && !IsSecureEventInputEnabled()
             && focus.matches(LearningFocusIdentity.capture(pid: pid))
-    }) { return failed(failure) }
-    return InsertionResult(status: .unverified, detail: "clipboard paste into an unreadable field", snapshot: nil)
+    })
+    if let failure = pasted.failure { return failed(failure) }
+    return InsertionResult(status: .unverified, detail: "clipboard paste into an unreadable field", snapshot: nil, visibleAt: pasted.postedAt)
 }
 
-private func verifyInsertion(_ before: FocusSnapshot, expected: String?, method: String) -> InsertionResult {
-    let after = try? captureFocus()
-    let matched = after.map { $0.pid == before.pid && CFEqual($0.element, before.element) && !$0.secure && readbackMatches(expected, $0.value) } ?? false
+/// Reads the field back until it shows the pasted text, for at most `clipboardLease` after the post
+/// (the old fixed wait, now ended by the first match). The text counts as visible at that match, or at
+/// the post when the field never matched.
+private func verifyInsertion(_ before: FocusSnapshot, expected: String?, method: String, postedAt: TimeInterval) -> InsertionResult {
+    func readBack() -> (FocusSnapshot?, Bool) {
+        let after = try? captureFocus()
+        return (after, after.map { $0.pid == before.pid && CFEqual($0.element, before.element) && !$0.secure && readbackMatches(expected, $0.value) } ?? false)
+    }
+    var (after, matched) = readBack()
+    var visibleAt = matched ? ProcessInfo.processInfo.systemUptime : postedAt
+    while !matched, ProcessInfo.processInfo.systemUptime < postedAt + clipboardLease {
+        Thread.sleep(forTimeInterval: 0.025)
+        (after, matched) = readBack()
+        if matched { visibleAt = ProcessInfo.processInfo.systemUptime }
+    }
     let verified = insertionReadbackVerified(expected: expected, actual: after?.value,
                                              sameField: matched, browserTypeUnknown: before.browserTypeUnknown || (after?.browserTypeUnknown ?? true))
     // Lengths only: the detail is logged, so it must never carry the text.
     let lengths = "readback \(after?.value.map { String($0.utf16.count) } ?? "unreadable") vs expected \(expected.map { String($0.utf16.count) } ?? "unknown")"
     return InsertionResult(status: verified ? .verified : .unverified,
                            detail: verified ? "\(method) matched full-field readback" : "\(method) delivery unverified (\(lengths)); retain output, never automatically retry",
-                           snapshot: matched ? after : nil)
+                           snapshot: matched ? after : nil, visibleAt: visibleAt)
 }
 
 func insertionReadbackVerified(expected: String?, actual: String?, sameField: Bool, browserTypeUnknown: Bool) -> Bool {
@@ -306,6 +390,11 @@ func insertionTextRole(_ role: String) -> Bool {
 }
 
 func runInsertionChecks() {
+    let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("chromium-check-\(UUID().uuidString).app")
+    defer { try? FileManager.default.removeItem(at: fixture) }
+    let helper = fixture.appendingPathComponent("Contents/Frameworks/X Framework.framework/Versions/1/Helpers/X (Renderer).app")
+    try? FileManager.default.createDirectory(at: helper, withIntermediateDirectories: true)
+    assert(bundleHasChromiumHelpers(fixture) && !bundleHasChromiumHelpers(fixture.appendingPathComponent("Contents")))
     assert(readbackMatches("Hi there.", "Hi\u{00A0}there.\n") && readbackMatches(" a b", "a\u{200B} b"))
     assert(!readbackMatches("Hi there.", "Hi there. Hi there.") && !readbackMatches("ab", nil) && !readbackMatches(nil, "ab"))
     let element = AXUIElementCreateApplication(123)

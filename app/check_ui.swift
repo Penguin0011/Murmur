@@ -81,6 +81,8 @@ import SwiftUI
             HistoryEntry(id: UUID().uuidString, recordedAt: Date(), rawText: "Synthetic transcript pasted into an unreadable field. Long text wraps for visual inspection.\nSecond synthetic paragraph keeps this fixture free of real transcript content.", finalText: "Synthetic transcript pasted into an unreadable field. Long text wraps for visual inspection.\nSecond synthetic paragraph keeps this fixture free of real transcript content.", insertionStatus: "unverified"),
             HistoryEntry(id: UUID().uuidString, recordedAt: Date().addingTimeInterval(-3600), rawText: "Synthetic verified transcript.", finalText: "Synthetic verified transcript.", insertionStatus: "verified")
         ]
+        entries[0].cleanupOptions = CleanupOptions(professional: true); entries[0].cleanupFallback = CleanupFailureReason.unexplainedDeletion.rawValue
+        entries[0].cleanupOutcome = .localRules
         if CommandLine.arguments.contains("--empty") { entries = [] }
         // Insights (gap #19): timed dictations into a few apps on most of the last 24 days.
         if args.contains("--insights") && !args.contains("--empty") {
@@ -120,6 +122,11 @@ import SwiftUI
                 controller.addDictionaryEntry(preferred: "Siobhan", variants: "shivon")
                 if let entry = controller.dictionaryEntries.last { controller.updateDictionaryEntry(entry, preferred: entry.preferred, variants: "shivon", enabled: false) }
                 controller.blockedWords = [.heard("versel"), .spelling("Akme")]
+                // After the page's own refresh (fixture History has none), before the 2 s snapshot.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    controller.dictionarySuggestions = [DictionarySuggestion(preferred: "Cerebras", heard: ["Serbrass", "Serebrass", "Serobrass"], dictations: 7),
+                                                        DictionarySuggestion(preferred: "Proxmox", heard: ["Proxmox", "Proxmonk"], dictations: 6)]
+                }
             }
             if CommandLine.arguments.contains("--history") { NotificationCenter.default.post(name: Notification.Name("DictationShowHistory"), object: nil) }
             if args.contains("--insights") || args.contains("--history-off") { controller.screenRequest = "insights" }

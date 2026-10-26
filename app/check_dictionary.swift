@@ -18,6 +18,7 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         defer { try? FileManager.default.removeItem(at: root) }
         try dictionaryChecks(root.appendingPathComponent("dict"))
         try filterChecks()
+        suggestionChecks()
         try learningChecks(root.appendingPathComponent("learn"))
         try retentionChecks(root.appendingPathComponent("retention"))
         print("\(passes) checks passed, \(failures) failed")
@@ -116,6 +117,25 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         check(removed.count == 1 && store.entries.allSatisfy { $0.source == .manual } && store.entries.count == manualCount, "resetLearned removes only learned")
     }
 
+    static func suggestionChecks() {
+        // Real misheard forms from History: Whisper spells the same name several ways; cleanup wrote it right.
+        let common: Set<String> = ["we", "use", "for", "the", "tokens", "ask", "about", "send", "to", "today", "call", "and", "fast", "is", "very"]
+        let isCommon = { (w: String) in common.contains(w.lowercased()) }
+        let said: [(raw: String, final: String)] = [
+            ("we use Serbrass for the tokens", "We use Cerebras for the tokens."), ("ask Serebrass about tokens", "Ask Cerebras about tokens."),
+            ("Serobrass is very fast", "Serobrass is very fast."), ("send Buzari's tokens today", "Send Buzzati's tokens today."),
+            ("call Buzati today", "Call Buzati today."), ("send Proxmox tokens", "Send Proxmox tokens."), ("call Akme and Akme", "Call Akme and Akme."),
+        ]
+        let akme = DictionaryEntry(id: UUID(), preferred: "Akme", variants: [], source: .manual, createdAt: Date(), enabled: true)
+        let found = DictionarySuggestions.find(said, entries: [akme], dismissed: [], isCommonWord: isCommon)
+        check(found.first == DictionarySuggestion(preferred: "Cerebras", heard: ["Serbrass", "Serebrass", "Serobrass"], dictations: 3), "spellings group; cleanup's spelling is preferred")
+        check(found.contains { $0.heard == ["Buzari", "Buzati"] && $0.preferred == "Buzzati" }, "possessive stripped, grouped with its plain form")
+        check(!found.contains { $0.heard.contains("Proxmox") } && !found.contains { $0.heard.contains("Akme") }, "one spelling in one dictation, or a known entry, is not suggested")
+        check(DictionarySuggestions.find(said, entries: [], dismissed: ["serbrass", "serebrass", "serobrass"], isCommonWord: isCommon).allSatisfy { !$0.heard.contains("Serbrass") }, "dismissed spellings stay away")
+        check(DictionarySuggestions.find(said + Array(repeating: ("ask Proxmox", "Ask Proxmox."), count: 3), entries: [], dismissed: [], isCommonWord: isCommon)
+              .contains { $0.heard == ["Proxmox"] && $0.dictations == 4 }, "one spelling recurring in four dictations is suggested")
+    }
+
     static func filterChecks() throws {
         func verdict(_ s: String, _ t: String, manual: Set<String> = []) -> CandidateVerdict {
             CorrectionFilter.evaluate(source: s, target: t, manualPreferred: manual)
@@ -179,6 +199,15 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         check(CorrectionFilter.evaluate(source: "jira", target: "Jira") == .rejected(.caseOnly), "no lexicon: case fix skipped")
         check(CorrectionFilter.evaluate(source: "git hub", target: "GitHub") == .rejected(.punctuationOnly), "no lexicon: spacing fix skipped")
         check(CorrectionFilter.evaluate(source: "Jon", target: "John") == .rejected(.tooShort), "no lexicon: short word skipped")
+        // History, October 2026: garbled names whose consonants shift (similarity 0.57 and 0.71).
+        let names: (String) -> Bool = { ["codecs", "codex", "claud", "claude", "buzzard", "lunch", "launch"].contains($0) }
+        check(CorrectionFilter.evaluate(source: "ChadJuT", target: "ChatGPT", isCommonWord: names) == .accepted(source: "ChadJuT", target: "ChatGPT"), "garbled product name learned with a lexicon")
+        check(CorrectionFilter.evaluate(source: "In Buzari's", target: "In Buzzati's", isCommonWord: names) == .accepted(source: "Buzari", target: "Buzzati"), "possessive name learned as its stem")
+        check(CorrectionFilter.evaluate(source: "ChadJuT", target: "ChatGPT") == .rejected(.notRespelling), "no lexicon: loose respelling skipped")
+        check(CorrectionFilter.evaluate(source: "Buzari", target: "buzzard", isCommonWord: names) == .rejected(.notRespelling), "loose respelling never lands on an ordinary word")
+        check(CorrectionFilter.evaluate(source: "codecs", target: "Codex", isCommonWord: names) == .rejected(.ordinaryWords), "codecs -> Codex stays unlearned")
+        check(CorrectionFilter.evaluate(source: "claud", target: "Claude", isCommonWord: names) == .rejected(.ordinaryWords), "claud -> Claude stays unlearned")
+        check(CorrectionFilter.evaluate(source: "Quorbix", target: "Fredlin", isCommonWord: names) == .rejected(.notRespelling), "dissimilar unfamiliar words skipped")
     }
 
     static func learningChecks(_ dir: URL) throws {
@@ -501,6 +530,16 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
             let s = UUID()
             try check(try ledger.record(obs(s, "lunch", "launch")) == .rejected(.ordinaryWords), "ledger uses lexicon")
             try check(ledger.settle(sessionID: s).isEmpty && learned(dict).isEmpty, "ordinary-word swap rejected under one-fix learning")
+        }
+
+        // History, October 2026: one fix of a garbled name in pasted text.
+        do {
+            let (dict, ledger) = try fresh("garbled")
+            ledger.isCommonWord = { ["errors", "across", "the", "or", "codex", "app", "latest", "version"].contains($0) }
+            let s = UUID()
+            try ledger.record(obs(s, "errors across the ChadJuT or Codex app", "errors across the ChatGPT or Codex app"))
+            try check(try ledger.settle(sessionID: s).map(\.preferred) == ["ChatGPT"], "ChadJuT fix learned from one edit")
+            check(dict.apply(to: "the ChadJuT app", isCommonWord: ledger.isCommonWord) == "the ChatGPT app", "learned form replaced")
         }
 
         // Learning off records nothing.

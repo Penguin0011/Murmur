@@ -354,44 +354,84 @@ enum CloudTranscriptionOutcome: Equatable, Sendable {
     case cancelled
 }
 
+/// What the pre-check and transcriber saw, kept in the History entry (never logged).
+struct CloudTranscriptionDetail: Sendable, Equatable {
+    var clipSeconds: Double? = nil
+    var peakP50: Float? = nil, peakP90: Float? = nil
+    /// The pre-check's level (second-highest 100 ms peak); nil when the audio was not decoded.
+    var silencePeak: Float? = nil
+    /// "passed", "skipped", or "unchecked" when the provider has no pre-check or no level.
+    var precheck = "unchecked"
+    var segments: [TranscriptSegment]? = nil
+    /// Why the outcome was no speech: "precheck", "lowConfidence", "insufficientLoudness", "empty" or "punctuationOnly".
+    var noSpeechReason: String? = nil
+
+    /// Content-free line for the unified log: reason, clip loudness and pre-check level, segment scores. Never text.
+    var noSpeechLogLine: String {
+        func f(_ value: Float?) -> String { value.map { String(format: "%.4f", $0) } ?? "-" }
+        let scores = (segments ?? []).compactMap(\.avgLogprob)
+        let range = scores.isEmpty ? "-" : String(format: "%.2f/%.2f", scores.min()!, scores.max()!)
+        return "no-speech reason=\(noSpeechReason ?? "unknown") clip=\(clipSeconds.map { String(format: "%.2f", $0) } ?? "-") p50=\(f(peakP50)) p90=\(f(peakP90)) "
+            + "silence=\(f(silencePeak))/\(f(silencePeak == nil ? nil : GeminiTranscriptionProvider.defaultSilencePeak)) segments=\(segments?.count ?? 0) logprob-min-max=\(range)"
+    }
+}
+
 enum CloudTranscription {
     static let unreadableAudio = "The recording could not be read."
     static let unknownFailure = "Cloud transcription failed."
 
     /// Reads the recording off the main thread and runs `run(provider:audioData:vocabulary:)`.
     static func run(provider: TranscriptionProvider, audioFile: URL, vocabulary: [String] = []) async -> CloudTranscriptionOutcome {
-        guard let data = try? Data(contentsOf: audioFile) else { return .failed(message: unreadableAudio, keepAudio: true) }
-        return await run(provider: provider, audioData: data, vocabulary: vocabulary)
+        await runDetailed(provider: provider, audioFile: audioFile, vocabulary: vocabulary).outcome
+    }
+
+    static func run(provider: TranscriptionProvider, audioData: Data, vocabulary: [String] = []) async -> CloudTranscriptionOutcome {
+        await runDetailed(provider: provider, audioData: audioData, vocabulary: vocabulary).outcome
+    }
+
+    static func runDetailed(provider: TranscriptionProvider, audioFile: URL, vocabulary: [String] = []) async -> (outcome: CloudTranscriptionOutcome, detail: CloudTranscriptionDetail) {
+        guard let data = try? Data(contentsOf: audioFile) else { return (.failed(message: unreadableAudio, keepAudio: true), CloudTranscriptionDetail()) }
+        return await runDetailed(provider: provider, audioData: data, vocabulary: vocabulary)
     }
 
     /// One provider call at most: silence pre-check, then one request, no retry, no fallback.
     /// `vocabulary` (dictionary spellings) goes as the hint; providers that ignore hints drop it.
-    static func run(provider: TranscriptionProvider, audioData: Data, vocabulary: [String] = []) async -> CloudTranscriptionOutcome {
+    /// The detail (clip loudness, pre-check, segments) is for History; it never changes the outcome.
+    static func runDetailed(provider: TranscriptionProvider, audioData: Data, vocabulary: [String] = []) async -> (outcome: CloudTranscriptionOutcome, detail: CloudTranscriptionDetail) {
         var prepared = CloudAudio.prepare(audioData)
         if !vocabulary.isEmpty { prepared.payload.vocabularyHint = vocabulary.joined(separator: ", ") }
-        if let checker = provider as? SilencePrecheckedTranscriber, let peak = prepared.peak,
-           checker.shouldSkip(peakLevel: peak, durationSeconds: prepared.duration) {
-            return .noSpeech(skipped: true)
+        var detail = CloudTranscriptionDetail(clipSeconds: prepared.duration, silencePeak: prepared.peak)
+        if let peaks = prepared.payload.levels.flatMap(OpenAITranscriptionFormat.peakPercentiles) { detail.peakP50 = peaks.p50; detail.peakP90 = peaks.p90 }
+        if let checker = provider as? SilencePrecheckedTranscriber, let peak = prepared.peak {
+            if checker.shouldSkip(peakLevel: peak, durationSeconds: prepared.duration) { detail.precheck = "skipped"; detail.noSpeechReason = "precheck"; return (.noSpeech(skipped: true), detail) }
+            detail.precheck = "passed"
         }
-        if Task.isCancelled { return .cancelled }
+        if Task.isCancelled { return (.cancelled, detail) }
         do {
             let text: String
             var suspected = false
             if let llm = provider as? LLMTranscriber {
                 let result = try await llm.transcribeChecked(prepared.payload)
                 text = result.text; suspected = result.answerSuspected
+            } else if let detailed = provider as? DetailedTranscriber {
+                let result = try await detailed.transcribeDetailed(prepared.payload)
+                text = result.text; detail.segments = result.segments; detail.noSpeechReason = result.noSpeechReason
             } else {
                 text = try await provider.transcribe(prepared.payload)
             }
-            if Task.isCancelled { return .cancelled }
-            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .noSpeech(skipped: false) }
-            return suspected ? .heldAnswerSuspected(text) : .transcript(text)
+            if Task.isCancelled { return (.cancelled, detail) }
+            // A transcript of only punctuation (" .") is silence too: nothing is pasted.
+            if !text.contains(where: { $0.isLetter || $0.isNumber }) {
+                detail.noSpeechReason = detail.noSpeechReason ?? (!text.isEmpty ? "punctuationOnly" : "empty")
+                return (.noSpeech(skipped: false), detail)
+            }
+            return (suspected ? .heldAnswerSuspected(text) : .transcript(text), detail)
         } catch let error as ProviderError {
-            if error == .cancelled || Task.isCancelled { return .cancelled }
-            return .failed(message: error.userMessage, keepAudio: error.disposition != .discard)
+            if error == .cancelled || Task.isCancelled { return (.cancelled, detail) }
+            return (.failed(message: error.userMessage, keepAudio: error.disposition != .discard), detail)
         } catch {
-            if Task.isCancelled { return .cancelled }
-            return .failed(message: unknownFailure, keepAudio: true)
+            if Task.isCancelled { return (.cancelled, detail) }
+            return (.failed(message: unknownFailure, keepAudio: true), detail)
         }
     }
 
@@ -426,7 +466,9 @@ enum CloudAudio {
         }
         let rate = decoded.sampleRate > targetRate ? targetRate : decoded.sampleRate
         let samples = trimTrailingSilence(WAVAudio.downsample(decoded.samples, from: decoded.sampleRate, to: targetRate), sampleRate: rate)
-        return Prepared(payload: AudioPayload(data: WAVAudio.encodePCM16(samples, sampleRate: rate)),
+        var payload = AudioPayload(data: WAVAudio.encodePCM16(samples, sampleRate: rate))
+        payload.levels = windowPeaks(samples, sampleRate: rate)
+        return Prepared(payload: payload,
                         peak: min(level(decoded.samples, sampleRate: decoded.sampleRate), 1),
                         duration: Double(decoded.samples.count) / Double(decoded.sampleRate))
     }
@@ -436,11 +478,16 @@ enum CloudAudio {
     /// ponytail: typing or repeated clicks during a silent hold still pass; a per-window energy
     /// measure would catch those but needs calibrating against a real voice.
     static func level(_ samples: [Float], sampleRate: Int) -> Float {
-        let window = max(sampleRate / 10, 1)
-        let peaks = stride(from: 0, to: samples.count, by: window).map { start in
-            samples[start..<min(start + window, samples.count)].reduce(Float(0)) { max($0, $1.isFinite ? abs($1) : 0) }
-        }.sorted(by: >)
+        let peaks = windowPeaks(samples, sampleRate: sampleRate).sorted(by: >)
         return peaks.count > 1 ? peaks[1] : peaks.first ?? 0
+    }
+
+    /// The peak of each 100 ms window, in order.
+    static func windowPeaks(_ samples: [Float], sampleRate: Int) -> [Float] {
+        let window = max(sampleRate / 10, 1)
+        return stride(from: 0, to: samples.count, by: window).map { start in
+            samples[start..<min(start + window, samples.count)].reduce(Float(0)) { max($0, $1.isFinite ? abs($1) : 0) }
+        }
     }
 
     /// Drops the silent tail (below the silence pre-check's level) after the last speech, keeping

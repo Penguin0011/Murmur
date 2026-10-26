@@ -19,6 +19,43 @@ import Darwin
         let older = #"{"id":"\#(UUID().uuidString)","recordedAt":0,"rawText":"a","finalText":"a","insertionStatus":"unverified"}"#
         let olderEntry = try JSONDecoder().decode(HistoryEntry.self, from: Data(older.utf8))
         precondition(olderEntry.cleanupFallback == nil, "older history decodes without a fallback reason")
+        // Provenance round-trips, older files decode without it, and new text keeps it.
+        var traced = fellBack
+        traced.cleanupOptions = CleanupOptions(professional: true); traced.writingModeID = UUID().uuidString; traced.writingModeName = "Email"
+        traced.transcriptionProvider = "local"; traced.transcriptionModel = unifiedRepository
+        traced.cleanupProvider = "gemini"; traced.cleanupModel = "gemma-4-26b-a4b-it"; traced.appVersion = "1.0 (7)"
+        traced.contextUsed = true; traced.cleanupOutcome = .modelPunctuationOnLocal; traced.edited = true
+        let tracedTrip = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(traced))
+        func provenance(_ e: HistoryEntry) -> [String?] {
+            [e.cleanupOptions.map { "\($0)" }, e.writingModeID, e.writingModeName, e.transcriptionProvider, e.transcriptionModel, e.cleanupProvider,
+             e.cleanupModel, e.appVersion, e.contextUsed.map { "\($0)" }, e.cleanupOutcome?.rawValue, e.edited.map { "\($0)" }]
+        }
+        precondition(tracedTrip.cleanupOptions == CleanupOptions(professional: true) && provenance(tracedTrip) == provenance(traced), "provenance round-trips")
+        precondition(provenance(olderEntry).allSatisfy { $0 == nil }, "older history decodes without provenance")
+        let retexted = traced.with(finalText: "B.", status: "verified")
+        precondition(retexted.finalText == "B." && provenance(retexted) == provenance(traced), "with(finalText:) keeps provenance")
+        // Diagnostics round-trip, survive with(finalText:), and older files decode without them.
+        var diagnosed = traced
+        diagnosed.transcription = TranscriptionDetail(segments: [SegmentDetail(text: " Thanks.", start: 1.5, end: 2, avgLogprob: -0.4, noSpeechProb: 0.1, compressionRatio: 0.9, loudWindows: 2, dropped: true)],
+                                                      clipSeconds: 2, peakP50: 0.02, peakP90: 0.3, silencePeak: 0.25, silenceThreshold: 0.01, precheck: "passed")
+        diagnosed.cleanup = CleanupDetail(modelOutput: "Hi.", guardVerdict: "cleaned", promptHash: "0123abcd", dictionaryTerms: ["Akme"], input: "hi", contextUsed: true,
+                                          contextApp: "com.apple.Notes", contextChars: ["selected": 0, "clipboard": 12, "window": 40])
+        diagnosed.afterPaste = AfterPaste(text: "Hi there.", changed: true, route: "ax", endReason: "focus departed")
+        // Words typed after the dictation are never kept; edits of it and wholesale replacements are.
+        let said = "Send it to Akme today."
+        precondition(AfterPaste.trimmingAppended(initial: said, edited: said + "\nuser@host secret: x1") == (said, false), "append-only is no edit and keeps nothing typed")
+        precondition(AfterPaste.trimmingAppended(initial: said, edited: "Send it to Acme today. secret: x1") == ("Send it to Acme today.", true), "an edit keeps the fix, drops the append")
+        precondition(AfterPaste.trimmingAppended(initial: said, edited: "Send it to Akme tomorrow. secret: x1") == ("Send it to Akme tomorrow.", true), "a fixed last word stays, the append goes")
+        precondition(AfterPaste.trimmingAppended(initial: "TrueNASDOTCloud doesn't get that.", edited: "truenas.clouddev.dad") == ("truenas.clouddev.dad", true), "a wholesale replacement is kept")
+        precondition(AfterPaste.trimmingAppended(initial: said, edited: said + "\n") == (said, false), "whitespace alone is no edit")
+        diagnosed.timing = StageTiming(transcription: 0.4, cleanup: 0.9, insertion: 0.1, total: 1.6, capture: 0.44, handoff: 0.01, insertionDone: 0.2)
+        let olderTiming = try JSONDecoder().decode(StageTiming.self, from: Data(#"{"transcription":0.4,"cleanup":0.4,"insertion":0.51,"total":1.8}"#.utf8))
+        precondition(olderTiming.capture == nil && olderTiming.handoff == nil && olderTiming.insertionDone == nil && olderTiming.total == 1.8, "timing from 0.2.3 decodes")
+        diagnosed.recordingFile = diagnosed.id + ".wav"
+        let diagnosedTrip = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(diagnosed.with(finalText: "Hi.", status: "verified")))
+        precondition(diagnosedTrip.transcription == diagnosed.transcription && diagnosedTrip.cleanup == diagnosed.cleanup && diagnosedTrip.afterPaste == diagnosed.afterPaste
+                     && diagnosedTrip.timing == diagnosed.timing && diagnosedTrip.recordingFile == diagnosed.recordingFile, "diagnostics round-trip and survive with(finalText:)")
+        precondition(olderEntry.transcription == nil && olderEntry.cleanup == nil && olderEntry.afterPaste == nil && olderEntry.timing == nil && olderEntry.recordingFile == nil, "older history decodes without diagnostics")
         let path = root.appendingPathComponent(entry.id + ".json")
         let abandoned = root.appendingPathComponent(".pending-" + UUID().uuidString)
         try JSONEncoder().encode(entry).write(to: abandoned)
@@ -88,6 +125,6 @@ import Darwin
         let rewritten = try ModelVerificationCache.fingerprint(modelRoot, manifest: manifest)
         precondition(rewritten != hashed, "rewrite must change the fingerprint")
         do { try cache.verify(modelRoot, manifest: manifest); fatalError("Cache accepted rewritten weights") } catch {}
-        print("Native history and verifier checks passed (atomic roundtrip, permissions, calendar expiry, invalid policy, mismatched/corrupt history, quarantine and expiry of unreadable files, deletion, absent/corrupt weights).")
+        print("Native history and verifier checks passed (atomic roundtrip, provenance, permissions, calendar expiry, invalid policy, mismatched/corrupt history, quarantine and expiry of unreadable files, deletion, absent/corrupt weights).")
     }
 }

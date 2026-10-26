@@ -203,7 +203,14 @@ func checkKeychainStore() {
         let body = fw.httpBody ?? Data()
         let parts = splitMultipart(body, boundary: boundary)
         check(parts["model"] == Data("whisper-1".utf8), "model field")
-        check(parts["response_format"] == Data("json".utf8), "response_format field")
+        check(parts["response_format"] == Data("json".utf8), "an undocumented whisper server keeps json")
+        func format(_ endpoint: String, _ model: String) -> Data? {
+            splitMultipart(OpenAITranscriptionFormat.makeRequest(endpoint: URL(string: endpoint)!, apiKey: key, model: model, audio: audio, boundary: boundary).httpBody ?? Data(), boundary: boundary)["response_format"]
+        }
+        check(format("https://api.groq.com/openai/v1/audio/transcriptions", "whisper-large-v3-turbo") == Data("verbose_json".utf8), "Groq whisper asks for verbose_json segments")
+        check(format("https://api.openai.com/v1/audio/transcriptions", "whisper-1") == Data("verbose_json".utf8), "OpenAI whisper asks for verbose_json segments")
+        check(format("https://api.openai.com/v1/audio/transcriptions", "gpt-4o-transcribe") == Data("json".utf8), "gpt-4o-transcribe keeps json (its only format)")
+        check(format("https://openrouter.ai/api/v1/audio/transcriptions", "openai/whisper-large-v3-turbo") == Data("json".utf8), "OpenRouter whisper keeps json")
         check(parts["language"] == Data("en".utf8), "language field")
         check(parts["prompt"] == nil, "custom transcription omits free-form dictionary prompts")
         func promptPart(_ hint: String) -> Data? {
@@ -257,6 +264,41 @@ func checkKeychainStore() {
         expectError(.malformedResponse(.customAPI), "STT non-JSON") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, "<html>")) }
         expectError(.authentication(.customAPI), "observed 401") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(401, unauthorizedBody)) }
         expectError(.server(.customAPI, status: 503), "503 no healthy upstream") { try OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(503, "no healthy upstream")) }
+        func segmented(_ segments: [(String, Double, Double)]) -> String? {
+            let parts = segments.map { #"{"text": "\#($0.0)", "no_speech_prob": \#($0.1), "avg_logprob": \#($0.2), "start": 0, "end": 1, "compression_ratio": 1.2}"# }
+            let text = segments.map(\.0).joined()
+            return try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": "\#(text)", "segments": [\#(parts.joined(separator: ","))]}"#))
+        }
+        check(segmented([(" Send the report.", 0.01, -0.2), (" Maybe shower.", 0.9, -1.5)]) == "Send the report.", "trailing no-speech segment dropped")
+        check(segmented([(" Send the report.", 0.01, -0.2), (" Thank you.", 0.1, -0.3)]) == " Send the report. Thank you.", "spoken Thank you. kept, text unchanged")
+        check(segmented([(" One.", 0.01, -0.2), (" um", 0.9, -1.5), (" Two.", 0.02, -0.2)]) == " One. um Two.", "middle low-confidence segment kept")
+        check(segmented([(" One.", 0.01, -0.2), (" um", 0.9, -1.5), (" Two.", 0.02, -0.2), (" Thank you.", 0.95, -1.2)]) == "One. um Two.", "only the trailing run is dropped")
+        check(segmented([(" Thank you.", 0.9, -1.5), (" Bye.", 0.8, -1.1)]) == "", "all no-speech becomes empty")
+        check(segmented([(" Send it.", 0.01, -0.2), (" Thank you.", 0.9, -0.5)]) == " Send it. Thank you.", "high no_speech alone is not enough")
+        check(segmented([(" I'm going to go ahead and get started.", 0, -1.4)]) == "", "a wholly low-confidence transcript is no speech")
+        check(segmented([(" Ship it on Monday.", 0, -0.8)]) == " Ship it on Monday.", "a moderately confident transcript is kept")
+        check(segmented([(" Ship it on Monday.", 0, -0.3), (" And the docs.", 0, -1.4)]) == " Ship it on Monday. And the docs.", "one low-confidence segment alone is kept")
+        // With the sent audio's 100 ms peaks: a trailing segment over quiet audio is dropped, whatever the model's confidence.
+        func timed(_ segments: [(String, Double, Double)], _ levels: [Float]) -> String? {
+            let parts = segments.map { #"{"text": "\#($0.0)", "no_speech_prob": 0.1, "avg_logprob": -0.3, "start": \#($0.1), "end": \#($0.2)}"# }
+            return try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": "\#(segments.map(\.0).joined())", "segments": [\#(parts.joined(separator: ","))]}"#), levels: levels)
+        }
+        let spokeThenQuiet = [Float](repeating: 0.3, count: 10) + [Float](repeating: 0.002, count: 10)
+        check(timed([(" Send the report.", 0, 1), (" Thank you.", 1.2, 1.9)], spokeThenQuiet) == "Send the report.", "confident Thank you. over quiet audio dropped")
+        check(timed([(" Send the report.", 0, 1), (" Thank you.", 1.2, 1.9)], [Float](repeating: 0.3, count: 20)) == " Send the report. Thank you.", "Thank you. over speech kept")
+        check(timed([(" Send the report.", 0, 1), (" Thank you.", 2.5, 3)], spokeThenQuiet) == "Send the report.", "segment past the end of the audio dropped")
+        var clicked = spokeThenQuiet; clicked[15] = 0.6
+        check(timed([(" Send the report.", 0, 1), (" Thank you.", 1.2, 1.9)], clicked) == "Send the report.", "a click under the tail is not speech")
+        check(timed([(" One.", 0, 0.5), (" Two.", 1.2, 1.4), (" Three.", 0.5, 1)], spokeThenQuiet) == " One. Two. Three.", "a quiet middle segment is kept")
+        check(OpenAITranscriptionFormat.loudWindows([0.3, 0.3, 0.002], start: 0, end: 0.25) == 2 && OpenAITranscriptionFormat.loudWindows([0.3], start: 4, end: 5) == 0, "windows under a segment are counted, rounding its end up")
+        // The segments come back with their scores and which were dropped; the text is the same as parse's.
+        let detailed = try? OpenAITranscriptionFormat.parseDetailed(provider: .customAPI, result: result(200, #"{"text": " Send the report. Thank you.", "segments": [{"text": " Send the report.", "no_speech_prob": 0.01, "avg_logprob": -0.2, "compression_ratio": 1.1, "start": 0, "end": 1}, {"text": " Thank you.", "no_speech_prob": 0.1, "avg_logprob": -0.3, "start": 1.2, "end": 1.9}]}"#), levels: spokeThenQuiet)
+        check(detailed?.text == "Send the report." && detailed?.segments?.map { $0.dropped } == [false, true] && detailed?.segments?[0].loudWindows == 10 && detailed?.segments?[1].loudWindows == 0
+              && detailed?.segments?[0].avgLogprob == -0.2 && detailed?.segments?[0].compressionRatio == 1.1 && detailed?.segments?[1].compressionRatio == nil, "segment detail keeps scores, loud windows and the dropped flag")
+        check((try? OpenAITranscriptionFormat.parseDetailed(provider: .customAPI, result: result(200, sttSuccess)))?.segments == nil, "plain json has no segments")
+        let partial = #"{"text": " Send it. Thank you.", "segments": [{"text": " Send it.", "start": 0, "end": 1}, {"text": " Thank you.", "no_speech_prob": 0.9, "avg_logprob": -1.5}]}"#
+        check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, partial))) == " Send it. Thank you.", "segments without confidence fall back to text")
+        check((try? OpenAITranscriptionFormat.parse(provider: .customAPI, result: result(200, #"{"text": " Hi.", "segments": "x"}"#))) == " Hi.", "malformed segments fall back to text")
 
         check((try? GeminiCleanupProvider.parse(result(200, geminiSuccess))) == "Please send the report.", "Gemini success parse")
         check((try? GeminiCleanupProvider.parse(result(200, geminiThought))) == "Meet Thursday at three.", "Gemini joins parts, skips thoughts")

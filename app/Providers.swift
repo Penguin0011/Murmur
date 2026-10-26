@@ -29,11 +29,37 @@ struct AudioPayload: Sendable {
     /// Optional vocabulary hint (the dictionary's enabled spellings). Sent only where the provider uses it,
     /// and listed in that provider's disclosure.
     var vocabularyHint: String?
+    /// Peak level of each 100 ms window of the audio sent, so a transcript segment can be checked
+    /// against the sound under it. Nil when the audio was not decoded. Never sent.
+    var levels: [Float]? = nil
 
     init(data: Data, filename: String = "audio.wav", mimeType: String = "audio/wav", language: String? = "en", vocabularyHint: String? = nil) {
         self.data = data; self.filename = filename; self.mimeType = mimeType
         self.language = language; self.vocabularyHint = vocabularyHint
     }
+}
+
+/// A transcriber's answer with the detail History keeps. Segments only where the model reports them.
+struct TranscriptionResult: Sendable, Equatable {
+    var text: String
+    var segments: [TranscriptSegment]? = nil
+    /// The parser's rejection path, rather than an inference from the dropped flags.
+    var noSpeechReason: String? = nil
+}
+
+/// One Whisper segment: its scores and times, the 100 ms windows under it that reach the silence level,
+/// and whether the parser dropped it from the transcript.
+struct TranscriptSegment: Sendable, Equatable {
+    var text: String
+    var start: Double?, end: Double?
+    var avgLogprob: Double?, noSpeechProb: Double?, compressionRatio: Double?
+    var loudWindows: Int?
+    var dropped = false
+}
+
+/// A transcriber that returns segment detail too; `transcribe` stays its text.
+protocol DetailedTranscriber: TranscriptionProvider {
+    func transcribeDetailed(_ audio: AudioPayload) async throws -> TranscriptionResult
 }
 
 enum ProcessingStage: String, Sendable { case transcription, cleanup }
@@ -513,7 +539,11 @@ enum Multipart {
 
 enum OpenAITranscriptionFormat {
     static func makeRequest(endpoint: URL, apiKey: APIKey?, model: String, audio: AudioPayload, boundary: String) -> URLRequest {
-        var fields: [(name: String, value: String)] = [("model", model), ("response_format", "json"), ("temperature", "0")]
+        // Whisper models return per-segment confidence in verbose_json; gpt-4o-transcribe accepts only json.
+        // Only Groq and OpenAI document it; other compatible servers keep json so a rejected format never fails the route.
+        let documented = ["api.groq.com", "api.openai.com"].contains(endpoint.host?.lowercased() ?? "")
+        let format = documented && model.lowercased().contains("whisper") ? "verbose_json" : "json"
+        var fields: [(name: String, value: String)] = [("model", model), ("response_format", format), ("temperature", "0")]
         if let language = audio.language, !language.isEmpty { fields.append(("language", language)) }
         // Whisper treats prompt text as prior transcript context and can echo it. Apply dictionary
         // spellings after transcription; compatible endpoints have no shared structured vocabulary field.
@@ -526,13 +556,93 @@ enum OpenAITranscriptionFormat {
         return request
     }
 
-    /// `{"text": "..."}`. An empty string (silence) is valid; a missing `text` is not.
-    static func parse(provider: ProviderID, result: HTTPResult) throws -> String {
+    // ponytail: Whisper's own defaults (no_speech_threshold, logprob_threshold), not yet calibrated
+    // against real dictations; tune once tails from real recordings are measured.
+    static let noSpeechThreshold = 0.6
+    static let logprobThreshold = -1.0
+    // ponytail: a segment with under 300 ms of sound above the silence level is taken as invented;
+    // a soft but real "thanks" is louder and longer. Tune from the transcript-tail log lines.
+    static let minLoudWindows = 3
+
+    /// 100 ms windows between `start` and `end` seconds whose peak reaches the silence level.
+    /// Time past the end of the audio has no sound.
+    static func loudWindows(_ levels: [Float], start: Double, end: Double) -> Int {
+        let from = max(0, Int(start * 10)), to = min(levels.count, Int((end * 10).rounded(.up)))
+        return from < to ? levels[from..<to].filter { $0 >= GeminiTranscriptionProvider.defaultSilencePeak }.count : 0
+    }
+
+    /// `{"text": "..."}`. An empty string (silence) is valid; a missing `text` is not. With verbose_json
+    /// `segments`, trailing segments are dropped when the model itself marks them as no speech, or when
+    /// `levels` shows the audio under them is quiet (Whisper invents "Thank you." on silent tails); the
+    /// words are never inspected. Partial segment data keeps `text`.
+    static func logTail(_ line: String) {
+        #if canImport(os)
+        Logger(subsystem: "cc.clouddev.dictation", category: "timing").notice("transcript-tail \(line, privacy: .public)")
+        #endif
+    }
+
+    static func parse(provider: ProviderID, result: HTTPResult, levels: [Float]? = nil) throws -> String {
+        try parseDetailed(provider: provider, result: result, levels: levels).text
+    }
+
+    /// Median and 90th-percentile of the clip's window peaks, for the log and for History.
+    static func peakPercentiles(_ levels: [Float]) -> (p50: Float, p90: Float)? {
+        guard !levels.isEmpty else { return nil }
+        let sorted = levels.sorted()
+        return (sorted[sorted.count / 2], sorted[sorted.count * 9 / 10])
+    }
+
+    /// `parse` with the segments it saw, so History can keep what the model heard and what was dropped.
+    static func parseDetailed(provider: ProviderID, result: HTTPResult, levels: [Float]? = nil) throws -> TranscriptionResult {
         guard (200..<300).contains(result.status) else { throw ProviderErrorClassifier.classify(provider: provider, result: result) }
         guard let object = try? JSONSerialization.jsonObject(with: result.body) as? [String: Any] else { throw ProviderError.malformedResponse(provider) }
         if object["error"] != nil { throw ProviderErrorClassifier.classify(provider: provider, result: result) }
         guard let text = object["text"] as? String else { throw ProviderError.malformedResponse(provider) }
-        return text
+        guard let raw = object["segments"] as? [[String: Any]] else { return TranscriptionResult(text: text) }
+        var segments: [(text: String, silent: Bool, scores: String, unsure: Bool)] = []
+        var details: [TranscriptSegment] = []
+        for segment in raw {
+            guard let words = segment["text"] as? String, let noSpeech = segment["no_speech_prob"] as? Double,
+                  let logprob = segment["avg_logprob"] as? Double else { return TranscriptionResult(text: text) }
+            var silent = noSpeech > noSpeechThreshold && logprob < logprobThreshold
+            var scores = String(format: "no_speech=%.3f logprob=%.3f", noSpeech, logprob)
+            let ratio = segment["compression_ratio"] as? Double
+            if let ratio { scores += String(format: " compression=%.2f", ratio) }
+            var loudCount: Int?
+            if let levels, let start = segment["start"] as? Double, let end = segment["end"] as? Double {
+                let loud = loudWindows(levels, start: start, end: end)
+                loudCount = loud
+                silent = silent || loud < minLoudWindows
+                scores += String(format: " start=%.2f end=%.2f clip=%.2f loud_windows=%d", start, end, Double(levels.count) / 10, loud)
+            }
+            segments.append((words, silent, scores, logprob < logprobThreshold))
+            details.append(TranscriptSegment(text: words, start: segment["start"] as? Double, end: segment["end"] as? Double,
+                                             avgLogprob: logprob, noSpeechProb: noSpeech, compressionRatio: ratio, loudWindows: loudCount))
+        }
+        if let levels, let peaks = peakPercentiles(levels) {
+            logTail(String(format: "clip peaks p50=%.4f p90=%.4f", peaks.p50, peaks.p90))
+        }
+        // Groq reports no_speech_prob 0 even for a transcript invented from room noise, but then every
+        // segment is low-confidence. Treated as no speech, the recording stays for a retry.
+        // ponytail: one invented clip (-1.40) against real speech no worse than -0.37; recalibrate from the log.
+        if !segments.isEmpty && segments.allSatisfy(\.unsure) {
+            logTail("all \(segments.count) segments below logprob \(logprobThreshold): no speech")
+            for index in details.indices { details[index].dropped = true }
+            return TranscriptionResult(text: "", segments: details, noSpeechReason: "lowConfidence")
+        }
+        // Content-free: scores and times of the trailing segments only, never their words.
+        var tail = segments.count - 1
+        while tail >= 0 {
+            logTail("segment=\(tail + 1)/\(segments.count) \(segments[tail].scores) dropped=\(segments[tail].silent)")
+            if !segments[tail].silent { break }
+            tail -= 1
+        }
+        guard segments.last?.silent == true else { return TranscriptionResult(text: text, segments: details) }
+        for index in (tail + 1)..<details.count { details[index].dropped = true }
+        while segments.last?.silent == true { segments.removeLast() }
+        // Whisper segment text carries its own leading space.
+        return TranscriptionResult(text: segments.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines), segments: details,
+                                   noSpeechReason: tail < 0 ? "insufficientLoudness" : nil)
     }
 }
 
@@ -594,7 +704,7 @@ enum OpenAIChatFormat {
 // MARK: - Custom OpenAI-compatible speech to text
 
 /// Uses the same endpoint validation and credential transport policy as custom cleanup.
-struct OpenAICompatibleTranscriptionProvider: TranscriptionProvider {
+struct OpenAICompatibleTranscriptionProvider: DetailedTranscriber {
     let server: OpenAICompatibleCleanupProvider
     let id = ProviderID.customAPI
     var transport: HTTPTransport = URLSessionTransport()
@@ -626,10 +736,11 @@ struct OpenAICompatibleTranscriptionProvider: TranscriptionProvider {
         OpenAITranscriptionFormat.makeRequest(endpoint: endpoint, apiKey: server.sendableKey, model: server.model,
                                              audio: audio, boundary: boundary)
     }
-    func transcribe(_ audio: AudioPayload) async throws -> String {
+    func transcribe(_ audio: AudioPayload) async throws -> String { try await transcribeDetailed(audio).text }
+    func transcribeDetailed(_ audio: AudioPayload) async throws -> TranscriptionResult {
         guard audio.data.count <= Self.uploadLimitBytes else { throw ProviderError.payloadTooLarge(id, limitBytes: Self.uploadLimitBytes) }
         let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 75).execute(makeRequest(audio))
-        return try OpenAITranscriptionFormat.parse(provider: id, result: result)
+        return try OpenAITranscriptionFormat.parseDetailed(provider: id, result: result, levels: audio.levels)
     }
     func validate() async throws {
         let result = try await ProviderHTTP(provider: id, transport: transport, deadline: 15).execute(server.makeGetRequest(server.modelsURL))

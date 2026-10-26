@@ -45,6 +45,8 @@ enum CandidateVerdict: Equatable {
 /// 3. Respelling: both sides have at least 4 letters, and either the normalized edit similarity
 ///    is >= 0.75, or the consonant-class phonetic keys are equal and similarity is >= 0.5.
 ///    (Acme -> Akme: similarity 0.75, passes. accept -> decline: antonym and dissimilar, fails.)
+///    With a lexicon, one word of 5+ letters to one word, neither of them ordinary, needs only
+///    similarity >= 0.5 (ChadJuT -> ChatGPT). A shared possessive ending is dropped from the pair.
 /// 4. Known term: when the target is already the preferred spelling of an enabled manual entry,
 ///    rule 3 is waived (rules 1 and 2, including the lexicon guard, still apply).
 ///
@@ -176,8 +178,12 @@ enum CorrectionFilter {
         guard sLetters.count >= floor, tLetters.count >= floor else { return .rejected(.tooShort) }
         if !caseOnly, sf.count == 1, tf.count == 1, inflectionOnly(sf[0], tf[0]) { return .rejected(.inflection) }
 
-        let reduced = CandidateVerdict.accepted(source: sw.map(\.text).joined(separator: " "),
-                                                target: tw.map(\.text).joined(separator: " "))
+        var reducedSource = sw.map(\.text).joined(separator: " "), reducedTarget = tw.map(\.text).joined(separator: " ")
+        // A shared possessive ending is not part of the respelling ("Buzari's" -> "Buzzati's").
+        if TermText.fold(reducedSource).hasSuffix("'s"), TermText.fold(reducedTarget).hasSuffix("'s") {
+            reducedSource.removeLast(2); reducedTarget.removeLast(2)
+        }
+        let reduced = CandidateVerdict.accepted(source: reducedSource, target: reducedTarget)
         // An all-capitals target (API, SQL, JSON) is a deliberate acronym, not an ordinary word.
         let acronym = joinedAcronym
         if let isCommonWord, spacingFix {
@@ -193,6 +199,11 @@ enum CorrectionFilter {
         let similarity = self.similarity(sLetters, tLetters)
         if similarity >= directSimilarity { return reduced }
         if similarity >= phoneticSimilarity, phoneticKey(sLetters) == phoneticKey(tLetters) { return reduced }
+        // With a lexicon, one unfamiliar word retyped as another is a garbled name or product even
+        // when its consonants shift ("ChadJuT" -> ChatGPT, "Buzari" -> Buzzati, History October 2026).
+        // Folded, so a mixed-case garble the spell checker waves through still counts as unfamiliar.
+        if let isCommonWord, sf.count == 1, tf.count == 1, sLetters.count >= 5, similarity >= phoneticSimilarity,
+           !isCommonWord(sf[0]), !isCommonWord(tf[0]) { return reduced }
         return .rejected(.notRespelling)
     }
 

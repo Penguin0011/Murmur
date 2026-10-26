@@ -107,6 +107,8 @@ private final class MockCloudCleaner: CleanupProvider, @unchecked Sendable {
         let override = DictationStyle(mode: WritingMode(options: .faithful, tone: .casual, screenContext: false, instructions: String(repeating: "x", count: 2_500)), settings: settings, context: ctx)
         check(override.options == .faithful && override.tone == .casual && override.context == nil, "set overrides replace the settings, and context off drops it")
         check(override.instructions.count == WritingModeLimits.instructions, "instructions are capped at 2,000 characters")
+        var trusting = settings; trusting.options.trustModel = true
+        check(DictationStyle(mode: WritingMode(options: .faithful), settings: trusting).options.trustModel, "trusting AI rewrites carries into a mode's options")
         settings.screenContext = false
         check(DictationStyle(mode: nil, settings: settings, context: ctx).context == nil, "global context off and no mode: no context")
         check(DictationStyle(mode: WritingMode(screenContext: true), settings: settings, context: ctx).context == ctx, "a mode turns context on over the global setting")
@@ -195,6 +197,22 @@ private final class MockCloudCleaner: CleanupProvider, @unchecked Sendable {
         p.cloudCleaner = MockCloudCleaner { _ in "We ship it on Friday." }
         let modeOn = await p.processAsync("we ship it on friday", style: DictationStyle(mode: WritingMode(options: .standard), settings: p.settings))
         check(modeOn == .insert("We ship it on Friday."), "a mode's cleanup options apply over faithful settings: \(modeOn)")
+
+        let faithfulSpy = MockCloudCleaner { _ in "Changed." }
+        p.cloudCleaner = faithfulSpy
+        for route in [CleanupRoute.local, .cloud] {
+            faithful.route = route
+            try p.update(faithful)
+            for tone in Tone.allCases {
+                let mode = WritingMode(options: .faithful, tone: tone)
+                let style = DictationStyle(mode: mode, settings: p.settings)
+                let output = await p.processAsync("Hello Sam, we ship Friday.", style: style)
+                check(output == .insert("Hello Sam, we ship Friday."), "Faithful preserves wording and punctuation with \(tone) on \(route)")
+                let direct = p.process("Hello Sam, we ship Friday.", style: DictationStyle(options: .faithful, tone: tone))
+                check(direct == .insert("Hello Sam, we ship Friday."), "direct Faithful style ignores \(tone) on \(route)")
+            }
+        }
+        check(faithfulSpy.messages.isEmpty, "Faithful never invokes AI cleanup")
 
         print(failures == 0 ? "\(passes) checks passed, 0 failed" : "\(passes) passed, \(failures) failed")
         exit(failures == 0 ? 0 : 1)
