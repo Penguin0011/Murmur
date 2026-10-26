@@ -386,6 +386,8 @@ final class PreStart: @unchecked Sendable {
     /// Forms and spellings learning skips (conflicting, undone or deleted fixes), for Settings.
     @Published var blockedWords: [CorrectionLedger.Blocked] = []
     @Published var dictionaryMessage = ""
+    @Published var dictionarySuggestions: [DictionarySuggestion] = []
+    private var spellingCache: [String: Bool] = [:]
     // Model download (R2). modelMessage reports the last download action, never interrupting dictation.
     @Published var modelStatus: ModelStatus = .notDownloaded
     @Published var modelMessage = ""
@@ -1666,6 +1668,33 @@ final class PreStart: @unchecked Sendable {
         defer { refreshDictionary() }
         do { try processing.updateEntry(id: entry.id, preferred: preferred, variants: variants, enabled: enabled); dictionaryMessage = ""; return true }
         catch { dictionaryMessage = (error as? DictionaryError)?.description ?? "Could not save the dictionary."; return false }
+    }
+    private static let dismissedSuggestionsKey = "dictionarySuggestionsDismissed"
+    /// Recomputed when the Dictionary page opens and after each answer; spell checks are cached for the launch.
+    func refreshDictionarySuggestions() {
+        let dismissed = Set(UserDefaults.standard.stringArray(forKey: Self.dismissedSuggestionsKey) ?? [])
+        dictionarySuggestions = DictionarySuggestions.find(history.map { (raw: $0.rawText, final: $0.finalText) }, entries: dictionaryEntries,
+                                                           dismissed: dismissed, isCommonWord: { [self] word in
+            if let known = spellingCache[word] { return known }
+            let common = isCommonEnglishWord(word); spellingCache[word] = common; return common
+        })
+    }
+    /// Adds the heard spellings to the entry with this spelling if there is one, else makes a new entry.
+    func acceptDictionarySuggestion(_ suggestion: DictionarySuggestion, preferred: String) {
+        let spelling = preferred.trimmingCharacters(in: .whitespaces)
+        let heard = suggestion.heard.filter { TermText.fold($0) != TermText.fold(spelling) }
+        if let entry = dictionaryEntries.first(where: { TermText.fold($0.preferred) == TermText.fold(spelling) }) {
+            let variants = entry.variants + heard.filter { word in !entry.variants.contains { TermText.fold($0) == TermText.fold(word) } }
+            updateDictionaryEntry(entry, preferred: entry.preferred, variants: variants.joined(separator: ", "), enabled: entry.enabled)
+        } else {
+            addDictionaryEntry(preferred: spelling, variants: heard.joined(separator: ", "))
+        }
+        refreshDictionarySuggestions()
+    }
+    func dismissDictionarySuggestion(_ suggestion: DictionarySuggestion) {
+        let dismissed = (UserDefaults.standard.stringArray(forKey: Self.dismissedSuggestionsKey) ?? []) + suggestion.heard.map(TermText.fold)
+        UserDefaults.standard.set(dismissed, forKey: Self.dismissedSuggestionsKey)
+        refreshDictionarySuggestions()
     }
     func deleteDictionaryEntry(_ entry: DictionaryEntry) {
         do { try processing?.deleteEntry(id: entry.id); dictionaryMessage = "" } catch { dictionaryMessage = "Could not delete this dictionary entry." }

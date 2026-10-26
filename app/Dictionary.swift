@@ -425,3 +425,63 @@ final class DictionaryStore {
         return first.uppercased() + preferred.dropFirst()
     }
 }
+
+/// A word Murmur keeps hearing that is neither ordinary English nor in the dictionary, offered for
+/// one-tap approval. `heard` are the transcript spellings, most frequent first; `preferred` is a guess.
+struct DictionarySuggestion: Equatable, Identifiable {
+    var preferred: String
+    var heard: [String]
+    var dictations: Int
+    var id: String { TermText.fold(heard[0]) }
+}
+
+/// Learning from corrections needs a fix made after pasting, which some people never make; this needs
+/// only what was said. A group of similar spellings qualifies when it spans `minDictations` dictations
+/// and Whisper spelled it more than one way, or when one spelling spans `minSingle` dictations.
+/// `preferred` is the spelling cleanup wrote most often in the final text, else the most heard one.
+enum DictionarySuggestions {
+    // ponytail: greedy grouping of single words by spelling; two-word forms ("True Naz") are not found.
+    static func find(_ dictations: [(raw: String, final: String)], entries: [DictionaryEntry], dismissed: Set<String>,
+                     isCommonWord: (String) -> Bool, minDictations: Int = 2, minSingle: Int = 4, limit: Int = 12) -> [DictionarySuggestion] {
+        var known = Set<String>()
+        for entry in entries { known.insert(TermText.fold(entry.preferred)); entry.variants.forEach { known.insert(TermText.fold($0)) } }
+        var common: [String: Bool] = [:]
+        func candidate(_ token: TermText.Token) -> (word: String, key: String)? {
+            var word = token.text
+            for suffix in ["'s", "\u{2019}s"] where word.hasSuffix(suffix) { word.removeLast(2) }
+            let key = TermText.fold(word)
+            guard key.count >= 4, key.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "-" }), !known.contains(key) else { return nil }
+            if common[key] == nil { common[key] = isCommonWord(word) || isCommonWord(key) }
+            return common[key]! ? nil : (word, key)
+        }
+        var seenIn: [String: Set<Int>] = [:], spelled: [String: [String: Int]] = [:], written: [String: [String: Int]] = [:]
+        for (index, dictation) in dictations.enumerated() {
+            for token in TermText.tokens(dictation.raw) {
+                guard let (word, key) = candidate(token), !dismissed.contains(key) else { continue }
+                seenIn[key, default: []].insert(index); spelled[key, default: [:]][word, default: 0] += 1
+            }
+            for token in TermText.tokens(dictation.final) {
+                guard let (word, key) = candidate(token) else { continue }
+                written[key, default: [:]][word, default: 0] += 1
+            }
+        }
+        func top(_ counts: [String: Int]) -> String { counts.max { ($0.value, $1.key) < ($1.value, $0.key) }!.key }
+        func alike(_ a: String, _ b: String) -> Bool {
+            a == b || CorrectionFilter.similarity(a, b) >= 0.7 || DictionaryStore.soundsLike(CorrectionFilter.letters(a), CorrectionFilter.letters(b))
+        }
+        let keys = seenIn.keys.sorted { (seenIn[$0]!.count, $1) > (seenIn[$1]!.count, $0) }
+        var used = Set<String>(), found: [DictionarySuggestion] = []
+        for key in keys where !used.contains(key) {
+            let group = keys.filter { !used.contains($0) && alike($0, key) }
+            used.formUnion(group)
+            let count = group.reduce(into: Set<Int>()) { $0.formUnion(seenIn[$1]!) }.count
+            guard group.count > 1 ? count >= minDictations : count >= minSingle else { continue }
+            let heard = group.map { top(spelled[$0]!) }
+            // A spelling cleanup wrote but Whisper never heard is cleanup's correction, so it ranks first.
+            func rank(_ item: (key: String, value: [String: Int])) -> (Int, Int, String) { (group.contains(item.key) ? 0 : 1, item.value.values.reduce(0, +), item.key) }
+            let cleaned = written.filter { written in group.contains { alike(written.key, $0) } }.max { rank($0) < rank($1) }
+            found.append(DictionarySuggestion(preferred: cleaned.map { top($0.value) } ?? heard[0], heard: heard, dictations: count))
+        }
+        return Array(found.sorted { ($0.dictations, $1.id) > ($1.dictations, $0.id) }.prefix(limit))
+    }
+}

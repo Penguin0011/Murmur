@@ -18,6 +18,7 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         defer { try? FileManager.default.removeItem(at: root) }
         try dictionaryChecks(root.appendingPathComponent("dict"))
         try filterChecks()
+        suggestionChecks()
         try learningChecks(root.appendingPathComponent("learn"))
         try retentionChecks(root.appendingPathComponent("retention"))
         print("\(passes) checks passed, \(failures) failed")
@@ -114,6 +115,25 @@ private struct Item: RetainedHistoryItem { let id: String; let recordedAt: Date 
         let manualCount = store.entries.filter { $0.source == .manual }.count
         let removed = try store.resetLearned()
         check(removed.count == 1 && store.entries.allSatisfy { $0.source == .manual } && store.entries.count == manualCount, "resetLearned removes only learned")
+    }
+
+    static func suggestionChecks() {
+        // Real misheard forms from History: Whisper spells the same name several ways; cleanup wrote it right.
+        let common: Set<String> = ["we", "use", "for", "the", "tokens", "ask", "about", "send", "to", "today", "call", "and", "fast", "is", "very"]
+        let isCommon = { (w: String) in common.contains(w.lowercased()) }
+        let said: [(raw: String, final: String)] = [
+            ("we use Serbrass for the tokens", "We use Cerebras for the tokens."), ("ask Serebrass about tokens", "Ask Cerebras about tokens."),
+            ("Serobrass is very fast", "Serobrass is very fast."), ("send Buzari's tokens today", "Send Buzzati's tokens today."),
+            ("call Buzati today", "Call Buzati today."), ("send Proxmox tokens", "Send Proxmox tokens."), ("call Akme and Akme", "Call Akme and Akme."),
+        ]
+        let akme = DictionaryEntry(id: UUID(), preferred: "Akme", variants: [], source: .manual, createdAt: Date(), enabled: true)
+        let found = DictionarySuggestions.find(said, entries: [akme], dismissed: [], isCommonWord: isCommon)
+        check(found.first == DictionarySuggestion(preferred: "Cerebras", heard: ["Serbrass", "Serebrass", "Serobrass"], dictations: 3), "spellings group; cleanup's spelling is preferred")
+        check(found.contains { $0.heard == ["Buzari", "Buzati"] && $0.preferred == "Buzzati" }, "possessive stripped, grouped with its plain form")
+        check(!found.contains { $0.heard.contains("Proxmox") } && !found.contains { $0.heard.contains("Akme") }, "one spelling in one dictation, or a known entry, is not suggested")
+        check(DictionarySuggestions.find(said, entries: [], dismissed: ["serbrass", "serebrass", "serobrass"], isCommonWord: isCommon).allSatisfy { !$0.heard.contains("Serbrass") }, "dismissed spellings stay away")
+        check(DictionarySuggestions.find(said + Array(repeating: ("ask Proxmox", "Ask Proxmox."), count: 3), entries: [], dismissed: [], isCommonWord: isCommon)
+              .contains { $0.heard == ["Proxmox"] && $0.dictations == 4 }, "one spelling recurring in four dictations is suggested")
     }
 
     static func filterChecks() throws {

@@ -172,6 +172,7 @@ struct SettingsView: View {
     @State private var newVariants = ""
     /// The dictionary row being edited, and its draft fields.
     @State private var editingEntryID: UUID?
+    @State private var suggestionSpellings: [String: String] = [:]
     @State private var editPreferred = ""
     @State private var editVariants = ""
     @State private var openKey: ProviderID?
@@ -1049,6 +1050,14 @@ struct SettingsView: View {
                 }
             }
             .overlay(alignment: .top) { rule }.padding(.top, 20)
+            if !controller.dictionarySuggestions.isEmpty {
+                eyebrow("Suggested").padding(.top, 24)
+                help("Words Murmur keeps hearing that aren't in your dictionary. Fix the spelling if needed, then add it.").padding(.top, 4)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(controller.dictionarySuggestions) { item in suggestionRow(item).overlay(alignment: .bottom) { softRule } }
+                }
+                .overlay(alignment: .top) { rule }.padding(.top, 12)
+            }
             if !controller.blockedWords.isEmpty {
                 eyebrow("Not learned").padding(.top, 24)
                 help("Skipped because your fixes conflicted or were undone.").padding(.top, 4)
@@ -1072,6 +1081,7 @@ struct SettingsView: View {
             }
             .font(WindowType.body(14)).padding(.top, 16)
         }
+        .onAppear { controller.refreshDictionarySuggestions() }
     }
 
     private func addEntry() {
@@ -1105,6 +1115,24 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain).help("Delete \(entry.preferred)").accessibilityLabel("Delete \(entry.preferred)")
         }
+    }
+
+    private func suggestionRow(_ item: DictionarySuggestion) -> some View {
+        let spelling = Binding(get: { suggestionSpellings[item.id] ?? item.preferred }, set: { suggestionSpellings[item.id] = $0 })
+        let empty = spelling.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty
+        return HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                field("Spelling", text: spelling).frame(minWidth: 100, idealWidth: 180, maxWidth: 220)
+                Text("Heard as \(item.heard.joined(separator: ", ")) · \(item.dictations) dictations").font(WindowType.body(13)).foregroundStyle(Palette.ink70)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("Add") { controller.acceptDictionarySuggestion(item, preferred: spelling.wrappedValue) }
+                .buttonStyle(InkButtonStyle()).fixedSize().disabled(empty).accessibilityLabel("Add \(spelling.wrappedValue)")
+            Button("Dismiss") { controller.dismissDictionarySuggestion(item) }.buttonStyle(InkButtonStyle(kind: .outline)).fixedSize()
+                .accessibilityLabel("Dismiss \(item.heard[0])")
+        }
+        .frame(minHeight: 56).padding(.vertical, 4)
     }
 
     private func blockedRow(_ item: CorrectionLedger.Blocked) -> some View {
