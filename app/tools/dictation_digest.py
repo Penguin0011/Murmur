@@ -123,6 +123,11 @@ def self_check():
 def main(argv):
     if "--self-check" in argv:
         return self_check()
+    # Unknown flags (including --help) must never fall through to printing dictation text.
+    values = {v for f, v in zip(argv, argv[1:]) if f in ("-n", "--since")}
+    unknown = [a for a in argv if a not in ("-n", "--since", "--json") and a not in values]
+    if unknown:
+        sys.exit(__doc__ if unknown[0] in ("-h", "--help") else f"unknown argument: {unknown[0]}\n{__doc__}")
     count, since, as_json = 20, None, "--json" in argv
     now = datetime.datetime.now().timestamp()
     for flag, value in zip(argv, argv[1:]):
