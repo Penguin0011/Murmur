@@ -74,7 +74,7 @@ rm -rf ~/Library/Caches/Dictation
 security delete-generic-password -s Murmur
 ```
 
-The folders still use the app's old name, Dictation. App preferences are stored under the development bundle ID, `cc.clouddev.dictation.development`; `defaults delete cc.clouddev.dictation.development` removes them. To revoke permissions, remove Murmur under System Settings → Privacy & Security → Microphone, Accessibility and Input Monitoring, plus System Audio Recording if you enabled meeting capture.
+The folders still use the app's old name, Dictation. Optional dictionary-support weights are stored separately in `~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml`; other FluidAudio apps may share this folder, so remove them from Settings → Dictionary, which shows that warning. App preferences are stored under the development bundle ID, `cc.clouddev.dictation.development`; `defaults delete cc.clouddev.dictation.development` removes them. To revoke permissions, remove Murmur under System Settings → Privacy & Security → Microphone, Accessibility and Input Monitoring, plus System Audio Recording if you enabled meeting capture.
 
 ## License
 
