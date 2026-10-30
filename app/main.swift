@@ -16,6 +16,8 @@ import SwiftUI
         NSApp.setActivationPolicy(controller.showInDock ? .regular : .accessory)
         let mainMenu = NSMenu()
         let appItem = NSMenuItem(); let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",").target = self
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Welcome Guide…", action: #selector(openGuide), keyEquivalent: "").target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Murmur", action: #selector(quit), keyEquivalent: "q").target = self
@@ -64,7 +66,7 @@ import SwiftUI
         let menu = NSMenu()
         let state = NSMenuItem(title: controller.phase, action: nil, keyEquivalent: ""); state.isEnabled = false; menu.addItem(state)
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Settings and History…", action: #selector(openSettings), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: "").target = self
         if recording {
             menu.addItem(withTitle: "Stop Meeting Notes", action: #selector(stopMeeting), keyEquivalent: "").target = self
         } else {
@@ -89,7 +91,10 @@ import SwiftUI
         menu.addItem(.separator()); menu.addItem(withTitle: "Quit Murmur", action: #selector(quit), keyEquivalent: "q").target = self
         statusItem?.menu = menu
     }
-    @objc func openSettings() { showWindow() }
+    @objc func openSettings() {
+        controller.screenRequest = "settings"
+        showWindow()
+    }
     /// Replays the welcome guide from its first step (gap #21).
     @objc func openGuide() { controller.screenRequest = "guide"; showWindow() }
     /// Keep configuration/recording errors visible even when Sparkle cannot open its dialog.
